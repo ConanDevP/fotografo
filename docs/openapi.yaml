@@ -1,0 +1,929 @@
+openapi: 3.0.3
+info:
+  title: Fotografos Platform API
+  description: |
+    API completa para plataforma de fotografía deportiva con detección automática de dorsales usando OCR con Gemini AI.
+    
+    ## Características principales:
+    - 🔐 Autenticación JWT con roles
+    - 📅 Gestión completa de eventos
+    - 📸 Upload masivo con procesamiento automático
+    - 🤖 OCR con Gemini AI (detección de dorsales)
+    - 🔍 Búsqueda instantánea por dorsal
+    - 💰 Sistema de pagos integrado (modo demo)
+    - ⚙️ Dashboard administrativo completo
+    
+  version: 1.0.0
+  contact:
+    email: api-support@fotografos.com
+  license:
+    name: MIT
+    
+servers:
+  - url: http://localhost:8080/v1
+    description: Development server
+  - url: https://api.fotografos.com/v1
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # Auth endpoints
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                role:
+                  $ref: '#/components/schemas/UserRole'
+            example:
+              email: photographer@example.com
+              password: password123
+              role: PHOTOGRAPHER
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      accessToken:
+                        type: string
+
+  # Events endpoints
+  /events:
+    get:
+      tags: [Events]
+      summary: List events
+      security: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Events list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+
+    post:
+      tags: [Events]
+      summary: Create event
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventDto'
+      responses:
+        '201':
+          description: Event created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Event'
+
+  /events/{eventId}:
+    get:
+      tags: [Events]
+      summary: Get event by ID
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Event details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Event'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [Events]
+      summary: Update event
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEventDto'
+      responses:
+        '200':
+          description: Event updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Event'
+
+  # Upload endpoints
+  /uploads/photo:
+    post:
+      tags: [Uploads]
+      summary: Upload single photo
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, eventId]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Image file (JPG, PNG, max 20MB)
+                eventId:
+                  type: string
+                  format: uuid
+                takenAt:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Photo uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/UploadResult'
+
+  /uploads/photos/batch:
+    post:
+      tags: [Uploads]
+      summary: Upload multiple photos
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files, eventId]
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  maxItems: 50
+                eventId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Batch upload results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BatchUploadResult'
+
+  # Search endpoints
+  /events/{eventId}/search/photos:
+    get:
+      tags: [Search]
+      summary: Search photos by bib number
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - name: bib
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Bib number to search for
+        - name: optimized
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Use optimized search (direct from folders)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor (only if optimized=false)
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PhotoSearchResult'
+                  meta:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      optimized:
+                        type: boolean
+                      cursor:
+                        type: string
+
+  /events/{eventId}/search/subscribe:
+    post:
+      tags: [Search]
+      summary: Subscribe to bib notifications
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bib, email]
+              properties:
+                bib:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        '204':
+          description: Subscription created
+
+  # Payments endpoints
+  /payments/orders:
+    post:
+      tags: [Payments]
+      summary: Create order
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderDto'
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/OrderResult'
+
+  /payments/orders/{orderId}:
+    get:
+      tags: [Payments]
+      summary: Get order details
+      security: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Order'
+
+  /payments/orders/{orderId}/download:
+    get:
+      tags: [Payments]
+      summary: Get download URLs for paid order
+      security: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Download URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      orderId:
+                        type: string
+                      downloads:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            photoId:
+                              type: string
+                            downloadUrl:
+                              type: string
+                            expiresAt:
+                              type: string
+                              format: date-time
+                      expiresInMinutes:
+                        type: integer
+
+  # Admin endpoints
+  /admin/events/{eventId}/metrics:
+    get:
+      tags: [Admin]
+      summary: Get event metrics
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Event metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/EventMetrics'
+
+  /admin/system-stats:
+    get:
+      tags: [Admin]
+      summary: Get system statistics (admin only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: System statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SystemStats'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Event UUID
+
+  schemas:
+    UserRole:
+      type: string
+      enum: [ATHLETE, PHOTOGRAPHER, ADMIN]
+
+    AuthResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            tokens:
+              type: object
+              properties:
+                accessToken:
+                  type: string
+                refreshToken:
+                  type: string
+            user:
+              $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
+        createdAt:
+          type: string
+          format: date-time
+
+    BibRules:
+      type: object
+      properties:
+        minLen:
+          type: integer
+          minimum: 1
+        maxLen:
+          type: integer
+          maximum: 10
+        range:
+          type: array
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+        regex:
+          type: string
+        whitelist:
+          type: array
+          items:
+            type: string
+
+    EventPricing:
+      type: object
+      required: [singlePhoto, currency]
+      properties:
+        singlePhoto:
+          type: integer
+          description: Price in cents
+        pack5:
+          type: integer
+        pack10:
+          type: integer
+        allPhotos:
+          type: integer
+        currency:
+          type: string
+          enum: [USD, EUR, GBP]
+
+    CreateEventDto:
+      type: object
+      required: [name, date]
+      properties:
+        name:
+          type: string
+          minLength: 3
+        date:
+          type: string
+          format: date
+        location:
+          type: string
+        bibRules:
+          $ref: '#/components/schemas/BibRules'
+        pricing:
+          $ref: '#/components/schemas/EventPricing'
+
+    UpdateEventDto:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 3
+        date:
+          type: string
+          format: date
+        location:
+          type: string
+        bibRules:
+          $ref: '#/components/schemas/BibRules'
+        pricing:
+          $ref: '#/components/schemas/EventPricing'
+
+    Event:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        date:
+          type: string
+          format: date
+        location:
+          type: string
+        bibRules:
+          $ref: '#/components/schemas/BibRules'
+        pricing:
+          $ref: '#/components/schemas/EventPricing'
+        owner:
+          $ref: '#/components/schemas/User'
+        createdAt:
+          type: string
+          format: date-time
+
+    UploadResult:
+      type: object
+      properties:
+        photoId:
+          type: string
+          format: uuid
+        cloudinaryId:
+          type: string
+        originalUrl:
+          type: string
+          format: uri
+        width:
+          type: integer
+        height:
+          type: integer
+
+    BatchUploadResult:
+      type: object
+      properties:
+        successful:
+          type: array
+          items:
+            $ref: '#/components/schemas/UploadResult'
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              fileIndex:
+                type: integer
+              fileName:
+                type: string
+              error:
+                type: string
+        total:
+          type: integer
+        successCount:
+          type: integer
+        errorCount:
+          type: integer
+
+    PhotoSearchResult:
+      type: object
+      properties:
+        photoId:
+          type: string
+          format: uuid
+        thumbUrl:
+          type: string
+          format: uri
+        watermarkUrl:
+          type: string
+          format: uri
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        takenAt:
+          type: string
+          format: date-time
+
+    CreateOrderDto:
+      type: object
+      required: [eventId, items]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            type: object
+            required: [type]
+            properties:
+              type:
+                type: string
+                enum: [PHOTO, PACKAGE]
+              photoId:
+                type: string
+                format: uuid
+                description: Required if type is PHOTO
+              packageType:
+                type: string
+                enum: [pack5, pack10, allPhotos]
+                description: Required if type is PACKAGE
+
+    OrderResult:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        totalAmount:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [CREATED, PAID, CANCELLED, REFUNDED]
+        demoMode:
+          type: boolean
+        message:
+          type: string
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        amountCents:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [CREATED, PAID, CANCELLED, REFUNDED]
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              itemType:
+                type: string
+                enum: [PHOTO, PACKAGE]
+              priceCents:
+                type: integer
+              photo:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  thumbUrl:
+                    type: string
+                  watermarkUrl:
+                    type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    EventMetrics:
+      type: object
+      properties:
+        eventId:
+          type: string
+        photos:
+          type: object
+          properties:
+            total:
+              type: integer
+            processed:
+              type: integer
+            failed:
+              type: integer
+            pending:
+              type: integer
+            processingRate:
+              type: number
+        bibs:
+          type: object
+          properties:
+            total:
+              type: integer
+            unique:
+              type: integer
+            avgBibsPerPhoto:
+              type: number
+        orders:
+          type: object
+          properties:
+            total:
+              type: integer
+            paid:
+              type: integer
+            conversionRate:
+              type: number
+        revenue:
+          type: object
+          properties:
+            totalCents:
+              type: integer
+            avgOrderValue:
+              type: number
+        ocr:
+          type: object
+          properties:
+            accuracy:
+              type: number
+
+    SystemStats:
+      type: object
+      properties:
+        users:
+          type: object
+          properties:
+            total:
+              type: integer
+        events:
+          type: object
+          properties:
+            total:
+              type: integer
+        photos:
+          type: object
+          properties:
+            total:
+              type: integer
+            recentUploads:
+              type: integer
+        orders:
+          type: object
+          properties:
+            total:
+              type: integer
+        revenue:
+          type: object
+          properties:
+            totalCents:
+              type: integer
+
+    PaginationMeta:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+            pages:
+              type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+        timestamp:
+          type: string
+          format: date-time
+        path:
+          type: string
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    ValidationError:
+      description: Invalid input data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

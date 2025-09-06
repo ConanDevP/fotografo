@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique
+  passwordHash  String?  @map("password_hash")
+  role          UserRole
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  ownedEvents   Event[]  @relation("EventOwner")
+  photographedPhotos Photo[] @relation("PhotoPhotographer")
+  orders        Order[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Event {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  slug        String   @unique
+  date        DateTime @db.Date
+  location    String?
+  imageUrl    String?  @map("image_url")
+  ownerId     String?  @map("owner_id") @db.Uuid
+  bibRules    Json?    @map("bib_rules")
+  pricing     Json?    @map("pricing")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  owner            User?              @relation("EventOwner", fields: [ownerId], references: [id])
+  photos           Photo[]
+  photoBibs        PhotoBib[]
+  bibSubscriptions BibSubscription[]
+  orders           Order[]
+
+  @@map("events")
+}
+
+model Photo {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId        String      @map("event_id") @db.Uuid
+  photographerId String?     @map("photographer_id") @db.Uuid
+  cloudinaryId   String      @map("cloudinary_id")
+  originalUrl    String      @map("original_url") 
+  thumbUrl       String?     @map("thumb_url")
+  watermarkUrl   String?     @map("watermark_url")
+  width          Int?
+  height         Int?
+  takenAt        DateTime?   @map("taken_at") @db.Timestamptz
+  status         PhotoStatus @default(PENDING)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  event        Event        @relation(fields: [eventId], references: [id])
+  photographer User?        @relation("PhotoPhotographer", fields: [photographerId], references: [id])
+  bibs         PhotoBib[]
+  orderItems   OrderItem[]
+  auditLogs    AuditLog[]
+
+  @@index([eventId])
+  @@map("photos")
+}
+
+model PhotoBib {
+  id              BigInt  @id @default(autoincrement())
+  photoId         String  @map("photo_id") @db.Uuid
+  eventId         String  @map("event_id") @db.Uuid
+  bib             String
+  confidence      Decimal @db.Decimal(4, 3)
+  bbox            Json?
+  source          String  @default("GEMINI")
+  promptTokens    Int?    @map("prompt_tokens")
+  candidatesTokens Int?   @map("candidates_tokens")
+  totalTokens     Int?    @map("total_tokens")
+
+  // Relations
+  photo Photo @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, bib], name: "idx_bibs_event_bib")
+  @@map("photo_bibs")
+}
+
+model BibSubscription {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId   String   @map("event_id") @db.Uuid
+  bib       String
+  email     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@map("bib_subscriptions")
+}
+
+model Order {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String?     @map("user_id") @db.Uuid
+  eventId         String?     @map("event_id") @db.Uuid
+  amountCents     Int         @map("amount_cents")
+  currency        String      @default("USD")
+  status          OrderStatus
+  stripeSessionId String?     @map("stripe_session_id")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user  User?       @relation(fields: [userId], references: [id])
+  event Event?      @relation(fields: [eventId], references: [id])
+  items OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId    String    @map("order_id") @db.Uuid
+  photoId    String?   @map("photo_id") @db.Uuid
+  itemType   ItemType  @map("item_type")
+  priceCents Int       @map("price_cents")
+
+  // Relations
+  order Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  photo Photo? @relation(fields: [photoId], references: [id])
+
+  @@map("order_items")
+}
+
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  userId    String?  @map("user_id") @db.Uuid
+  photoId   String?  @map("photo_id") @db.Uuid
+  action    String
+  data      Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user  User?  @relation(fields: [userId], references: [id])
+  photo Photo? @relation(fields: [photoId], references: [id])
+
+  @@map("audit_logs")
+}
+
+enum UserRole {
+  ATHLETE
+  PHOTOGRAPHER
+  ADMIN
+}
+
+enum PhotoStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum OrderStatus {
+  CREATED
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum ItemType {
+  PHOTO
+  PACKAGE
+}
