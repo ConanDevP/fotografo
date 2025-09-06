@@ -15,6 +15,8 @@ Plataforma completa para fotógrafos de eventos deportivos con detección autom�
 
 ### **Para Atletas**
 - ✅ Búsqueda instantánea por dorsal
+- ✅ **Búsqueda por reconocimiento facial (selfie)**
+- ✅ **Búsqueda híbrida (dorsal + rostro)**
 - ✅ Previsualizaciones con marca de agua
 - ✅ Suscripción a notificaciones automáticas
 - ✅ Compra y descarga sin marca de agua
@@ -22,6 +24,8 @@ Plataforma completa para fotógrafos de eventos deportivos con detección autom�
 
 ### **Sistema Automático**
 - ✅ OCR con Gemini AI (flash + pro strategies)
+- ✅ **Reconocimiento facial con Face-API.js**
+- ✅ **Búsqueda por foto del atleta (selfie)**
 - ✅ Cola de procesamiento con Redis + BullMQ
 - ✅ Generación automática de thumbnails y watermarks
 - ✅ Validación de dorsales según reglas del evento
@@ -47,6 +51,7 @@ Plataforma completa para fotógrafos de eventos deportivos con detección autom�
 - **Cache/Colas**: Redis + BullMQ
 - **Almacenamiento**: Cloudinary (imágenes + CDN)
 - **OCR/AI**: Google Gemini 1.5 (flash/pro)
+- **Reconocimiento Facial**: Face-API.js (local)
 - **Autenticación**: JWT (RS256)
 - **Pagos**: Stripe (modo demo habilitado)
 - **Email**: SendGrid/SES
@@ -143,6 +148,9 @@ POST   /v1/uploads/photos/batch
 ### **🔍 Búsqueda**
 ```http
 GET    /v1/events/:id/search/photos?bib=1234
+POST   /v1/events/:id/search/photos/by-face
+POST   /v1/events/:id/search/photos/hybrid
+GET    /v1/events/:id/search/face-stats
 POST   /v1/events/:id/search/subscribe
 POST   /v1/events/:id/search/email-photos
 ```

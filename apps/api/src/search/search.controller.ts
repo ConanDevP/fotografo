@@ -11,14 +11,19 @@ import {
 import { Throttle } from '@nestjs/throttler';
 
 import { SearchService } from './search.service';
+import { FaceSearchService } from './face-search.service';
 import { SubscribeToBibDto } from './dto/subscribe-to-bib.dto';
 import { SendPhotosDto } from './dto/send-photos.dto';
+import { FaceSearchDto } from './dto/face-search.dto';
 import { ApiResponse } from '@shared/types';
-import { RATE_LIMITS, PAGINATION } from '@shared/constants';
+import { RATE_LIMITS, PAGINATION, FACE_SEARCH_LIMITS } from '@shared/constants';
 
 @Controller('events/:eventId/search')
 export class SearchController {
-  constructor(private readonly searchService: SearchService) {}
+  constructor(
+    private readonly searchService: SearchService,
+    private readonly faceSearchService: FaceSearchService,
+  ) {}
 
   @Get('photos')
   @Throttle(RATE_LIMITS.SEARCH, 60)
@@ -146,5 +151,90 @@ export class SearchController {
   ): Promise<ApiResponse> {
     const results = await this.searchService.getPopularBibs(eventId, limit);
     return { data: results };
+  }
+
+  // Face Recognition Endpoints
+  
+  @Post('photos/by-face')
+  @Throttle(FACE_SEARCH_LIMITS.REGISTERED, 60)
+  async searchByFace(
+    @Param('eventId') eventId: string,
+    @Body() faceSearchDto: FaceSearchDto,
+  ): Promise<ApiResponse> {
+    const results = await this.faceSearchService.searchPhotosByFace(eventId, {
+      userImageBase64: faceSearchDto.userImageBase64,
+      threshold: faceSearchDto.threshold,
+    });
+    
+    return { 
+      data: {
+        matches: results.matches,
+        userFaceDetected: results.userFaceDetected,
+      },
+      meta: { 
+        total: results.total,
+        searchTime: results.searchTime,
+        optimized: true,
+      },
+    };
+  }
+
+  @Get('face-stats')
+  async getFaceStats(
+    @Param('eventId') eventId: string,
+  ): Promise<ApiResponse> {
+    const stats = await this.faceSearchService.getEventFaceStats(eventId);
+    return { data: stats };
+  }
+
+  @Post('photos/hybrid')
+  @Throttle(RATE_LIMITS.SEARCH, 60)
+  async hybridSearch(
+    @Param('eventId') eventId: string,
+    @Body() body: { bib?: string; userImageBase64?: string; threshold?: number },
+  ): Promise<ApiResponse> {
+    const results = {
+      bibResults: [] as any[],
+      faceResults: [] as any[],
+      combined: [] as any[],
+    };
+
+    // Search by bib if provided
+    if (body.bib) {
+      const bibSearch = await this.searchService.searchPhotosByBib(eventId, body.bib, 50);
+      results.bibResults = bibSearch.items;
+    }
+
+    // Search by face if provided
+    if (body.userImageBase64) {
+      const faceSearch = await this.faceSearchService.searchPhotosByFace(eventId, {
+        userImageBase64: body.userImageBase64,
+        threshold: body.threshold,
+      });
+      results.faceResults = faceSearch.matches;
+    }
+
+    // Combine results and deduplicate
+    const allResults = [
+      ...results.bibResults.map(r => ({ ...r, source: 'bib' })),
+      ...results.faceResults.map(r => ({ ...r, source: 'face' })),
+    ];
+
+    const uniqueResults = new Map();
+    allResults.forEach(result => {
+      const existing = uniqueResults.get(result.photoId);
+      if (!existing || (result.confidence || result.similarity) > (existing.confidence || existing.similarity)) {
+        uniqueResults.set(result.photoId, result);
+      }
+    });
+
+    results.combined = Array.from(uniqueResults.values());
+
+    return { 
+      data: results,
+      meta: { 
+        total: results.combined.length,
+      },
+    };
   }
 }
