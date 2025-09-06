@@ -1,6 +1,7 @@
 // Queue names
 export const QUEUES = {
   PROCESS_PHOTO: 'process-photo',
+  PROCESS_FACE: 'process-face',
   SEND_BIB_EMAIL: 'send-bib-email',
   REPROCESS_PHOTO: 'reprocess-photo',
 } as const;
@@ -8,6 +9,7 @@ export const QUEUES = {
 // Job names
 export const JOBS = {
   PROCESS_PHOTO: 'process-photo',
+  PROCESS_FACE: 'process-face',
   SEND_BIB_EMAIL: 'send-bib-email',
   REPROCESS_PHOTO: 'reprocess-photo',
 } as const;
@@ -104,4 +106,21 @@ export const CLOUDINARY_TRANSFORMS = {
 export const URL_EXPIRY = {
   UPLOAD: 15 * 60, // 15 minutes
   DOWNLOAD: 5 * 60, // 5 minutes
+} as const;
+
+// Face Recognition
+export const FACE_RECOGNITION = {
+  DEFAULT_THRESHOLD: 0.6, // Similarity threshold for matches
+  HIGH_THRESHOLD: 0.75,   // High confidence threshold  
+  LOW_THRESHOLD: 0.4,     // Low confidence threshold
+  MAX_FACES_PER_PHOTO: 20, // Maximum faces to detect per photo
+  DESCRIPTOR_LENGTH: 128,  // Length of face descriptor vector
+} as const;
+
+// Face Search Rate Limits
+export const FACE_SEARCH_LIMITS = {
+  ANONYMOUS: 3,    // 3 searches per day for anonymous users
+  REGISTERED: 10,  // 10 searches per day for registered users  
+  PREMIUM: 100,    // 100 searches per day for premium users
+  UNLIMITED: -1,   // Unlimited for photographers/admins
 } as const;

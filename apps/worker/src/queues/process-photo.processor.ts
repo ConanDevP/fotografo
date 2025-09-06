@@ -6,8 +6,10 @@ import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { OcrGeminiService } from '../services/ocr-gemini.service';
 import { ImagesService } from '../services/images.service';
 import { CloudinaryService } from '../../../api/src/common/services/cloudinary.service';
-import { ProcessPhotoJob } from '@shared/types';
+import { ProcessPhotoJob, ProcessFaceJob } from '@shared/types';
 import { QUEUES } from '@shared/constants';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 
 @Processor(QUEUES.PROCESS_PHOTO)
 export class ProcessPhotoProcessor extends WorkerHost {
@@ -18,6 +20,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
     private ocrService: OcrGeminiService,
     private imagesService: ImagesService,
     private cloudinaryService: CloudinaryService,
+    @InjectQueue(QUEUES.PROCESS_FACE) private faceQueue: Queue<ProcessFaceJob>,
   ) {
     super();
   }
@@ -110,7 +113,17 @@ export class ProcessPhotoProcessor extends WorkerHost {
         }
       }
 
-      // Step 7: Mark photo as processed
+      // Step 7: Process facial recognition (parallel to OCR)
+      job.updateProgress(85);
+      try {
+        await this.enqueueFaceProcessing(photoId, eventId, ocrImageUrl);
+        this.logger.log(`Face processing enqueued for photo ${photoId}`);
+      } catch (error) {
+        // Don't fail the entire job if face processing fails
+        this.logger.warn(`Failed to enqueue face processing for photo ${photoId}: ${error.message}`);
+      }
+
+      // Step 8: Mark photo as processed
       job.updateProgress(100);
       await this.prisma.photo.update({
         where: { id: photoId },
@@ -173,6 +186,31 @@ export class ProcessPhotoProcessor extends WorkerHost {
       const errorStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(`Error organizando foto por dorsales: ${errorMessage}`, errorStack);
       // Don't throw - this shouldn't fail the entire job
+    }
+  }
+
+  private async enqueueFaceProcessing(photoId: string, eventId: string, imageUrl: string): Promise<void> {
+    try {
+      await this.faceQueue.add(
+        'process-face',
+        {
+          photoId,
+          eventId,
+          imageUrl,
+        } as ProcessFaceJob,
+        {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000,
+          },
+          removeOnComplete: 10,
+          removeOnFail: 5,
+        }
+      );
+    } catch (error) {
+      this.logger.error(`Failed to enqueue face processing: ${error.message}`);
+      throw error;
     }
   }
 

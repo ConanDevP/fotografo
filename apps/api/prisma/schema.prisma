@@ -39,6 +39,7 @@ model Event {
   owner            User?              @relation("EventOwner", fields: [ownerId], references: [id])
   photos           Photo[]
   photoBibs        PhotoBib[]
+  faceEmbeddings   FaceEmbedding[]
   bibSubscriptions BibSubscription[]
   orders           Order[]
 
@@ -63,6 +64,7 @@ model Photo {
   event        Event        @relation(fields: [eventId], references: [id])
   photographer User?        @relation("PhotoPhotographer", fields: [photographerId], references: [id])
   bibs         PhotoBib[]
+  faces        FaceEmbedding[]
   orderItems   OrderItem[]
   auditLogs    AuditLog[]
 
@@ -148,6 +150,27 @@ model AuditLog {
   photo Photo? @relation(fields: [photoId], references: [id])
 
   @@map("audit_logs")
+}
+
+model FaceEmbedding {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photoId    String   @map("photo_id") @db.Uuid
+  eventId    String   @map("event_id") @db.Uuid
+  embedding  Decimal[] @map("embedding") @db.Decimal(10, 8)
+  confidence Decimal  @db.Decimal(4, 3)
+  bbox       Json?    @map("bounding_box")
+  landmarks  Json?    @map("landmarks")
+  age        Int?     @map("estimated_age")
+  gender     String?  @map("estimated_gender")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  photo Photo @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId], name: "idx_face_embeddings_event")
+  @@index([photoId], name: "idx_face_embeddings_photo")
+  @@map("face_embeddings")
 }
 
 enum UserRole {

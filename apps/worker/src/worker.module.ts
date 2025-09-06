@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 
 import { ProcessPhotoProcessor } from './queues/process-photo.processor';
+import { ProcessFaceProcessor } from './queues/process-face.processor';
 import { SendBibEmailProcessor } from './queues/send-bib-email.processor';
 import { ReprocessPhotoProcessor } from './queues/reprocess-photo.processor';
 
@@ -10,6 +11,7 @@ import { ReprocessPhotoProcessor } from './queues/reprocess-photo.processor';
 import { PrismaService } from '../../api/src/common/services/prisma.service';
 import { CloudinaryService } from '../../api/src/common/services/cloudinary.service';
 import { OcrGeminiService } from './services/ocr-gemini.service';
+import { FaceApiService } from './services/face-api.service';
 import { ImagesService } from './services/images.service';
 import { MailService } from './services/mail.service';
 
@@ -36,17 +38,20 @@ import { QUEUES } from '@shared/constants';
     }),
     BullModule.registerQueue(
       { name: QUEUES.PROCESS_PHOTO },
+      { name: QUEUES.PROCESS_FACE },
       { name: QUEUES.SEND_BIB_EMAIL },
       { name: QUEUES.REPROCESS_PHOTO },
     ),
   ],
   providers: [
     ProcessPhotoProcessor,
+    ProcessFaceProcessor,
     SendBibEmailProcessor, 
     ReprocessPhotoProcessor,
     PrismaService,
     CloudinaryService,
     OcrGeminiService,
+    FaceApiService,
     ImagesService,
     MailService,
   ],

@@ -90,6 +90,59 @@ export interface ReprocessPhotoJob {
   strategy?: 'flash' | 'pro';
 }
 
+export interface ProcessFaceJob {
+  photoId: string;
+  eventId: string;
+  imageUrl: string;
+}
+
+// Face Recognition Types
+export interface FaceDetectionResult {
+  id: string;
+  confidence: number;
+  bbox: [number, number, number, number]; // [x, y, width, height]
+  embedding: number[]; // 128-dimensional descriptor
+  landmarks?: number[][]; // Facial landmarks points
+  age?: number;
+  gender?: string;
+}
+
+export interface FaceEmbeddingData {
+  id: string;
+  photoId: string;
+  eventId: string;
+  embedding: number[];
+  confidence: number;
+  bbox: [number, number, number, number];
+  landmarks?: number[][];
+  age?: number;
+  gender?: string;
+  createdAt: string;
+}
+
+export interface FaceSearchRequest {
+  userImageBase64: string;
+  threshold?: number; // Similarity threshold (0-1)
+}
+
+export interface FaceSearchResult {
+  photoId: string;
+  similarity: number;
+  confidence: number;
+  faceId: string;
+  bbox: [number, number, number, number];
+  thumbUrl?: string;
+  watermarkUrl?: string;
+  originalUrl?: string;
+}
+
+export interface FaceSearchResponse {
+  matches: FaceSearchResult[];
+  total: number;
+  searchTime: number;
+  userFaceDetected: boolean;
+}
+
 // API Response types
 export interface ApiResponse<T = any> {
   data?: T;
@@ -108,6 +161,7 @@ export interface ApiResponse<T = any> {
     cursor?: string;
     total?: number;
     optimized?: boolean;
+    searchTime?: number;
   };
 }
 
