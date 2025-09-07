@@ -120,7 +120,8 @@ export class ProcessPhotoProcessor extends WorkerHost {
         this.logger.log(`Face processing enqueued for photo ${photoId}`);
       } catch (error) {
         // Don't fail the entire job if face processing fails
-        this.logger.warn(`Failed to enqueue face processing for photo ${photoId}: ${error.message}`);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn(`Failed to enqueue face processing for photo ${photoId}: ${errorMessage}`);
       }
 
       // Step 8: Mark photo as processed
@@ -209,7 +210,8 @@ export class ProcessPhotoProcessor extends WorkerHost {
         }
       );
     } catch (error) {
-      this.logger.error(`Failed to enqueue face processing: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to enqueue face processing: ${errorMessage}`);
       throw error;
     }
   }

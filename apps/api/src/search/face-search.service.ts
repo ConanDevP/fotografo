@@ -50,7 +50,9 @@ export class FaceSearchService {
       // Step 1: Extract face descriptor from user's image
       this.logger.log(`Extracting face from user image for event ${eventId}`);
       
-      const imageBuffer = Buffer.from(searchRequest.userImageBase64, 'base64');
+      // Clean up the base64 string
+      const base64Data = searchRequest.userImageBase64.split(',').pop() || '';
+      const imageBuffer = Buffer.from(base64Data, 'base64');
       const userFaceDescriptor = await this.faceApiService.extractFaceDescriptor(imageBuffer);
 
       if (!userFaceDescriptor) {
@@ -96,17 +98,17 @@ export class FaceSearchService {
         // Convert Decimal[] to number[] for comparison
         const faceDescriptor = eventFace.embedding.map(d => Number(d));
         
-        // Calculate similarity
-        const similarity = this.faceApiService.calculateSimilarity(
+        // Calculate Euclidean distance (lower is better)
+        const distance = this.faceApiService.calculateDistance(
           userDescriptor,
           faceDescriptor
         );
 
-        // Check if it's a match
-        if (similarity >= threshold) {
+        // Check if it's a match (distance is below the threshold)
+        if (distance <= threshold) {
           matches.push({
             photoId: eventFace.photoId,
-            similarity: Number(similarity.toFixed(3)),
+            similarity: Number((1 - distance).toFixed(3)), // Still show similarity to the frontend
             confidence: Number(eventFace.confidence),
             faceId: eventFace.id,
             bbox: eventFace.bbox as [number, number, number, number],
@@ -117,9 +119,8 @@ export class FaceSearchService {
         }
       }
 
-      // Step 4: Sort matches by similarity (highest first) and remove duplicates
-      const uniqueMatches = this.deduplicateMatches(matches);
-      const sortedMatches = uniqueMatches.sort((a, b) => b.similarity - a.similarity);
+      // Step 4: Sort matches by similarity (highest first)
+      const sortedMatches = matches.sort((a, b) => b.similarity - a.similarity);
 
       const searchTime = Date.now() - startTime;
       

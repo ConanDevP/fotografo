@@ -1,17 +1,33 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import * as faceapi from 'face-api.js';
-import { Canvas, Image, createCanvas, loadImage } from 'canvas';
 import { join } from 'path';
 import { FaceDetectionResult, FaceEmbeddingData } from '@shared/types';
 
-// Polyfill for face-api.js to work with Node.js
-const { env } = faceapi;
-env.monkeyPatch({
-  Canvas: Canvas as any,
-  Image: Image as any,
-  createCanvasElement: () => createCanvas(1, 1) as any,
-  createImageElement: () => new Image() as any,
-});
+// Conditional imports for Canvas and Face-API
+let faceapi: any;
+let Canvas: any;
+let Image: any;
+let createCanvas: any;
+let loadImage: any;
+
+try {
+  faceapi = require('face-api.js');
+  const canvas = require('canvas');
+  Canvas = canvas.Canvas;
+  Image = canvas.Image;
+  createCanvas = canvas.createCanvas;
+  loadImage = canvas.loadImage;
+
+  // Polyfill for face-api.js to work with Node.js
+  const { env } = faceapi;
+  env.monkeyPatch({
+    Canvas: Canvas as any,
+    Image: Image as any,
+    createCanvasElement: () => createCanvas(1, 1) as any,
+    createImageElement: () => new Image() as any,
+  });
+} catch (error) {
+  console.warn('Face-API.js or Canvas not available, face recognition will be disabled');
+}
 
 @Injectable()
 export class FaceApiService implements OnModuleInit {
@@ -24,11 +40,17 @@ export class FaceApiService implements OnModuleInit {
 
   private async loadModels() {
     try {
+      if (!faceapi) {
+        this.logger.warn('Face-API.js not available, skipping model loading');
+        return;
+      }
+
       this.logger.log('Loading Face-API models...');
       
       // In a real implementation, models would be stored in a models/ directory
       // For now, we'll load from node_modules
-      const MODEL_URL = join(__dirname, '../../../../node_modules/face-api.js/weights');
+      const MODEL_URL = join(process.cwd(), 'node_modules/face-api.js/weights');
+      this.logger.log(`Looking for models at: ${MODEL_URL}`);
 
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromDisk(MODEL_URL),
@@ -47,8 +69,8 @@ export class FaceApiService implements OnModuleInit {
   }
 
   async detectAllFaces(imageUrl: string): Promise<FaceDetectionResult[]> {
-    if (!this.modelsLoaded) {
-      this.logger.warn('Face-API models not loaded, skipping face detection');
+    if (!this.modelsLoaded || !faceapi || !loadImage) {
+      this.logger.warn('Face-API not available, skipping face detection');
       return [];
     }
 
@@ -92,8 +114,8 @@ export class FaceApiService implements OnModuleInit {
   }
 
   async extractFaceDescriptor(imageBuffer: Buffer): Promise<Float32Array | null> {
-    if (!this.modelsLoaded) {
-      this.logger.warn('Face-API models not loaded, cannot extract descriptor');
+    if (!this.modelsLoaded || !faceapi || !loadImage) {
+      this.logger.warn('Face-API not available, cannot extract descriptor');
       return null;
     }
 
@@ -118,31 +140,23 @@ export class FaceApiService implements OnModuleInit {
     }
   }
 
-  calculateSimilarity(descriptor1: number[], descriptor2: number[]): number {
+  calculateDistance(descriptor1: number[], descriptor2: number[]): number {
     if (descriptor1.length !== descriptor2.length) {
-      throw new Error('Descriptors must have the same length');
+      this.logger.error('Descriptors must have the same length for distance calculation');
+      // Return a large distance to indicate a non-match
+      return 999;
     }
 
-    // Calculate Euclidean distance
-    let sum = 0;
-    for (let i = 0; i < descriptor1.length; i++) {
-      const diff = descriptor1[i] - descriptor2[i];
-      sum += diff * diff;
-    }
-    
-    const distance = Math.sqrt(sum);
-    
-    // Convert distance to similarity (0-1, where 1 is most similar)
-    // Face-api.js typically uses 0.4 as the threshold for same person
-    return Math.max(0, 1 - distance);
+    // Use face-api.js's built-in EuclideanDistance for consistency
+    return faceapi.euclideanDistance(descriptor1, descriptor2);
   }
 
-  isMatch(similarity: number, threshold = 0.6): boolean {
-    return similarity >= threshold;
+  isMatch(distance: number, threshold = 0.4): boolean {
+    return distance <= threshold;
   }
 
-  private serializeLandmarks(landmarks: faceapi.FaceLandmarks68): number[][] {
-    return landmarks.positions.map(point => [point.x, point.y]);
+  private serializeLandmarks(landmarks: any): number[][] {
+    return landmarks.positions.map((point: any) => [point.x, point.y]);
   }
 
   private async fetchImageAsBuffer(url: string): Promise<Buffer> {

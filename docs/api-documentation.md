@@ -6,6 +6,16 @@ Development: http://localhost:8080/v1
 Production: https://api.fotografos.com/v1
 ```
 
+## 🆕 NEW: Face Recognition System
+The platform now supports **facial recognition** for photo search! Athletes can upload their selfies to find all photos where they appear.
+
+### 🎯 Key Features:
+- **Search by selfie**: Upload user photo to find matching faces
+- **Hybrid search**: Combine bib number + facial recognition
+- **Pre-computed embeddings**: Ultra-fast searches (~2-3 seconds)
+- **Privacy-first**: Only mathematical vectors stored, no face images
+- **Independent processing**: Face detection runs parallel to OCR
+
 ## 🔐 Authentication
 
 La API usa JWT Bearer tokens. Incluye el token en el header:
@@ -1211,6 +1221,190 @@ curl "http://localhost:8080/v1/payments/orders/$ORDER_ID/download"
 4. **Rate limits apply** - handle 429 responses
 5. **File uploads are validated** - only images allowed
 6. **Download URLs expire** - use them immediately
+
+---
+
+## 🤖 Face Recognition Endpoints
+
+### Search Photos by Face
+Upload a selfie to find all photos where the person appears.
+
+```http
+POST /events/:eventId/search/photos/by-face
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "userImageBase64": "data:image/jpeg;base64,/9j/4AAQ...",
+  "threshold": 0.6
+}
+```
+
+**Parameters:**
+- `userImageBase64` (required): Base64-encoded image (JPEG/PNG)
+- `threshold` (optional): Similarity threshold 0.3-0.95 (default: 0.6)
+
+**Response:**
+```json
+{
+  "data": {
+    "matches": [
+      {
+        "photoId": "uuid-123",
+        "similarity": 0.87,
+        "confidence": 0.95,
+        "faceId": "uuid-456",
+        "bbox": [100, 200, 80, 100],
+        "thumbUrl": "https://cloudinary.com/thumb.jpg",
+        "watermarkUrl": "https://cloudinary.com/watermark.jpg",
+        "originalUrl": "https://cloudinary.com/original.jpg"
+      }
+    ],
+    "userFaceDetected": true
+  },
+  "meta": {
+    "total": 15,
+    "searchTime": 234
+  }
+}
+```
+
+**Error Responses:**
+- `400`: No face detected in uploaded image
+- `404`: Event not found
+- `503`: Face recognition service unavailable
+
+### Get Face Recognition Statistics
+```http
+GET /events/:eventId/search/face-stats
+Authorization: Bearer <token>
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "totalPhotos": 1000,
+    "photosWithFaces": 750,
+    "totalFacesDetected": 1850,
+    "averageFacesPerPhoto": 2.47
+  }
+}
+```
+
+### Hybrid Search (Bib + Face)
+Combine bib number search with facial recognition for maximum accuracy.
+
+```http
+POST /events/:eventId/search/photos/hybrid
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "bib": "1234",
+  "userImageBase64": "data:image/jpeg;base64,/9j/4AAQ...",
+  "threshold": 0.6
+}
+```
+
+**Parameters:**
+- `bib` (optional): Bib number to search for
+- `userImageBase64` (optional): User photo for facial recognition
+- `threshold` (optional): Face similarity threshold (default: 0.6)
+
+**Response:**
+```json
+{
+  "data": {
+    "bibResults": [
+      {
+        "photoId": "uuid-1",
+        "confidence": 0.99,
+        "source": "bib"
+      }
+    ],
+    "faceResults": [
+      {
+        "photoId": "uuid-2", 
+        "similarity": 0.85,
+        "source": "face"
+      }
+    ],
+    "combined": [
+      {
+        "photoId": "uuid-1",
+        "confidence": 0.99,
+        "source": "bib"
+      }
+    ]
+  },
+  "meta": {
+    "total": 8
+  }
+}
+```
+
+### Rate Limiting
+Face recognition endpoints have specific rate limits:
+
+```javascript
+FACE_SEARCH_LIMITS = {
+  ANONYMOUS: 3,    // searches per day
+  REGISTERED: 10,  // searches per day  
+  PREMIUM: 100,    // searches per day
+  PHOTOGRAPHERS: -1 // unlimited
+}
+```
+
+### Usage Tips
+1. **Image Quality**: Use clear, well-lit photos with visible faces
+2. **File Size**: Keep images under 5MB for faster processing
+3. **Threshold Tuning**:
+   - `0.4`: Very lenient (may include similar-looking people)
+   - `0.6`: Balanced (recommended for most cases)
+   - `0.8`: Strict (only very confident matches)
+4. **Error Handling**: Always check `userFaceDetected` field
+5. **Privacy**: Only mathematical vectors are stored, not face images
+
+### Example Implementation
+
+```javascript
+// Search by selfie
+async function searchByFace(eventId, imageFile) {
+  // Convert image to base64
+  const base64 = await fileToBase64(imageFile);
+  
+  const response = await fetch(`/v1/events/${eventId}/search/photos/by-face`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      userImageBase64: base64,
+      threshold: 0.7
+    })
+  });
+  
+  const result = await response.json();
+  
+  if (!result.data.userFaceDetected) {
+    alert('No face detected in your photo. Please try a clearer image.');
+    return;
+  }
+  
+  console.log(`Found ${result.data.matches.length} photos`);
+  return result.data.matches;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+```
 
 ---
 

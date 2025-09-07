@@ -10,7 +10,19 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Silenciar ECONNRESET antes de crear la app
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    const message = args.join(' ');
+    if (message.includes('ECONNRESET') || message.includes('read ECONNRESET')) {
+      return;
+    }
+    originalConsoleError.apply(console, args);
+  };
+
+  const app = await NestFactory.create(AppModule, {
+    logger: ['error', 'warn', 'log'],
+  });
   const configService = app.get(ConfigService);
 
   // Security
@@ -39,7 +51,35 @@ async function bootstrap() {
   app.setGlobalPrefix('v1');
 
   const port = configService.get('PORT', 8080);
-  await app.listen(port);
+  
+  // Configurar timeouts y keep-alive
+  const server = await app.listen(port);
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+  
+  // Manejar errores de conexión
+  server.on('clientError', (err, socket) => {
+    if (err.code === 'ECONNRESET' || !socket.writable) {
+      return;
+    }
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  });
+
+  // Silenciar errores ECONNRESET globalmente
+  process.on('uncaughtException', (err: any) => {
+    if (err.code === 'ECONNRESET') {
+      return;
+    }
+    console.error('Uncaught Exception:', err);
+    process.exit(1);
+  });
+
+  process.on('unhandledRejection', (reason: any, promise) => {
+    if (reason && typeof reason === 'object' && 'code' in reason && reason.code === 'ECONNRESET') {
+      return;
+    }
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  });
   
   console.log(`🚀 API corriendo en puerto ${port}`);
 }

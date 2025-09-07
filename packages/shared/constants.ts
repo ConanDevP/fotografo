@@ -1,3 +1,5 @@
+import * as path from 'path';
+
 // Queue names
 export const QUEUES = {
   PROCESS_PHOTO: 'process-photo',
@@ -110,12 +112,11 @@ export const URL_EXPIRY = {
 
 // Face Recognition
 export const FACE_RECOGNITION = {
-  DEFAULT_THRESHOLD: 0.6, // Similarity threshold for matches
-  HIGH_THRESHOLD: 0.75,   // High confidence threshold  
-  LOW_THRESHOLD: 0.4,     // Low confidence threshold
+  DEFAULT_THRESHOLD: 0.4, // Euclidean distance threshold. Lower is more similar. Recommended: 0.4 for high confidence.
   MAX_FACES_PER_PHOTO: 20, // Maximum faces to detect per photo
+  FACEAPI_MODEL_PATH: path.join(__dirname, '..', '..', '..', 'models', 'face-api'),
   DESCRIPTOR_LENGTH: 128,  // Length of face descriptor vector
-} as const;
+};
 
 // Face Search Rate Limits
 export const FACE_SEARCH_LIMITS = {

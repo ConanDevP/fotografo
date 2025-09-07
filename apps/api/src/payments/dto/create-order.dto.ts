@@ -1,6 +1,7 @@
-import { IsString, IsArray, ValidateNested, IsEnum, IsUUID, IsOptional } from 'class-validator';
+import { IsString, IsArray, ValidateNested, IsEnum, IsUUID, IsOptional, IsUrl } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ItemType } from '@shared/types';
+import { PaymentGateway } from '@shared/payment-types';
 
 class OrderItemDto {
   @IsEnum(ItemType, { message: 'Tipo de item debe ser PHOTO o PACKAGE' })
@@ -24,4 +25,20 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
   items: OrderItemDto[];
+
+  @IsOptional()
+  @IsEnum(PaymentGateway, { message: 'Gateway de pago inválido' })
+  gateway?: PaymentGateway = PaymentGateway.DEMO;
+
+  @IsOptional()
+  @IsString({ message: 'Moneda debe ser texto' })
+  currency?: string;
+
+  @IsOptional()
+  @IsUrl({}, { message: 'URL de retorno inválida' })
+  returnUrl?: string;
+
+  @IsOptional()
+  @IsUrl({}, { message: 'URL de cancelación inválida' })
+  cancelUrl?: string;
 }

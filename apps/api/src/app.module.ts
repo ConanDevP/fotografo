@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bullmq';
@@ -12,6 +12,7 @@ import { SearchModule } from './search/search.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AdminModule } from './admin/admin.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { ConnectionErrorMiddleware } from './common/middleware/connection-error.middleware';
 
 @Module({
   imports: [
@@ -46,4 +47,10 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     WebhooksModule,
   ],
 })
-export class AppModule {}
+export class AppModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(ConnectionErrorMiddleware)
+      .forRoutes('*');
+  }
+}
