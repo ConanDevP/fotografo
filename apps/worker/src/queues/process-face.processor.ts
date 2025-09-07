@@ -53,7 +53,7 @@ export class ProcessFaceProcessor extends WorkerHost {
       const faceEmbeddingData = facesToProcess.map(face => ({
         photoId,
         eventId,
-        embedding: face.embedding.map(val => Number(val.toFixed(8))), // Convert to Decimal precision
+        embedding: face.embedding.map(val => Number(val.toFixed(12))), // Convert to Decimal precision
         confidence: Number(face.confidence.toFixed(3)),
         bbox: face.bbox,
         landmarks: face.landmarks || null,

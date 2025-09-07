@@ -1,6 +1,9 @@
 # 🚀 Getting Started - Fotografos Platform
 
-Esta guía te ayudará a configurar y ejecutar la plataforma completa en tu entorno local.
+Esta guía te ayudará a configurar y ejecutar la plataforma completa con OCR y reconocimiento facial en tu entorno local.
+
+## 🆕 What's New: Facial Recognition
+The platform now includes **facial recognition** alongside OCR detection! Athletes can search for photos using their selfies, providing a backup when bib numbers aren't visible and enhanced search accuracy.
 
 ## 📋 Requisitos Previos
 
@@ -357,14 +360,106 @@ GROUP BY status;
 
 ---
 
+## 🤖 Facial Recognition Setup
+
+The platform includes facial recognition powered by **Face-API.js** running locally.
+
+### **Face Model Files**
+Face-API.js models are automatically downloaded when you first start the worker:
+
+```bash
+# Models are downloaded to:
+node_modules/face-api.js/weights/
+├── tiny_face_detector_model-*          # Face detection
+├── face_landmark_68_model-*             # Facial landmarks  
+├── face_recognition_model-*             # Face embeddings
+└── age_gender_model-*                   # Age/gender estimation
+```
+
+**Total size**: ~7MB (downloaded once)
+
+### **Verify Face Recognition**
+Start the worker and look for this success message:
+
+```bash
+npx nest start worker --watch
+
+# You should see:
+[LOG] [FaceApiService] Loading Face-API models...
+[LOG] [FaceApiService] Face-API models loaded successfully ✅
+```
+
+### **Face Recognition Features**
+Once operational, the system provides:
+
+1. **🔍 Search by Selfie**
+   ```bash
+   POST /v1/events/:id/search/photos/by-face
+   # Upload selfie → Get all matching photos
+   ```
+
+2. **📊 Face Statistics** 
+   ```bash
+   GET /v1/events/:id/search/face-stats
+   # Get detection stats for the event
+   ```
+
+3. **🔄 Hybrid Search**
+   ```bash
+   POST /v1/events/:id/search/photos/hybrid
+   # Combine bib number + face recognition
+   ```
+
+### **Processing Flow**
+When photos are uploaded, both systems work in parallel:
+
+```
+📸 Photo Upload
+├── 🔢 OCR Processing (Gemini) → Detect bib numbers
+└── 👤 Face Processing (Face-API) → Detect faces & create embeddings
+
+🔍 Search Options:
+├── Search by bib number (traditional)
+├── Search by selfie (new!)
+└── Hybrid search (combined accuracy)
+```
+
+### **Performance Characteristics**
+- **Setup**: 2-5 seconds per photo (one-time processing)
+- **Search**: 2-3 seconds for 2000+ faces  
+- **Cost**: ~$0.0001 per search (local computation only)
+- **Privacy**: Only mathematical vectors stored, no face images
+
+### **Rate Limits**
+Face recognition has separate rate limits:
+
+```javascript
+Daily Search Limits:
+├── Anonymous users: 3 searches
+├── Registered users: 10 searches  
+├── Premium users: 100 searches
+└── Photographers: Unlimited
+```
+
+---
+
 ## 🎉 ¡Listo para Empezar!
 
 Una vez que tengas todo configurado, tu plataforma estará lista para:
 
 1. ✅ **Subir fotos** con procesamiento automático
 2. ✅ **Detectar dorsales** con OCR de Gemini
-3. ✅ **Búsqueda instantánea** por dorsal
-4. ✅ **Compras simuladas** para testing
-5. ✅ **Dashboard administrativo** completo
+3. ✅ **🆕 Reconocimiento facial** con Face-API.js
+4. ✅ **🆕 Búsqueda por selfie** de atletas
+5. ✅ **Búsqueda instantánea** por dorsal
+6. ✅ **🆕 Búsqueda híbrida** (dorsal + rostro)
+7. ✅ **Compras simuladas** para testing
+8. ✅ **Dashboard administrativo** completo
 
 **Siguiente paso**: Revisar la [documentación de la API](./api-documentation.md) para implementar tu frontend o integrar con sistemas existentes.
+
+### **🔗 Enlaces Útiles**
+- 📖 [Face Recognition System Documentation](./face-recognition.md)
+- 🔧 [API Documentation](./api-documentation.md)
+- 💡 [Usage Examples](./examples.md)
+- 🚀 [Deployment Guide](../README.md#deployment)

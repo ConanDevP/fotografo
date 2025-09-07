@@ -2,14 +2,16 @@ openapi: 3.0.3
 info:
   title: Fotografos Platform API
   description: |
-    API completa para plataforma de fotografía deportiva con detección automática de dorsales usando OCR con Gemini AI.
+    API completa para plataforma de fotografía deportiva con detección automática de dorsales usando OCR con Gemini AI y reconocimiento facial con Face-API.js.
     
     ## Características principales:
     - 🔐 Autenticación JWT con roles
     - 📅 Gestión completa de eventos
     - 📸 Upload masivo con procesamiento automático
     - 🤖 OCR con Gemini AI (detección de dorsales)
-    - 🔍 Búsqueda instantánea por dorsal
+    - 👤 **NUEVO**: Reconocimiento facial con Face-API.js
+    - 🔍 Búsqueda instantánea por dorsal o por rostro
+    - 🎯 Búsqueda híbrida (dorsal + facial)
     - 💰 Sistema de pagos integrado (modo demo)
     - ⚙️ Dashboard administrativo completo
     
@@ -366,6 +368,176 @@ paths:
         '204':
           description: Subscription created
 
+  /events/{eventId}/search/photos/by-face:
+    post:
+      tags: [Search, Face Recognition]
+      summary: Search photos by facial recognition
+      description: |
+        Upload a selfie to find all photos containing the same person using facial recognition.
+        
+        **Rate Limits:**
+        - Anonymous users: 3 searches per day
+        - Registered users: 10 searches per day  
+        - Premium users: 100 searches per day
+        - Photographers: Unlimited
+        
+        **Processing Time:** 2-3 seconds for 2000+ faces
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userImageBase64]
+              properties:
+                userImageBase64:
+                  type: string
+                  description: Base64 encoded image of the person to search for
+                  example: "/9j/4AAQSkZJRgABAQEASABIAAD..."
+                threshold:
+                  type: number
+                  minimum: 0.5
+                  maximum: 0.9
+                  default: 0.65
+                  description: Similarity threshold (0.5=loose, 0.9=strict)
+                maxResults:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 20
+                  description: Maximum number of results to return
+            example:
+              userImageBase64: "/9j/4AAQSkZJRgABAQEASABIAAD..."
+              threshold: 0.65
+              maxResults: 20
+      responses:
+        '200':
+          description: Face search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FaceSearchResult'
+                  meta:
+                    $ref: '#/components/schemas/FaceSearchMeta'
+        '400':
+          description: Invalid image or search parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /events/{eventId}/search/photos/hybrid:
+    post:
+      tags: [Search, Face Recognition]
+      summary: Hybrid search combining bib number and facial recognition
+      description: |
+        Combines traditional bib number search with facial recognition for maximum accuracy.
+        
+        **Search Modes:**
+        - `intersection`: Only photos matching both bib AND face
+        - `union`: Photos matching bib OR face (recommended)
+        
+        **Use Cases:**
+        - When bib numbers are partially visible
+        - For verification of search results
+        - Enhanced accuracy in crowded scenes
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bib, userImageBase64]
+              properties:
+                bib:
+                  type: string
+                  description: Bib number to search for
+                  example: "1234"
+                userImageBase64:
+                  type: string
+                  description: Base64 encoded image for facial recognition
+                  example: "/9j/4AAQSkZJRgABAQEASABIAAD..."
+                faceThreshold:
+                  type: number
+                  minimum: 0.5
+                  maximum: 0.9
+                  default: 0.6
+                  description: Face similarity threshold
+                bibConfidence:
+                  type: number
+                  minimum: 0.5
+                  maximum: 1.0
+                  default: 0.8
+                  description: Minimum bib detection confidence
+                hybridMode:
+                  type: string
+                  enum: [intersection, union]
+                  default: intersection
+                  description: How to combine the two search methods
+            example:
+              bib: "1234"
+              userImageBase64: "/9j/4AAQSkZJRgABAQEASABIAAD..."
+              faceThreshold: 0.6
+              bibConfidence: 0.8
+              hybridMode: "intersection"
+      responses:
+        '200':
+          description: Hybrid search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HybridSearchResult'
+                  meta:
+                    $ref: '#/components/schemas/HybridSearchMeta'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /events/{eventId}/search/face-stats:
+    get:
+      tags: [Search, Face Recognition]
+      summary: Get facial recognition statistics for an event
+      description: |
+        Returns comprehensive statistics about face detection and processing for the event.
+        
+        **Includes:**
+        - Total faces detected
+        - Processing status
+        - Demographic estimates (age, gender)
+        - Detection rates and averages
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Face recognition statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FaceStats'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # Payments endpoints
   /payments/orders:
     post:
@@ -699,6 +871,229 @@ components:
         takenAt:
           type: string
           format: date-time
+
+    # Face Recognition Schemas
+    FaceSearchResult:
+      type: object
+      properties:
+        photoId:
+          type: string
+          format: uuid
+        thumbUrl:
+          type: string
+          format: uri
+        watermarkUrl:
+          type: string
+          format: uri
+        originalUrl:
+          type: string
+          format: uri
+          description: Only available for purchased photos
+        similarity:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Face similarity score (0-1, where 1 is identical)
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Face detection confidence
+        takenAt:
+          type: string
+          format: date-time
+        faceCount:
+          type: integer
+          description: Total number of faces detected in this photo
+        matchingFaces:
+          type: integer
+          description: Number of faces that matched the search
+        bbox:
+          type: array
+          items:
+            type: number
+          minItems: 4
+          maxItems: 4
+          description: Bounding box of matched face [x, y, width, height]
+
+    FaceSearchMeta:
+      type: object
+      properties:
+        totalMatches:
+          type: integer
+          description: Total number of matching photos found
+        searchTime:
+          type: string
+          description: Time taken to perform the search (e.g., "2.3s")
+        facesScanned:
+          type: integer
+          description: Total number of face embeddings compared
+        threshold:
+          type: number
+          description: Similarity threshold used for matching
+        rateLimitRemaining:
+          type: integer
+          description: Remaining searches for this user today
+
+    HybridSearchResult:
+      type: object
+      properties:
+        hybridResults:
+          type: array
+          items:
+            type: object
+            properties:
+              photoId:
+                type: string
+                format: uuid
+              thumbUrl:
+                type: string
+                format: uri
+              watermarkUrl:
+                type: string
+                format: uri
+              bibMatch:
+                type: object
+                properties:
+                  bib:
+                    type: string
+                  confidence:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                  bbox:
+                    type: array
+                    items:
+                      type: number
+                    minItems: 4
+                    maxItems: 4
+              faceMatch:
+                type: object
+                properties:
+                  similarity:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                  confidence:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                  bbox:
+                    type: array
+                    items:
+                      type: number
+                    minItems: 4
+                    maxItems: 4
+              hybridScore:
+                type: number
+                minimum: 0
+                maximum: 1
+                description: Combined score from both bib and face matching
+              takenAt:
+                type: string
+                format: date-time
+        bibOnlyResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhotoSearchResult'
+          description: Photos matching only the bib number
+        faceOnlyResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/FaceSearchResult'
+          description: Photos matching only the face
+
+    HybridSearchMeta:
+      type: object
+      properties:
+        hybridMatches:
+          type: integer
+          description: Number of photos matching both bib and face
+        bibOnlyMatches:
+          type: integer
+          description: Number of photos matching only the bib
+        faceOnlyMatches:
+          type: integer
+          description: Number of photos matching only the face
+        searchStrategy:
+          type: string
+          enum: [intersection, union]
+          description: Search strategy used
+        bibSearchTime:
+          type: string
+          description: Time for bib number search
+        faceSearchTime:
+          type: string
+          description: Time for facial recognition search
+        totalSearchTime:
+          type: string
+          description: Total hybrid search time
+
+    FaceStats:
+      type: object
+      properties:
+        totalPhotos:
+          type: integer
+          description: Total photos in the event
+        photosWithFaces:
+          type: integer
+          description: Photos where faces were detected
+        totalFaces:
+          type: integer
+          description: Total number of faces detected across all photos
+        averageFacesPerPhoto:
+          type: number
+          description: Average number of faces per photo
+        faceDetectionRate:
+          type: number
+          description: Percentage of photos with detected faces
+        processing:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [processing, completed, failed]
+              description: Overall processing status
+            processed:
+              type: integer
+              description: Number of photos processed for faces
+            pending:
+              type: integer
+              description: Number of photos waiting for face processing
+            failed:
+              type: integer
+              description: Number of photos that failed face processing
+        demographics:
+          type: object
+          description: Estimated demographics (for informational purposes only)
+          properties:
+            estimatedAges:
+              type: object
+              properties:
+                "20-30":
+                  type: integer
+                "30-40":
+                  type: integer
+                "40-50":
+                  type: integer
+                "50+":
+                  type: integer
+            estimatedGenders:
+              type: object
+              properties:
+                male:
+                  type: integer
+                female:
+                  type: integer
+        performance:
+          type: object
+          properties:
+            avgProcessingTimePerPhoto:
+              type: string
+              description: Average time to process faces per photo
+            avgSearchTime:
+              type: string
+              description: Average time for face search queries
 
     CreateOrderDto:
       type: object

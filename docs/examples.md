@@ -669,6 +669,619 @@ describe('Photo Workflow Integration', () => {
 
 ---
 
+## 🤖 Ejemplos: Reconocimiento Facial
+
+### **Búsqueda por Selfie (Atleta)**
+
+```bash
+# Atleta sube su selfie para encontrar fotos donde aparece
+EVENT_ID="event-uuid-123"
+
+# Convertir imagen a base64 (Linux/macOS)
+SELFIE_BASE64=$(base64 -w 0 selfie.jpg)
+
+curl -X POST http://localhost:8080/v1/events/$EVENT_ID/search/photos/by-face \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userImageBase64": "'$SELFIE_BASE64'",
+    "threshold": 0.65,
+    "maxResults": 20
+  }'
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "photoId": "photo-uuid-1",
+      "thumbUrl": "https://res.cloudinary.com/.../thumb/photo-1.jpg",
+      "watermarkUrl": "https://res.cloudinary.com/.../wm/photo-1.jpg",
+      "similarity": 0.87,
+      "confidence": 0.92,
+      "takenAt": "2025-04-13T09:15:00Z",
+      "faceCount": 3,
+      "matchingFaces": 1
+    },
+    {
+      "photoId": "photo-uuid-2",
+      "thumbUrl": "https://res.cloudinary.com/.../thumb/photo-2.jpg", 
+      "watermarkUrl": "https://res.cloudinary.com/.../wm/photo-2.jpg",
+      "similarity": 0.73,
+      "confidence": 0.89,
+      "takenAt": "2025-04-13T10:22:00Z",
+      "faceCount": 2,
+      "matchingFaces": 1
+    }
+  ],
+  "meta": {
+    "totalMatches": 8,
+    "searchTime": "2.3s",
+    "facesScanned": 1247,
+    "threshold": 0.65
+  }
+}
+```
+
+### **Búsqueda Híbrida (Dorsal + Rostro)**
+
+```bash
+# Combinar búsqueda por dorsal Y por rostro para mayor precisión
+curl -X POST http://localhost:8080/v1/events/$EVENT_ID/search/photos/hybrid \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bib": "1234",
+    "userImageBase64": "'$SELFIE_BASE64'",
+    "faceThreshold": 0.6,
+    "bibConfidence": 0.8,
+    "hybridMode": "intersection"
+  }'
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "hybridResults": [
+      {
+        "photoId": "photo-uuid-1",
+        "thumbUrl": "https://res.cloudinary.com/.../thumb/photo-1.jpg",
+        "watermarkUrl": "https://res.cloudinary.com/.../wm/photo-1.jpg",
+        "bibMatch": {
+          "bib": "1234",
+          "confidence": 0.95,
+          "bbox": [150, 200, 80, 60]
+        },
+        "faceMatch": {
+          "similarity": 0.78,
+          "confidence": 0.91,
+          "bbox": [220, 120, 85, 90]
+        },
+        "hybridScore": 0.865,
+        "takenAt": "2025-04-13T09:15:00Z"
+      }
+    ],
+    "bibOnlyResults": [
+      // Fotos con dorsal 1234 pero sin coincidencia facial clara
+    ],
+    "faceOnlyResults": [
+      // Fotos con coincidencia facial pero sin dorsal detectado
+    ]
+  },
+  "meta": {
+    "hybridMatches": 3,
+    "bibOnlyMatches": 2,
+    "faceOnlyMatches": 1,
+    "searchStrategy": "intersection"
+  }
+}
+```
+
+### **Estadísticas de Reconocimiento Facial**
+
+```bash
+# Ver estadísticas de detección facial en el evento
+curl http://localhost:8080/v1/events/$EVENT_ID/search/face-stats
+```
+
+**Response:**
+```json
+{
+  "data": {
+    "totalPhotos": 250,
+    "photosWithFaces": 198,
+    "totalFaces": 447,
+    "averageFacesPerPhoto": 2.26,
+    "faceDetectionRate": 79.2,
+    "processing": {
+      "status": "completed",
+      "processed": 250,
+      "pending": 0,
+      "failed": 0
+    },
+    "demographics": {
+      "estimatedAges": {
+        "20-30": 156,
+        "30-40": 189,
+        "40-50": 78,
+        "50+": 24
+      },
+      "estimatedGenders": {
+        "male": 267,
+        "female": 180
+      }
+    }
+  }
+}
+```
+
+### **JavaScript: Hook para Búsqueda Facial**
+
+```javascript
+// hooks/useFaceSearch.js
+import { useState } from 'react';
+
+export const useFaceSearch = (eventId) => {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const searchByFace = async (imageFile, options = {}) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Convert image file to base64
+      const base64 = await fileToBase64(imageFile);
+
+      const response = await fetch(`/v1/events/${eventId}/search/photos/by-face`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userImageBase64: base64,
+          threshold: options.threshold || 0.65,
+          maxResults: options.maxResults || 20
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      setResults(data.data);
+      
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const searchHybrid = async (imageFile, bib, options = {}) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const base64 = await fileToBase64(imageFile);
+
+      const response = await fetch(`/v1/events/${eventId}/search/photos/hybrid`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          bib,
+          userImageBase64: base64,
+          faceThreshold: options.faceThreshold || 0.6,
+          bibConfidence: options.bibConfidence || 0.8,
+          hybridMode: options.hybridMode || 'intersection'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      setResults(data.data.hybridResults);
+      
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { results, loading, error, searchByFace, searchHybrid };
+};
+
+// Utility function
+const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1]; // Remove data:image/jpeg;base64,
+      resolve(base64);
+    };
+    reader.onerror = reject;
+  });
+};
+```
+
+### **React: Componente de Búsqueda Facial**
+
+```javascript
+// components/FaceSearch.jsx
+import React, { useState, useRef } from 'react';
+import { useFaceSearch } from '../hooks/useFaceSearch';
+
+const FaceSearch = ({ eventId }) => {
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [searchMode, setSearchMode] = useState('face'); // 'face' or 'hybrid'
+  const [bib, setBib] = useState('');
+  const [threshold, setThreshold] = useState(0.65);
+  const [preview, setPreview] = useState('');
+  
+  const fileInputRef = useRef(null);
+  const { results, loading, error, searchByFace, searchHybrid } = useFaceSearch(eventId);
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setSelectedFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => setPreview(e.target.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!selectedFile) {
+      alert('Por favor selecciona una foto tuya');
+      return;
+    }
+
+    try {
+      if (searchMode === 'face') {
+        await searchByFace(selectedFile, { threshold });
+      } else if (searchMode === 'hybrid' && bib) {
+        await searchHybrid(selectedFile, bib, { 
+          faceThreshold: threshold,
+          bibConfidence: 0.8 
+        });
+      } else {
+        alert('Para búsqueda híbrida necesitas ingresar tu dorsal');
+        return;
+      }
+    } catch (err) {
+      console.error('Search failed:', err);
+    }
+  };
+
+  return (
+    <div className="face-search">
+      <div className="search-controls">
+        <h3>🤖 Búsqueda por Reconocimiento Facial</h3>
+        
+        {/* File input */}
+        <div className="file-input-section">
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="upload-btn"
+          >
+            📸 Subir tu Selfie
+          </button>
+          {preview && (
+            <div className="image-preview">
+              <img 
+                src={preview} 
+                alt="Preview" 
+                style={{ width: 150, height: 150, objectFit: 'cover' }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Search mode toggle */}
+        <div className="search-mode">
+          <label>
+            <input
+              type="radio"
+              value="face"
+              checked={searchMode === 'face'}
+              onChange={(e) => setSearchMode(e.target.value)}
+            />
+            Solo por rostro
+          </label>
+          <label>
+            <input
+              type="radio"
+              value="hybrid"
+              checked={searchMode === 'hybrid'}
+              onChange={(e) => setSearchMode(e.target.value)}
+            />
+            Híbrido (rostro + dorsal)
+          </label>
+        </div>
+
+        {/* Bib input for hybrid mode */}
+        {searchMode === 'hybrid' && (
+          <div className="bib-input">
+            <input
+              type="text"
+              placeholder="Tu número de dorsal"
+              value={bib}
+              onChange={(e) => setBib(e.target.value)}
+            />
+          </div>
+        )}
+
+        {/* Threshold slider */}
+        <div className="threshold-control">
+          <label>
+            Precisión: {Math.round(threshold * 100)}%
+            <input
+              type="range"
+              min="0.5"
+              max="0.9"
+              step="0.05"
+              value={threshold}
+              onChange={(e) => setThreshold(parseFloat(e.target.value))}
+            />
+          </label>
+          <small>
+            Menor = más fotos pero menos precisas | Mayor = menos fotos pero más precisas
+          </small>
+        </div>
+
+        <button 
+          onClick={handleSearch}
+          disabled={loading || !selectedFile}
+          className="search-btn"
+        >
+          {loading ? '🔍 Buscando...' : '🚀 Buscar mis Fotos'}
+        </button>
+      </div>
+
+      {/* Error display */}
+      {error && (
+        <div className="error-message">
+          ❌ Error: {error}
+        </div>
+      )}
+
+      {/* Results */}
+      <div className="search-results">
+        {results.length > 0 && (
+          <>
+            <h4>📸 Fotos encontradas ({results.length})</h4>
+            <div className="photos-grid">
+              {results.map((photo) => (
+                <div key={photo.photoId} className="photo-card">
+                  <img 
+                    src={photo.watermarkUrl} 
+                    alt="Foto encontrada"
+                    onError={(e) => {
+                      e.target.src = photo.thumbUrl; // Fallback to thumb
+                    }}
+                  />
+                  <div className="photo-info">
+                    <div className="similarity">
+                      🎯 Similitud: {Math.round(photo.similarity * 100)}%
+                    </div>
+                    <div className="timestamp">
+                      📅 {new Date(photo.takenAt).toLocaleString()}
+                    </div>
+                    {photo.faceCount > 1 && (
+                      <div className="face-count">
+                        👥 {photo.faceCount} personas en la foto
+                      </div>
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => purchasePhoto(photo.photoId)}
+                    className="purchase-btn"
+                  >
+                    💰 Comprar €3.50
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {results.length === 0 && !loading && selectedFile && (
+          <div className="no-results">
+            😔 No encontramos fotos tuyas con esta precisión.
+            <br />
+            Prueba reducir la precisión o usar búsqueda híbrida con tu dorsal.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default FaceSearch;
+```
+
+### **Ejemplo: Workflow Completo con Facial Recognition**
+
+```bash
+#!/bin/bash
+# face_recognition_workflow.sh
+
+TOKEN="your-jwt-token"
+EVENT_ID="event-uuid-123"
+SELFIE_PATH="./my_selfie.jpg"
+MY_BIB="1234"
+
+echo "🤖 Iniciando búsqueda con reconocimiento facial..."
+
+# 1. Convertir selfie a base64
+echo "📸 Procesando selfie..."
+SELFIE_BASE64=$(base64 -w 0 "$SELFIE_PATH")
+
+# 2. Primero intentar búsqueda solo por rostro
+echo "🔍 Buscando solo por rostro..."
+FACE_RESULTS=$(curl -s -X POST http://localhost:8080/v1/events/$EVENT_ID/search/photos/by-face \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userImageBase64": "'$SELFIE_BASE64'",
+    "threshold": 0.65,
+    "maxResults": 20
+  }' | jq '.data | length')
+
+echo "👤 Encontradas por rostro: $FACE_RESULTS fotos"
+
+# 3. Si hay pocas coincidencias, intentar búsqueda híbrida
+if [ "$FACE_RESULTS" -lt 3 ]; then
+  echo "🔄 Pocas coincidencias, probando búsqueda híbrida..."
+  
+  HYBRID_RESULTS=$(curl -s -X POST http://localhost:8080/v1/events/$EVENT_ID/search/photos/hybrid \
+    -H "Content-Type: application/json" \
+    -d '{
+      "bib": "'$MY_BIB'",
+      "userImageBase64": "'$SELFIE_BASE64'",
+      "faceThreshold": 0.6,
+      "bibConfidence": 0.8,
+      "hybridMode": "union"
+    }')
+  
+  echo "🎯 Resultados híbridos:"
+  echo "$HYBRID_RESULTS" | jq '.meta'
+else
+  echo "✅ Suficientes coincidencias por rostro!"
+fi
+
+# 4. Obtener estadísticas del evento
+echo "📊 Estadísticas de reconocimiento facial:"
+curl -s http://localhost:8080/v1/events/$EVENT_ID/search/face-stats | \
+  jq '.data | {
+    photosWithFaces: .photosWithFaces,
+    totalFaces: .totalFaces,
+    faceDetectionRate: .faceDetectionRate,
+    averageFacesPerPhoto: .averageFacesPerPhoto
+  }'
+
+echo "🎉 Búsqueda completada!"
+```
+
+### **Monitoreo: Dashboard de Reconocimiento Facial**
+
+```javascript
+// components/FaceRecognitionDashboard.jsx
+import React, { useEffect, useState } from 'react';
+
+const FaceRecognitionDashboard = ({ eventId }) => {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const response = await fetch(`/v1/events/${eventId}/search/face-stats`);
+        const data = await response.json();
+        setStats(data.data);
+      } catch (error) {
+        console.error('Failed to fetch face recognition stats:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+    
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
+  }, [eventId]);
+
+  if (loading) return <div>Loading face recognition stats...</div>;
+
+  return (
+    <div className="face-recognition-dashboard">
+      <h3>🤖 Estado del Reconocimiento Facial</h3>
+      
+      <div className="stats-grid">
+        <div className="stat-card">
+          <h4>📸 Fotos Procesadas</h4>
+          <div className="stat-value">
+            {stats.photosWithFaces} / {stats.totalPhotos}
+          </div>
+          <div className="stat-label">
+            {stats.faceDetectionRate.toFixed(1)}% con rostros detectados
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <h4>👥 Rostros Detectados</h4>
+          <div className="stat-value">{stats.totalFaces}</div>
+          <div className="stat-label">
+            Promedio: {stats.averageFacesPerPhoto.toFixed(1)} por foto
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <h4>⚡ Procesamiento</h4>
+          <div className="stat-value">
+            {stats.processing.status === 'completed' ? '✅' : '⏳'}
+          </div>
+          <div className="stat-label">
+            {stats.processing.processed} procesadas, {stats.processing.pending} pendientes
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <h4>👨‍👩‍👧‍👦 Demografía</h4>
+          <div className="demographic-stats">
+            <div>♂️ {stats.demographics.estimatedGenders.male} hombres</div>
+            <div>♀️ {stats.demographics.estimatedGenders.female} mujeres</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="age-distribution">
+        <h4>📈 Distribución por Edad</h4>
+        <div className="age-bars">
+          {Object.entries(stats.demographics.estimatedAges).map(([range, count]) => (
+            <div key={range} className="age-bar">
+              <span className="age-label">{range}</span>
+              <div 
+                className="age-bar-fill" 
+                style={{ width: `${(count / stats.totalFaces) * 100}%` }}
+              />
+              <span className="age-count">{count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default FaceRecognitionDashboard;
+```
+
+---
+
 ## 🎯 Casos de Uso Específicos
 
 ### **Evento con Miles de Fotos**
