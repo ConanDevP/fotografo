@@ -170,8 +170,13 @@ export class CloudinaryService {
   async generateSecureDownloadUrl(cloudinaryId: string, expiresIn = 300): Promise<string> {
     const timestamp = Math.round(Date.now() / 1000) + expiresIn;
     
-    return cloudinary.utils.private_download_url(cloudinaryId, 'jpg', {
+    return cloudinary.url(cloudinaryId, {
+      sign_url: true,
       expires_at: timestamp,
+      resource_type: 'image',
+      type: 'upload',
+      format: 'jpg',
+      secure: true,
     });
   }
 
