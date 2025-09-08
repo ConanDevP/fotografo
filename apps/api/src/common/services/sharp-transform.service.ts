@@ -37,14 +37,63 @@ export class SharpTransformService {
     } = { 
       width: 2000, 
       quality: 80, 
-      watermarkText: '© Fotografo', 
+      watermarkText: 'fotocorredor.com', 
       opacity: 0.3 
     }
   ): Promise<Buffer> {
     try {
-      // Por ahora, simplemente redimensionamos sin watermark para evitar errores
-      // TODO: Implementar watermark con overlay de imagen en lugar de SVG
-      const watermarkedBuffer = await sharp(imageBuffer)
+      // Crear un watermark simple con canvas-like approach usando Sharp
+      const resized = sharp(imageBuffer)
+        .resize(options.width, null, {
+          withoutEnlargement: true,
+          fit: 'inside',
+        });
+
+      const { width, height } = await resized.metadata();
+      
+      if (!width || !height) {
+        throw new Error('No se pudieron obtener las dimensiones de la imagen');
+      }
+
+      // Crear una imagen de texto simple usando Sharp
+      const fontSize = Math.max(40, Math.floor(width / 20));
+      const textWidth = options.watermarkText.length * fontSize * 0.6;
+      const textHeight = fontSize + 20;
+      
+      // Crear SVG con dimensiones exactas
+      const svgWatermark = Buffer.from(`
+        <svg width="${textWidth}" height="${textHeight}" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100%" height="100%" fill="none"/>
+          <text x="50%" y="60%" 
+                font-family="Arial, sans-serif" 
+                font-size="${fontSize}" 
+                font-weight="bold"
+                fill="rgba(255,255,255,${options.opacity})" 
+                text-anchor="middle">${options.watermarkText}</text>
+        </svg>
+      `);
+
+      // Posición en la esquina inferior derecha (enteros)
+      const left = Math.max(0, Math.floor(width - textWidth - 20));
+      const top = Math.max(0, Math.floor(height - textHeight - 20));
+
+      const watermarkedBuffer = await resized
+        .composite([{
+          input: svgWatermark,
+          left: left,
+          top: top,
+          blend: 'over',
+        }])
+        .jpeg({ quality: options.quality })
+        .toBuffer();
+
+      this.logger.debug(`Watermark '${options.watermarkText}' generado: ${watermarkedBuffer.length} bytes`);
+      return watermarkedBuffer;
+    } catch (error) {
+      this.logger.error(`Error generando watermark: ${getErrorMessage(error)}`, getErrorStack(error));
+      
+      // Fallback: solo redimensionar si el watermark falla
+      const fallbackBuffer = await sharp(imageBuffer)
         .resize(options.width, null, {
           withoutEnlargement: true,
           fit: 'inside',
@@ -52,11 +101,8 @@ export class SharpTransformService {
         .jpeg({ quality: options.quality })
         .toBuffer();
 
-      this.logger.debug(`Watermark generado (sin texto por compatibilidad): ${watermarkedBuffer.length} bytes`);
-      return watermarkedBuffer;
-    } catch (error) {
-      this.logger.error(`Error generando watermark: ${getErrorMessage(error)}`, getErrorStack(error));
-      throw error;
+      this.logger.warn(`Watermark fallback aplicado: ${fallbackBuffer.length} bytes`);
+      return fallbackBuffer;
     }
   }
 
