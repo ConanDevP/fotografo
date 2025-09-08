@@ -16,7 +16,8 @@
       "Bash(git add:*)",
       "Bash(curl:*)",
       "Bash(grep:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(npm run dev:*)"
     ],
     "deny": [],
     "ask": []

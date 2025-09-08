@@ -38,7 +38,7 @@ export class SharpTransformService {
       width: 2000, 
       quality: 80, 
       watermarkText: 'fotocorredor.com', 
-      opacity: 0.3 
+      opacity: 0.8 
     }
   ): Promise<Buffer> {
     try {
@@ -55,35 +55,53 @@ export class SharpTransformService {
         throw new Error('No se pudieron obtener las dimensiones de la imagen');
       }
 
-      // Crear una imagen de texto simple usando Sharp
-      const fontSize = Math.max(40, Math.floor(width / 20));
-      const textWidth = options.watermarkText.length * fontSize * 0.6;
-      const textHeight = fontSize + 20;
+      // Crear múltiples marcas de agua simples
+      const fontSize = Math.max(14, Math.floor(width / 60)); // Más pequeño para más densidad
+      const svgWidth = Math.floor(width / 5); // Más pequeño para más marcas
+      const svgHeight = Math.floor(height / 7); // Más pequeño para más marcas
+      const cols = 4; // 4 columnas
+      const rows = 6; // 6 filas = 24 marcas de agua total
+      const spacingX = Math.floor(width / cols);
+      const spacingY = Math.floor(height / rows);
       
-      // Crear SVG con dimensiones exactas
-      const svgWatermark = Buffer.from(`
-        <svg width="${textWidth}" height="${textHeight}" xmlns="http://www.w3.org/2000/svg">
-          <rect width="100%" height="100%" fill="none"/>
-          <text x="50%" y="60%" 
-                font-family="Arial, sans-serif" 
-                font-size="${fontSize}" 
-                font-weight="bold"
-                fill="rgba(255,255,255,${options.opacity})" 
-                text-anchor="middle">${options.watermarkText}</text>
-        </svg>
-      `);
-
-      // Posición en la esquina inferior derecha (enteros)
-      const left = Math.max(0, Math.floor(width - textWidth - 20));
-      const top = Math.max(0, Math.floor(height - textHeight - 20));
+      const watermarkElements = [];
+      
+      // Crear grid de marcas de agua con márgenes
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const x = Math.floor(col * spacingX + spacingX * 0.2); // 20% de margen
+          const y = Math.floor(row * spacingY + spacingY * 0.3); // 30% de margen
+          
+          // Alternar horizontal y diagonal
+          const isRotated = (row + col) % 2 === 1;
+          const rotation = isRotated ? -45 : 0;
+          const opacity = isRotated ? options.opacity * 0.7 : options.opacity;
+          
+          // SVG ajustado al espacio disponible
+          const textSvg = Buffer.from(`
+            <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">
+              <text x="50%" y="50%" 
+                    font-family="Arial, sans-serif" 
+                    font-size="${fontSize}" 
+                    font-weight="bold"
+                    fill="rgba(255,255,255,${opacity})" 
+                    text-anchor="middle"
+                    dominant-baseline="middle"
+                    transform="rotate(${rotation} ${svgWidth/2} ${svgHeight/2})">${options.watermarkText}</text>
+            </svg>
+          `);
+          
+          watermarkElements.push({
+            input: textSvg,
+            left: Math.min(width - svgWidth, x),
+            top: Math.min(height - svgHeight, y),
+            blend: 'over',
+          });
+        }
+      }
 
       const watermarkedBuffer = await resized
-        .composite([{
-          input: svgWatermark,
-          left: left,
-          top: top,
-          blend: 'over',
-        }])
+        .composite(watermarkElements)
         .jpeg({ quality: options.quality })
         .toBuffer();
 

@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 
 import { PrismaService } from '../../../api/src/common/services/prisma.service';
-import { FaceApiService } from '../services/face-api.service';
+import { PythonFaceApiService } from '../services/python-face-api.service';
 import { ProcessFaceJob } from '@shared/types';
 import { QUEUES, FACE_RECOGNITION } from '@shared/constants';
 
@@ -13,7 +13,7 @@ export class ProcessFaceProcessor extends WorkerHost {
 
   constructor(
     private prisma: PrismaService,
-    private faceApiService: FaceApiService,
+    private pythonFaceApiService: PythonFaceApiService,
   ) {
     super();
   }
@@ -24,15 +24,15 @@ export class ProcessFaceProcessor extends WorkerHost {
     this.logger.log(`Processing faces for photo ${photoId} in event ${eventId}`);
 
     try {
-      // Check if Face-API is ready
-      if (!this.faceApiService.isReady()) {
-        this.logger.warn(`Face-API not ready, skipping face processing for photo ${photoId}`);
+      // Check if Python Face-API is ready
+      if (!this.pythonFaceApiService.isReadySync()) {
+        this.logger.warn(`Python Face-API not ready, skipping face processing for photo ${photoId}`);
         return;
       }
 
-      // Step 1: Detect all faces in the photo
+      // Step 1: Detect all faces in the photo using Python API
       job.updateProgress(25);
-      const detectedFaces = await this.faceApiService.detectAllFaces(imageUrl);
+      const detectedFaces = await this.pythonFaceApiService.detectAllFaces(imageUrl, FACE_RECOGNITION.MAX_FACES_PER_PHOTO);
       
       if (detectedFaces.length === 0) {
         this.logger.log(`No faces detected in photo ${photoId}`);
@@ -53,7 +53,7 @@ export class ProcessFaceProcessor extends WorkerHost {
       const faceEmbeddingData = facesToProcess.map(face => ({
         photoId,
         eventId,
-        embedding: face.embedding.map(val => Number(val.toFixed(12))), // Convert to Decimal precision
+        embedding: face.embedding, // Keep as number[] for 512-dimensional embeddings
         confidence: Number(face.confidence.toFixed(3)),
         bbox: face.bbox,
         landmarks: face.landmarks || null,

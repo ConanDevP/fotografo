@@ -11,8 +11,13 @@ model User {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email         String   @unique
   passwordHash  String?  @map("password_hash")
+  name          String?  @map("name")
+  phone         String?  @map("phone")
+  profileImageUrl String? @map("profile_image_url")
+  address       String?  @map("address") // Para fotógrafos principalmente
   role          UserRole
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   ownedEvents   Event[]  @relation("EventOwner")
@@ -156,7 +161,7 @@ model FaceEmbedding {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   photoId    String   @map("photo_id") @db.Uuid
   eventId    String   @map("event_id") @db.Uuid
-  embedding  Decimal[] @map("embedding") @db.Decimal(10, 8)
+  embedding  Float[]  @map("embedding")
   confidence Decimal  @db.Decimal(4, 3)
   bbox       Json?    @map("bounding_box")
   landmarks  Json?    @map("landmarks")

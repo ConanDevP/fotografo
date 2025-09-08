@@ -23,7 +23,15 @@ export class PhotosService {
         photographer: {
           select: { id: true, email: true },
         },
-        bibs: true,
+        bibs: {
+          select: {
+            bib: true,
+            confidence: true,
+            bbox: true,
+            source: true,
+            // Omitimos id (BigInt) para evitar error de serialización
+          },
+        },
       },
     });
 

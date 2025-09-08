@@ -5,7 +5,10 @@ import { SearchController } from './search.controller';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
-import { FaceApiService } from '../../../worker/src/services/face-api.service';
+import { StorageService } from '../common/services/storage.service';
+import { R2Service } from '../common/services/r2.service';
+import { SharpTransformService } from '../common/services/sharp-transform.service';
+import { PythonFaceApiService } from '../../../worker/src/services/python-face-api.service';
 
 @Module({
   controllers: [SearchController],
@@ -15,7 +18,10 @@ import { FaceApiService } from '../../../worker/src/services/face-api.service';
     PrismaService, 
     QueueService, 
     CloudinaryService,
-    FaceApiService,
+    StorageService,
+    R2Service,
+    SharpTransformService,
+    PythonFaceApiService,
   ],
   exports: [SearchService, FaceSearchService],
 })

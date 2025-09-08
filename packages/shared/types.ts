@@ -173,6 +173,10 @@ export interface AuthTokens {
 export interface UserProfile {
   id: string;
   email: string;
+  name?: string;
+  phone?: string;
+  profileImageUrl?: string;
+  address?: string;
   role: UserRole;
   createdAt: string;
 }

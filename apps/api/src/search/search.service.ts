@@ -470,15 +470,11 @@ export class SearchService {
         cursorCondition = {
           OR: [
             {
-              photo: {
-                takenAt: { lt: new Date(decodedCursor.takenAt) },
-              },
+              takenAt: { lt: new Date(decodedCursor.takenAt) },
             },
             {
-              photo: {
-                takenAt: new Date(decodedCursor.takenAt),
-                id: { lt: decodedCursor.photoId },
-              },
+              takenAt: new Date(decodedCursor.takenAt),
+              id: { lt: decodedCursor.photoId },
             },
           ],
         };
@@ -490,59 +486,78 @@ export class SearchService {
       }
     }
 
-    // Get all photos with watermark from event
-    const photoBibs = await this.prisma.photoBib.findMany({
+    // Get ALL photos with watermark from event (not just those with bibs)
+    const photos = await this.prisma.photo.findMany({
       where: {
         eventId,
-        photo: {
-          status: 'PROCESSED',
-          watermarkUrl: { not: null },
-        },
+        status: 'PROCESSED',
+        watermarkUrl: { not: null },
         ...cursorCondition,
       },
-      include: {
-        photo: {
+      select: {
+        id: true,
+        watermarkUrl: true,
+        thumbUrl: true,
+        originalUrl: true,
+        takenAt: true,
+        createdAt: true,
+        bibs: {
           select: {
-            id: true,
-            watermarkUrl: true,
-            takenAt: true,
-            createdAt: true,
+            confidence: true,
           },
+          orderBy: {
+            confidence: 'desc',
+          },
+          take: 1, // Get highest confidence bib for sorting
+        },
+        faces: {
+          select: {
+            confidence: true,
+          },
+          orderBy: {
+            confidence: 'desc',
+          },
+          take: 1, // Get highest confidence face for sorting
         },
       },
       orderBy: [
-        { photo: { takenAt: 'desc' } },
-        { photo: { id: 'desc' } },
+        { takenAt: 'desc' },
+        { id: 'desc' },
       ],
       take: limitNum + 1, // Take one extra to determine if there are more results
     });
 
     // Check if there are more results
-    const hasMore = photoBibs.length > limitNum;
-    const results = hasMore ? photoBibs.slice(0, limitNum) : photoBibs;
-
-    // Remove duplicates by photo ID (a photo might have multiple bibs)
-    const uniquePhotos = results.filter((photoBib, index, self) => 
-      index === self.findIndex(p => p.photo.id === photoBib.photo.id)
-    );
+    const hasMore = photos.length > limitNum;
+    const results = hasMore ? photos.slice(0, limitNum) : photos;
 
     // Transform to response format - only watermark URLs
-    const items: PhotoSearchResult[] = uniquePhotos.map(photoBib => ({
-      photoId: photoBib.photo.id,
-      watermarkUrl: photoBib.photo.watermarkUrl!,
-      thumbUrl: '',
-      originalUrl: '',
-      confidence: Number(photoBib.confidence),
-      takenAt: photoBib.photo.takenAt?.toISOString() || photoBib.photo.createdAt.toISOString(),
-    }));
+    const items: PhotoSearchResult[] = results.map(photo => {
+      // Use highest confidence from either bibs or faces for sorting
+      let confidence = 0;
+      if (photo.bibs.length > 0) {
+        confidence = Number(photo.bibs[0].confidence);
+      } else if (photo.faces.length > 0) {
+        confidence = Number(photo.faces[0].confidence);
+      }
+
+      return {
+        photoId: photo.id,
+        watermarkUrl: photo.watermarkUrl!,
+        thumbUrl: '',
+        originalUrl: '',
+        confidence,
+        takenAt: photo.takenAt?.toISOString() || photo.createdAt.toISOString(),
+      };
+    });
 
     // Generate next cursor
     let nextCursor;
-    if (hasMore && uniquePhotos.length > 0) {
-      const lastItem = uniquePhotos[uniquePhotos.length - 1];
+    if (hasMore && results.length > 0) {
+      const lastItem = results[results.length - 1];
       const cursorData = {
-        takenAt: lastItem.photo.takenAt?.toISOString() || lastItem.photo.createdAt.toISOString(),
-        photoId: lastItem.photo.id,
+        takenAt: lastItem.takenAt?.toISOString() || lastItem.createdAt.toISOString(),
+        photoId: lastItem.id,
       };
       nextCursor = Buffer.from(JSON.stringify(cursorData)).toString('base64');
     }

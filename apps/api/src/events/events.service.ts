@@ -72,6 +72,50 @@ export class EventsService {
     };
   }
 
+  async getPhotographerEvents(userId: string, userRole: UserRole, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    
+    // Los admins pueden ver todos los eventos, los fotógrafos solo los suyos
+    const whereClause = userRole === UserRole.ADMIN 
+      ? {} 
+      : { ownerId: userId };
+
+    const [events, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where: whereClause,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          owner: {
+            select: { id: true, email: true, role: true },
+          },
+          _count: {
+            select: { 
+              photos: true,
+              photoBibs: true,
+              bibSubscriptions: true,
+              orders: true,
+            },
+          },
+        },
+      }),
+      this.prisma.event.count({
+        where: whereClause,
+      }),
+    ]);
+
+    return {
+      items: events,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
   async findOne(id: string) {
     const event = await this.prisma.event.findUnique({
       where: { id },
@@ -236,8 +280,21 @@ export class EventsService {
             },
             orderBy: { confidence: 'desc' },
           },
+          faces: {
+            select: {
+              id: true,
+              confidence: true,
+              bbox: true,
+              age: true,
+              gender: true,
+            },
+            orderBy: { confidence: 'desc' },
+          },
           _count: {
-            select: { bibs: true },
+            select: { 
+              bibs: true,
+              faces: true,
+            },
           },
         },
       }),
@@ -278,6 +335,8 @@ export class EventsService {
         photographer: photo.photographer,
         detectedBibs: photo.bibs,
         bibCount: photo._count.bibs,
+        detectedFaces: photo.faces,
+        faceCount: photo._count.faces,
       })),
       pagination: {
         page,

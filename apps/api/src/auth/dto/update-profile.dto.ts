@@ -1,14 +1,6 @@
-import { IsEmail, IsString, MinLength, IsOptional, IsEnum, IsPhoneNumber, MaxLength } from 'class-validator';
-import { UserRole } from '@shared/types';
+import { IsString, IsOptional, MaxLength, MinLength } from 'class-validator';
 
-export class RegisterDto {
-  @IsEmail({}, { message: 'Email debe ser válido' })
-  email: string;
-
-  @IsString({ message: 'Password debe ser texto' })
-  @MinLength(8, { message: 'Password debe tener al menos 8 caracteres' })
-  password: string;
-
+export class UpdateProfileDto {
   @IsOptional()
   @IsString({ message: 'Nombre debe ser texto' })
   @MinLength(2, { message: 'Nombre debe tener al menos 2 caracteres' })
@@ -24,8 +16,4 @@ export class RegisterDto {
   @IsString({ message: 'Dirección debe ser texto' })
   @MaxLength(200, { message: 'Dirección no puede superar 200 caracteres' })
   address?: string;
-
-  @IsOptional()
-  @IsEnum(UserRole, { message: 'Rol debe ser ATHLETE, PHOTOGRAPHER o ADMIN' })
-  role?: UserRole;
 }
