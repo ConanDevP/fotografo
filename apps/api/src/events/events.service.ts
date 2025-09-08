@@ -588,7 +588,6 @@ export class EventsService {
         take: limit,
         orderBy: [
           { confidence: 'asc' }, // Los menos seguros primero
-          { createdAt: 'desc' },
         ],
         include: {
           photo: {
