@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
-import { CloudinaryService } from '../common/services/cloudinary.service';
+import { StorageService } from '../common/services/storage.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
 
@@ -10,7 +10,7 @@ export class PhotosService {
   constructor(
     private prisma: PrismaService,
     private queueService: QueueService,
-    private cloudinaryService: CloudinaryService,
+    private storageService: StorageService,
   ) {}
 
   async findOne(id: string, userId: string, userRole: UserRole) {
@@ -214,7 +214,7 @@ export class PhotosService {
 
     // Delete from Cloudinary
     try {
-      await this.cloudinaryService.deletePhoto(photo.cloudinaryId);
+      await this.storageService.deletePhoto(photo.cloudinaryId);
     } catch (error) {
       // Log error but continue with database deletion
       console.error('Error deleting from Cloudinary:', error);
@@ -232,7 +232,7 @@ export class PhotosService {
     const photo = await this.findOne(photoId, userId, userRole);
     
     // Generate secure download URL
-    const downloadUrl = await this.cloudinaryService.generateSecureDownloadUrl(
+    const downloadUrl = await this.storageService.generateSecureDownloadUrl(
       photo.cloudinaryId,
       300, // 5 minutes
     );

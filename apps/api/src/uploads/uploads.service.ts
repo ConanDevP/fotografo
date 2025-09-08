@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
-import { CloudinaryService } from '../common/services/cloudinary.service';
+import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
 import { FILE_CONSTRAINTS, ERROR_CODES } from '@shared/constants';
 import { UserRole } from '@shared/types';
@@ -11,7 +11,7 @@ import { getErrorMessage } from '@shared/utils';
 export class UploadsService {
   constructor(
     private prisma: PrismaService,
-    private cloudinaryService: CloudinaryService,
+    private storageService: StorageService,
     private queueService: QueueService,
   ) {}
 
@@ -60,10 +60,10 @@ export class UploadsService {
     });
 
     try {
-      // Upload to Cloudinary
-      const uploadResult = await this.cloudinaryService.uploadPhoto(file, eventId, photo.id);
+      // Upload to Storage (R2 or Cloudinary)
+      const uploadResult = await this.storageService.uploadPhoto(file, eventId, photo.id);
 
-      // Update photo with Cloudinary data
+      // Update photo with storage data
       const updatedPhoto = await this.prisma.photo.update({
         where: { id: photo.id },
         data: {

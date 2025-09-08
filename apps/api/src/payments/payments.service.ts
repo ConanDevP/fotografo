@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/services/prisma.service';
-import { CloudinaryService } from '../common/services/cloudinary.service';
+import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { EventPricing } from '@shared/types';
@@ -21,7 +21,7 @@ export class PaymentsService {
   
   constructor(
     private prisma: PrismaService,
-    private cloudinaryService: CloudinaryService,
+    private storageService: StorageService,
     private queueService: QueueService,
     private configService: ConfigService,
     private paymentGatewayFactory: PaymentGatewayFactory,
@@ -316,7 +316,7 @@ export class PaymentsService {
       order.items
         .filter(item => item.photo)
         .map(async item => {
-          const secureUrl = await this.cloudinaryService.generateSecureDownloadUrl(
+          const secureUrl = await this.storageService.generateSecureDownloadUrl(
             item.photo!.cloudinaryId,
             300 // 5 minutes expiry
           );
