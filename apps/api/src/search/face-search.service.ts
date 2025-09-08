@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
-import { FaceApiService } from '../../../worker/src/services/face-api.service';
+import { StorageService } from '../common/services/storage.service';
+import { PythonFaceApiService } from '../../../worker/src/services/python-face-api.service';
 import { 
   FaceSearchRequest, 
   FaceSearchResponse, 
@@ -16,7 +17,8 @@ export class FaceSearchService {
 
   constructor(
     private prisma: PrismaService,
-    private faceApiService: FaceApiService,
+    private storageService: StorageService,
+    private pythonFaceApiService: PythonFaceApiService,
   ) {}
 
   async searchPhotosByFace(
@@ -39,8 +41,8 @@ export class FaceSearchService {
         });
       }
 
-      // Check if Face API is ready
-      if (!this.faceApiService.isReady()) {
+      // Check if Python Face API is ready
+      if (!this.pythonFaceApiService.isReadySync()) {
         throw new BadRequestException({
           code: ERROR_CODES.INTERNAL_ERROR,
           message: 'Face recognition service is not available',
@@ -53,7 +55,43 @@ export class FaceSearchService {
       // Clean up the base64 string
       const base64Data = searchRequest.userImageBase64.split(',').pop() || '';
       const imageBuffer = Buffer.from(base64Data, 'base64');
-      const userFaceDescriptor = await this.faceApiService.extractFaceDescriptor(imageBuffer);
+      this.logger.log(`Image buffer size: ${imageBuffer.length} bytes`);
+      
+      // Upload search image temporarily to R2 to get a signed URL (same as when processing photos)
+      const tempImageKey = `temp/search/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+      
+      this.logger.log(`Uploading search image temporarily to R2: ${tempImageKey}`);
+      
+      // Upload image buffer to R2
+      await this.storageService.uploadImage(imageBuffer, tempImageKey);
+      
+      // Generate signed URL for the temporary image
+      const tempImageUrl = await this.storageService.generateSecureDownloadUrl(tempImageKey, 900); // 15 minutes
+      this.logger.log(`Generated signed URL for search image: ${tempImageUrl.substring(0, 100)}...`);
+      
+      let userFaceDescriptor: Float32Array | null = null;
+      
+      try {
+        // Use detectAllFaces() with URL (same method that works for event photos)
+        const faces = await this.pythonFaceApiService.detectAllFaces(tempImageUrl, 1);
+        
+        if (faces.length > 0) {
+          userFaceDescriptor = new Float32Array(faces[0].embedding);
+          this.logger.log(`Face extracted successfully from search image! Confidence: ${faces[0].confidence}`);
+        } else {
+          this.logger.warn(`No face detected in search image using URL method`);
+        }
+      } finally {
+        // Clean up temporary image
+        try {
+          await this.storageService.deleteImage(tempImageKey);
+          this.logger.log(`Cleaned up temporary search image: ${tempImageKey}`);
+        } catch (cleanupError) {
+          this.logger.warn(`Failed to cleanup temporary image ${tempImageKey}:`, cleanupError);
+        }
+      }
+      
+      this.logger.log(`Face descriptor extracted: ${userFaceDescriptor ? 'SUCCESS' : 'FAILED'}`);
 
       if (!userFaceDescriptor) {
         return {
@@ -82,11 +120,24 @@ export class FaceSearchService {
         },
       });
 
-      this.logger.log(`Found ${eventFaces.length} faces to compare against`);
-
       // Step 3: Calculate similarities and find matches
       const threshold = searchRequest.threshold || FACE_RECOGNITION.DEFAULT_THRESHOLD;
       const userDescriptor = Array.from(userFaceDescriptor);
+
+      this.logger.log(`Found ${eventFaces.length} faces to compare against`);
+      
+      if (eventFaces.length === 0) {
+        this.logger.error(`NO FACE EMBEDDINGS FOUND IN DATABASE for event ${eventId}!`);
+        return {
+          matches: [],
+          total: 0,
+          searchTime: Date.now() - startTime,
+          userFaceDetected: true,
+        };
+      }
+      
+      this.logger.log(`User descriptor length: ${userDescriptor.length}`);
+      this.logger.log(`First DB embedding length: ${eventFaces[0].embedding.length}`);
       const matches: FaceSearchResult[] = [];
 
       for (const eventFace of eventFaces) {
@@ -95,14 +146,16 @@ export class FaceSearchService {
           continue;
         }
 
-        // Convert Decimal[] to number[] for comparison
+        // Convert embedding to number array for comparison
         const faceDescriptor = eventFace.embedding.map(d => Number(d));
         
-        // Calculate Euclidean distance (lower is better)
-        const distance = this.faceApiService.calculateDistance(
+        // Calculate cosine distance using Python Face API service (lower is better)
+        const distance = this.pythonFaceApiService.calculateDistance(
           userDescriptor,
           faceDescriptor
         );
+
+        this.logger.debug(`Photo ${eventFace.photoId}: distance=${distance.toFixed(4)}, threshold=${threshold}`);
 
         // Check if it's a match (distance is below the threshold)
         if (distance <= threshold) {
@@ -125,6 +178,15 @@ export class FaceSearchService {
       const searchTime = Date.now() - startTime;
       
       this.logger.log(`Face search completed: ${sortedMatches.length} matches found in ${searchTime}ms`);
+      
+      if (sortedMatches.length === 0) {
+        this.logger.warn(`No matches found! Threshold: ${threshold}, Total faces checked: ${eventFaces.length}`);
+        // Log some sample distances for debugging
+        const sampleDistances = matches.slice(0, 3).map(m => `${m.similarity}`);
+        if (sampleDistances.length > 0) {
+          this.logger.debug(`Sample distances: ${sampleDistances.join(', ')}`);
+        }
+      }
 
       return {
         matches: sortedMatches,

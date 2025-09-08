@@ -15,6 +15,7 @@ import { SharpTransformService } from '../../api/src/common/services/sharp-trans
 import { StorageService } from '../../api/src/common/services/storage.service';
 import { OcrGeminiService } from './services/ocr-gemini.service';
 import { FaceApiService } from './services/face-api.service';
+import { PythonFaceApiService } from './services/python-face-api.service';
 import { ImagesService } from './services/images.service';
 import { MailService } from './services/mail.service';
 
@@ -58,6 +59,7 @@ import { QUEUES } from '@shared/constants';
     StorageService,
     OcrGeminiService,
     FaceApiService,
+    PythonFaceApiService,
     ImagesService,
     MailService,
   ],

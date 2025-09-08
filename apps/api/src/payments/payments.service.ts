@@ -148,7 +148,7 @@ export class PaymentsService {
 
     // Usar pasarela real (PayPal, Stripe, MercadoPago)
     const finalCurrency = currency || pricing.currency;
-    const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
+    const frontendUrl = this.configService.get('FRONTEND_URL', 'https://fotocorredor.com');
     
     const paymentRequest: PaymentRequest = {
       orderId: order.id,

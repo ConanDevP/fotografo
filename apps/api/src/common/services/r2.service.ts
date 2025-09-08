@@ -93,6 +93,15 @@ export class R2Service {
         expiresIn,
       });
 
+      // Si tenemos un dominio personalizado configurado, reemplazar el dominio de R2
+      if (this.publicUrl) {
+        const url = new URL(signedUrl);
+        const customUrl = new URL(this.publicUrl);
+        
+        // Mantener el path y query parameters, solo cambiar el dominio
+        return `${customUrl.origin}${url.pathname}${url.search}`;
+      }
+
       return signedUrl;
     } catch (error) {
       this.logger.error(`Error generando URL firmada: ${getErrorMessage(error)}`);
@@ -148,5 +157,46 @@ export class R2Service {
 
   async deleteImage(key: string): Promise<void> {
     return this.deletePhoto(key);
+  }
+
+  async uploadAvatar(
+    file: Express.Multer.File,
+    userId: string,
+  ): Promise<{
+    key: string;
+    url: string;
+  }> {
+    try {
+      const extension = file.originalname.split('.').pop() || 'jpg';
+      const key = `avatars/${userId}/avatar.${extension}`;
+      
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+        Metadata: {
+          userId: userId,
+          originalName: file.originalname,
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+
+      await this.s3Client.send(command);
+
+      const publicUrl = this.publicUrl 
+        ? `${this.publicUrl}/${key}`
+        : `https://${this.bucketName}.r2.cloudflarestorage.com/${key}`;
+
+      this.logger.log(`Avatar subido exitosamente para usuario ${userId}: ${key}`);
+
+      return {
+        key,
+        url: publicUrl,
+      };
+    } catch (error) {
+      this.logger.error(`Error subiendo avatar para usuario ${userId}:`, getErrorStack(error));
+      throw new Error(`Error al subir avatar: ${getErrorMessage(error)}`);
+    }
   }
 }

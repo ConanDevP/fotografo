@@ -6,6 +6,10 @@ import { ERROR_CODES } from '@shared/constants';
 interface CreateUserData {
   email: string;
   passwordHash?: string;
+  name?: string;
+  phone?: string;
+  profileImageUrl?: string;
+  address?: string;
   role: UserRole;
 }
 

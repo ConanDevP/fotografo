@@ -62,6 +62,23 @@ export class EventsController {
     };
   }
 
+  @UseGuards(AuthGuard('jwt'))
+  @Get('my-events')
+  async getMyEvents(
+    @Req() req: AuthenticatedRequest,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<ApiResponse> {
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 20;
+    
+    const result = await this.eventsService.getPhotographerEvents(req.user.id, req.user.role, pageNum, limitNum);
+    return { 
+      data: result.items,
+      meta: { pagination: result.pagination },
+    };
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string): Promise<ApiResponse> {
     const event = await this.eventsService.findOne(id);

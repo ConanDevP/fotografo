@@ -21,7 +21,7 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto): Promise<{ tokens: AuthTokens; user: UserProfile }> {
-    const { email, password, role = UserRole.ATHLETE } = registerDto;
+    const { email, password, name, phone, address, role = UserRole.ATHLETE } = registerDto;
 
     // Check if user exists
     const existingUser = await this.usersService.findByEmail(email);
@@ -39,6 +39,9 @@ export class AuthService {
     const user = await this.usersService.create({
       email,
       passwordHash,
+      name,
+      phone,
+      address,
       role,
     });
 
@@ -145,6 +148,10 @@ export class AuthService {
     return {
       id: user.id,
       email: user.email,
+      name: user.name,
+      phone: user.phone,
+      profileImageUrl: user.profileImageUrl,
+      address: user.address,
       role: user.role,
       createdAt: user.createdAt.toISOString(),
     };
