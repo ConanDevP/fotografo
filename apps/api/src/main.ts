@@ -40,6 +40,8 @@ async function bootstrap() {
     credentials: true,
   });
 
+
+
   // Global pipes
   app.useGlobalPipes(
     new ValidationPipe({
@@ -48,6 +50,8 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  
 
   // Global filters
   app.useGlobalFilters(new AllExceptionsFilter());
