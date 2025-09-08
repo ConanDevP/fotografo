@@ -111,7 +111,18 @@ export class EventsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<ApiResponse> {
     await this.eventsService.remove(id, req.user.id, req.user.role);
-    return { data: { message: 'Evento eliminado correctamente' } };
+    return { data: { message: 'Evento ocultado correctamente' } };
+  }
+
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id/restore')
+  async restore(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const event = await this.eventsService.restore(id, req.user.id, req.user.role);
+    return { data: event };
   }
 
   @UseGuards(AuthGuard('jwt'), RolesGuard)

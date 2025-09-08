@@ -46,6 +46,7 @@ export class EventsService {
 
     const [events, total] = await Promise.all([
       this.prisma.event.findMany({
+        where: { deletedAt: null }, // Solo eventos no eliminados
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -58,7 +59,9 @@ export class EventsService {
           },
         },
       }),
-      this.prisma.event.count(),
+      this.prisma.event.count({
+        where: { deletedAt: null }, // Solo eventos no eliminados
+      }),
     ]);
 
     return {
@@ -76,9 +79,10 @@ export class EventsService {
     const skip = (page - 1) * limit;
     
     // Los admins pueden ver todos los eventos, los fotógrafos solo los suyos
+    // Siempre excluir eventos eliminados
     const whereClause = userRole === UserRole.ADMIN 
-      ? {} 
-      : { ownerId: userId };
+      ? { deletedAt: null } 
+      : { ownerId: userId, deletedAt: null };
 
     const [events, total] = await Promise.all([
       this.prisma.event.findMany({
@@ -117,8 +121,8 @@ export class EventsService {
   }
 
   async findOne(id: string) {
-    const event = await this.prisma.event.findUnique({
-      where: { id },
+    const event = await this.prisma.event.findFirst({
+      where: { id, deletedAt: null }, // Solo eventos no eliminados
       include: {
         owner: {
           select: { id: true, email: true, role: true },
@@ -144,8 +148,8 @@ export class EventsService {
   }
 
   async findBySlug(slug: string) {
-    const event = await this.prisma.event.findUnique({
-      where: { slug },
+    const event = await this.prisma.event.findFirst({
+      where: { slug, deletedAt: null }, // Solo eventos no eliminados
       include: {
         owner: {
           select: { id: true, email: true, role: true },
@@ -218,20 +222,40 @@ export class EventsService {
       });
     }
 
-    // Check if event has photos
-    const photoCount = await this.prisma.photo.count({
-      where: { eventId: id },
+    // Soft delete: marcar como eliminado en lugar de borrar físicamente
+    return this.prisma.event.update({
+      where: { id },
+      data: { 
+        deletedAt: new Date() 
+      },
     });
+  }
 
-    if (photoCount > 0) {
-      throw new BadRequestException({
-        code: ERROR_CODES.VALIDATION_ERROR,
-        message: 'No se puede eliminar un evento que tiene fotos',
+  async restore(id: string, userId: string, userRole: UserRole) {
+    // Solo admins pueden restaurar eventos
+    if (userRole !== UserRole.ADMIN) {
+      throw new ForbiddenException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'Solo administradores pueden restaurar eventos',
       });
     }
 
-    return this.prisma.event.delete({
+    const event = await this.prisma.event.findFirst({
+      where: { id, deletedAt: { not: null } }, // Solo eventos eliminados
+    });
+
+    if (!event) {
+      throw new NotFoundException({
+        code: ERROR_CODES.EVENT_NOT_FOUND,
+        message: 'Evento eliminado no encontrado',
+      });
+    }
+
+    return this.prisma.event.update({
       where: { id },
+      data: { 
+        deletedAt: null 
+      },
     });
   }
 

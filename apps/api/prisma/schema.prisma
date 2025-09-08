@@ -38,6 +38,7 @@ model Event {
   ownerId     String?  @map("owner_id") @db.Uuid
   bibRules    Json?    @map("bib_rules")
   pricing     Json?    @map("pricing")
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
