@@ -10,6 +10,9 @@ import { ReprocessPhotoProcessor } from './queues/reprocess-photo.processor';
 // Services
 import { PrismaService } from '../../api/src/common/services/prisma.service';
 import { CloudinaryService } from '../../api/src/common/services/cloudinary.service';
+import { R2Service } from '../../api/src/common/services/r2.service';
+import { SharpTransformService } from '../../api/src/common/services/sharp-transform.service';
+import { StorageService } from '../../api/src/common/services/storage.service';
 import { OcrGeminiService } from './services/ocr-gemini.service';
 import { FaceApiService } from './services/face-api.service';
 import { ImagesService } from './services/images.service';
@@ -50,6 +53,9 @@ import { QUEUES } from '@shared/constants';
     ReprocessPhotoProcessor,
     PrismaService,
     CloudinaryService,
+    R2Service,
+    SharpTransformService,
+    StorageService,
     OcrGeminiService,
     FaceApiService,
     ImagesService,

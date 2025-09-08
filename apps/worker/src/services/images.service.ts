@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CloudinaryService } from '../../../api/src/common/services/cloudinary.service';
+import { StorageService } from '../../../api/src/common/services/storage.service';
 
 @Injectable()
 export class ImagesService {
   private readonly logger = new Logger(ImagesService.name);
 
-  constructor(private cloudinaryService: CloudinaryService) {}
+  constructor(private storageService: StorageService) {}
 
   async generateDerivatives(cloudinaryId: string, eventId: string, photoId: string) {
     try {
@@ -13,8 +13,8 @@ export class ImagesService {
 
       // Generate thumbnail and watermark in parallel
       const [thumbUrl, watermarkUrl] = await Promise.all([
-        this.cloudinaryService.generateThumbnail(cloudinaryId, eventId, photoId),
-        this.cloudinaryService.generateWatermark(cloudinaryId, eventId, photoId),
+        this.storageService.generateThumbnail(cloudinaryId, eventId, photoId),
+        this.storageService.generateWatermark(cloudinaryId, eventId, photoId),
       ]);
 
       this.logger.log(`Derivados generados para ${photoId}`);
@@ -32,6 +32,6 @@ export class ImagesService {
   }
 
   async getOptimizedImageForOCR(cloudinaryId: string): Promise<string> {
-    return this.cloudinaryService.getOptimizedUrlForOCR(cloudinaryId);
+    return this.storageService.getOptimizedUrlForOCR(cloudinaryId);
   }
 }
