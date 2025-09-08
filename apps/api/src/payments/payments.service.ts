@@ -266,6 +266,7 @@ export class PaymentsService {
               photo: {
                 select: {
                   id: true,
+                  cloudinaryId: true,
                   thumbUrl: true,
                   watermarkUrl: true,
                   originalUrl: true,
@@ -316,7 +317,7 @@ export class PaymentsService {
         .filter(item => item.photo)
         .map(async item => {
           const secureUrl = await this.cloudinaryService.generateSecureDownloadUrl(
-            item.photo!.originalUrl.split('/').pop()!.split('.')[0], // Extract cloudinary ID
+            item.photo!.cloudinaryId,
             300 // 5 minutes expiry
           );
 
