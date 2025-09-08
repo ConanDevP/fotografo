@@ -564,6 +564,75 @@ export class EventsService {
     }
   }
 
+  async getLowConfidenceBibs(eventId: string, userId: string, userRole: UserRole, threshold = 0.8, page = 1, limit = 50) {
+    // Verificar permisos primero
+    const event = await this.findOne(eventId);
+    
+    if (userRole !== UserRole.ADMIN && event.ownerId !== userId) {
+      throw new ForbiddenException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'No tienes permisos para ver los dorsales de este evento',
+      });
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [bibs, total] = await Promise.all([
+      this.prisma.photoBib.findMany({
+        where: {
+          eventId,
+          confidence: { lt: threshold },
+          source: 'GEMINI', // Solo dorsales detectados por Gemini
+        },
+        skip,
+        take: limit,
+        orderBy: [
+          { confidence: 'asc' }, // Los menos seguros primero
+          { createdAt: 'desc' },
+        ],
+        include: {
+          photo: {
+            select: {
+              id: true,
+              thumbUrl: true,
+              watermarkUrl: true,
+              originalUrl: true,
+              takenAt: true,
+              width: true,
+              height: true,
+            },
+          },
+        },
+      }),
+      this.prisma.photoBib.count({
+        where: {
+          eventId,
+          confidence: { lt: threshold },
+          source: 'GEMINI',
+        },
+      }),
+    ]);
+
+    return {
+      items: bibs.map(bib => ({
+        id: bib.id.toString(), // Convertir BigInt a string
+        photoId: bib.photoId,
+        bib: bib.bib,
+        confidence: Number(bib.confidence), // Convertir Decimal a number
+        bbox: bib.bbox,
+        source: bib.source,
+        photo: bib.photo,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+      threshold,
+    };
+  }
+
   private extractCloudinaryIdFromUrl(url: string): string {
     // Extract public_id from Cloudinary URL
     // Example: https://res.cloudinary.com/demo/image/upload/v1234567890/events/event-id/cover/event-cover.jpg

@@ -190,4 +190,36 @@ export class EventsController {
     // TODO: Implement subscription logic
     return { data: { message: 'Suscripción creada' } };
   }
+
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+  @Get(':id/bibs/low-confidence')
+  async getLowConfidenceBibs(
+    @Param('id') eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Query('threshold') threshold?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<ApiResponse> {
+    const thresholdNum = threshold ? parseFloat(threshold) : 0.8;
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 50;
+    
+    const result = await this.eventsService.getLowConfidenceBibs(
+      eventId, 
+      req.user.id, 
+      req.user.role,
+      thresholdNum,
+      pageNum,
+      limitNum
+    );
+    
+    return { 
+      data: result.items,
+      meta: { 
+        pagination: result.pagination,
+        threshold: result.threshold,
+      },
+    };
+  }
 }
