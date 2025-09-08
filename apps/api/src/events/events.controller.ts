@@ -218,7 +218,7 @@ export class EventsController {
       data: result.items,
       meta: { 
         pagination: result.pagination,
-        threshold: result.threshold,
+        total: result.pagination.total,
       },
     };
   }
