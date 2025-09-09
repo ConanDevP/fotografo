@@ -1,6 +1,8 @@
 import {
   Controller,
   Post,
+  Get,
+  Param,
   UseGuards,
   UseInterceptors,
   UploadedFile,
@@ -70,9 +72,9 @@ export class UploadsController {
   }
 
   @Post('photos/batch')
-  @Throttle(5, 60)
+  @Throttle(2, 60) // Reducir a 2 requests por minuto para batches grandes
   @UseInterceptors(
-    FilesInterceptor('files', 50, {
+    FilesInterceptor('files', 5000, { // Aumentar límite a 5000 archivos
       limits: {
         fileSize: FILE_CONSTRAINTS.MAX_SIZE,
       },

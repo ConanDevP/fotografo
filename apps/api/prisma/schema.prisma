@@ -19,12 +19,27 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  // Photographer profile fields
+  slug            String?   @unique
+  bio             String?
+  website         String?
+  instagram       String?
+  facebook        String?
+  specialties     String[]
+  experienceYears Int?      @map("experience_years")
+  location        String?
+  portfolioUrl    String?   @map("portfolio_url")
+  isFeatured      Boolean   @default(false) @map("is_featured")
+  isVerified      Boolean   @default(false) @map("is_verified")
+
   // Relations
   ownedEvents   Event[]  @relation("EventOwner")
   photographedPhotos Photo[] @relation("PhotoPhotographer")
   orders        Order[]
   auditLogs     AuditLog[]
 
+  @@index([slug])
+  @@index([role, isFeatured])
   @@map("users")
 }
 
