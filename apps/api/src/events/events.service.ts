@@ -298,6 +298,7 @@ export class EventsService {
           },
           bibs: {
             select: {
+              id: true,
               bib: true,
               confidence: true,
               bbox: true,
@@ -358,7 +359,11 @@ export class EventsService {
         takenAt: photo.takenAt,
         createdAt: photo.createdAt,
         photographer: photo.photographer,
-        detectedBibs: photo.bibs,
+        detectedBibs: photo.bibs.map(bib => ({
+          ...bib,
+          id: bib.id.toString(),
+          confidence: Number(bib.confidence),
+        })),
         bibCount: photo._count.bibs,
         detectedFaces: photo.faces,
         faceCount: photo._count.faces,
