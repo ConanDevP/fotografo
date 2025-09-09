@@ -320,13 +320,13 @@ export class PaymentsService {
         .map(async item => {
           const secureUrl = await this.storageService.generateSecureDownloadUrl(
             item.photo!.cloudinaryId,
-            1728000 // 20 days expiry (20 * 24 * 60 * 60 = 1,728,000 seconds)
+            604800 // 7 days expiry (7 * 24 * 60 * 60 = 604,800 seconds)
           );
 
           return {
             photoId: item.photo!.id,
             downloadUrl: secureUrl,
-            expiresAt: new Date(Date.now() + 1728000 * 1000).toISOString(),
+            expiresAt: new Date(Date.now() + 604800 * 1000).toISOString(),
           };
         })
     );
@@ -334,7 +334,7 @@ export class PaymentsService {
     return {
       orderId,
       downloads: downloadUrls,
-      expiresInDays: 20,
+      expiresInDays: 7,
     };
   }
 
@@ -772,8 +772,8 @@ export class PaymentsService {
 
   private async getPhotoBuffer(cloudinaryId: string): Promise<Buffer> {
     try {
-      // Get secure download URL from storage service (20 days expiry: 20 * 24 * 60 * 60 = 1,728,000 seconds)
-      const downloadUrl = await this.storageService.generateSecureDownloadUrl(cloudinaryId, 1728000);
+      // Get secure download URL from storage service (7 days expiry: 7 * 24 * 60 * 60 = 604,800 seconds)
+      const downloadUrl = await this.storageService.generateSecureDownloadUrl(cloudinaryId, 604800);
       
       // Fetch the photo
       const response = await fetch(downloadUrl);
