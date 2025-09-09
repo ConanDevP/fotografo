@@ -437,8 +437,11 @@ export class EventsService {
     let counter = 1;
 
     while (true) {
-      const existing = await this.prisma.event.findUnique({
-        where: { slug },
+      const existing = await this.prisma.event.findFirst({
+        where: { 
+          slug,
+          deletedAt: null
+        },
         select: { id: true },
       });
 
