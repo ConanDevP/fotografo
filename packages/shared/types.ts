@@ -146,6 +146,7 @@ export interface FaceSearchResponse {
 // API Response types
 export interface ApiResponse<T = any> {
   data?: T;
+  message?: string;
   error?: {
     code: string;
     message: string;

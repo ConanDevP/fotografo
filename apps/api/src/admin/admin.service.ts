@@ -34,75 +34,101 @@ export class AdminService {
       });
     }
 
-    // Get comprehensive metrics
-    const [
-      totalPhotos,
-      processedPhotos,
-      failedPhotos,
-      totalBibs,
-      uniqueBibs,
-      totalOrders,
-      paidOrders,
-      totalRevenue,
-      subscriptions,
-      ocrAccuracy,
-    ] = await Promise.all([
-      // Photo counts
-      this.prisma.photo.count({ where: { eventId } }),
-      this.prisma.photo.count({ where: { eventId, status: 'PROCESSED' } }),
-      this.prisma.photo.count({ where: { eventId, status: 'FAILED' } }),
+    // Get comprehensive metrics usando transacción para evitar conexiones múltiples
+    const metrics = await this.prisma.$transaction(async (prisma) => {
+      // Ejecutar queries en secuencia para evitar sobrecarga de conexiones
+      const [photoStats, bibStats, orderStats, subscriptionCount] = await Promise.all([
+        // Photo statistics en una query
+        prisma.photo.groupBy({
+          by: ['status'],
+          where: { eventId },
+          _count: { status: true },
+        }),
+        
+        // Bib statistics
+        Promise.all([
+          prisma.photoBib.count({ where: { eventId } }),
+          prisma.photoBib.groupBy({
+            by: ['bib'],
+            where: { eventId },
+            _count: { bib: true },
+          }),
+        ]),
+        
+        // Order statistics
+        Promise.all([
+          prisma.order.groupBy({
+            by: ['status'],
+            where: { eventId },
+            _count: { status: true },
+            _sum: { amountCents: true },
+          }),
+        ]),
+        
+        // Subscriptions
+        prisma.bibSubscription.count({ where: { eventId } }),
+      ]);
+
+      // Procesar resultados
+      const totalPhotos = photoStats.reduce((sum, stat) => sum + stat._count.status, 0);
+      const processedPhotos = photoStats.find(stat => stat.status === 'PROCESSED')?._count.status || 0;
+      const failedPhotos = photoStats.find(stat => stat.status === 'FAILED')?._count.status || 0;
       
-      // Bib statistics
-      this.prisma.photoBib.count({ where: { eventId } }),
-      this.prisma.photoBib.groupBy({
-        by: ['bib'],
-        where: { eventId },
-        _count: { bib: true },
-      }).then(result => result.length),
+      const [totalBibs, bibGroups] = bibStats;
+      const uniqueBibs = bibGroups.length;
       
-      // Order statistics
-      this.prisma.order.count({ where: { eventId } }),
-      this.prisma.order.count({ where: { eventId, status: 'PAID' } }),
-      this.prisma.order.aggregate({
-        where: { eventId, status: 'PAID' },
-        _sum: { amountCents: true },
-      }).then(result => result._sum.amountCents || 0),
-      
-      // Subscriptions
-      this.prisma.bibSubscription.count({ where: { eventId } }),
-      
-      // OCR accuracy (photos with at least one detected bib / total processed photos)
-      this.getOcrAccuracy(eventId),
-    ]);
+      const totalOrders = orderStats[0].reduce((sum, stat) => sum + stat._count.status, 0);
+      const paidOrderGroup = orderStats[0].find(stat => stat.status === 'PAID');
+      const paidOrders = paidOrderGroup?._count.status || 0;
+      const totalRevenue = paidOrderGroup?._sum.amountCents || 0;
+
+      // OCR accuracy (se calcula después para evitar otra query en la transacción)
+      const ocrAccuracy = processedPhotos > 0 
+        ? await this.getOcrAccuracyInTransaction(prisma, eventId, processedPhotos) 
+        : 0;
+
+      return {
+        totalPhotos,
+        processedPhotos,
+        failedPhotos,
+        totalBibs,
+        uniqueBibs,
+        totalOrders,
+        paidOrders,
+        totalRevenue,
+        subscriptions: subscriptionCount,
+        ocrAccuracy,
+      };
+    });
 
     return {
       eventId,
       photos: {
-        total: totalPhotos,
-        processed: processedPhotos,
-        failed: failedPhotos,
-        pending: totalPhotos - processedPhotos - failedPhotos,
-        processingRate: totalPhotos > 0 ? (processedPhotos / totalPhotos * 100) : 0,
+        total: metrics.totalPhotos,
+        processed: metrics.processedPhotos,
+        failed: metrics.failedPhotos,
+        pending: metrics.totalPhotos - metrics.processedPhotos - metrics.failedPhotos,
+        processingRate: metrics.totalPhotos > 0 ? (metrics.processedPhotos / metrics.totalPhotos * 100) : 0,
       },
       bibs: {
-        total: totalBibs,
-        unique: uniqueBibs,
-        avgBibsPerPhoto: processedPhotos > 0 ? (totalBibs / processedPhotos) : 0,
+        total: metrics.totalBibs,
+        unique: metrics.uniqueBibs,
+        avgBibsPerPhoto: metrics.processedPhotos > 0 ? (metrics.totalBibs / metrics.processedPhotos) : 0,
       },
       orders: {
-        total: totalOrders,
-        paid: paidOrders,
-        conversionRate: totalOrders > 0 ? (paidOrders / totalOrders * 100) : 0,
+        total: metrics.totalOrders,
+        paid: metrics.paidOrders,
+        conversionRate: metrics.totalOrders > 0 ? (metrics.paidOrders / metrics.totalOrders * 100) : 0,
       },
       revenue: {
-        totalCents: totalRevenue,
-        avgOrderValue: paidOrders > 0 ? (totalRevenue / paidOrders) : 0,
+        totalCents: metrics.totalRevenue,
+        avgOrderValue: metrics.paidOrders > 0 ? (metrics.totalRevenue / metrics.paidOrders) : 0,
       },
       subscriptions: {
-        total: subscriptions,
+        total: metrics.subscriptions,
       },
       ocr: {
-        accuracy: ocrAccuracy,
+        accuracy: metrics.ocrAccuracy,
       },
     };
   }
@@ -125,6 +151,20 @@ export class AdminService {
         },
       }),
     ]);
+
+    return totalProcessed > 0 ? (photosWithBibs / totalProcessed * 100) : 0;
+  }
+
+  private async getOcrAccuracyInTransaction(prisma: any, eventId: string, totalProcessed: number): Promise<number> {
+    const photosWithBibs = await prisma.photo.count({
+      where: {
+        eventId,
+        status: 'PROCESSED',
+        bibs: {
+          some: {},
+        },
+      },
+    });
 
     return totalProcessed > 0 ? (photosWithBibs / totalProcessed * 100) : 0;
   }

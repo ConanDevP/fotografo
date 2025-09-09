@@ -112,21 +112,50 @@ export class UploadsService {
   ) {
     const results = [];
     const errors = [];
+    const CHUNK_SIZE = 10; // Procesar de 10 en 10 para evitar sobrecarga de DB
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    // Procesar en chunks
+    for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+      const chunk = files.slice(i, i + CHUNK_SIZE);
+      console.log(`Procesando chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(files.length / CHUNK_SIZE)} (${chunk.length} fotos)`);
       
-      try {
-        const result = await this.uploadPhoto(file, eventId, userId, userRole);
-        results.push(result);
-      } catch (error) {
-        errors.push({
-          fileIndex: i,
-          fileName: file.originalname,
-          error: getErrorMessage(error),
-        });
+      // Procesar chunk con Promise.all para paralelizar
+      const chunkPromises = chunk.map(async (file, chunkIndex) => {
+        const globalIndex = i + chunkIndex;
+        try {
+          const result = await this.uploadPhoto(file, eventId, userId, userRole);
+          return { success: true, result, globalIndex, fileName: file.originalname };
+        } catch (error) {
+          return { 
+            success: false, 
+            error: {
+              fileIndex: globalIndex,
+              fileName: file.originalname,
+              error: getErrorMessage(error),
+            }
+          };
+        }
+      });
+
+      // Esperar que termine el chunk completo
+      const chunkResults = await Promise.all(chunkPromises);
+      
+      // Procesar resultados del chunk
+      chunkResults.forEach(result => {
+        if (result.success) {
+          results.push(result.result);
+        } else {
+          errors.push(result.error);
+        }
+      });
+
+      // Pequeña pausa entre chunks para no sobrecargar el sistema
+      if (i + CHUNK_SIZE < files.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
+
+    console.log(`Batch completado: ${results.length} exitosas, ${errors.length} fallidas`);
 
     return {
       successful: results,

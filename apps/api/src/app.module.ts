@@ -12,6 +12,7 @@ import { SearchModule } from './search/search.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AdminModule } from './admin/admin.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { PhotographersModule } from './photographers/photographers.module';
 import { ConnectionErrorMiddleware } from './common/middleware/connection-error.middleware';
 
 @Module({
@@ -45,6 +46,7 @@ import { ConnectionErrorMiddleware } from './common/middleware/connection-error.
     PaymentsModule,
     AdminModule,
     WebhooksModule,
+    PhotographersModule,
   ],
 })
 export class AppModule {
