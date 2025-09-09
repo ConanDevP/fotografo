@@ -78,6 +78,16 @@ export class PaymentsController {
     return { data: result };
   }
 
+  @Get('orders/:orderId/download-zip')
+  async downloadZip(
+    @Param('orderId') orderId: string,
+    @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
+  ): Promise<void> {
+    const userId = req.user?.id;
+    await this.paymentsService.downloadOrderAsZip(orderId, userId, res);
+  }
+
   // Simulate payment completion (for demo mode)
   @Post('orders/:orderId/complete')
   @Throttle(5, 60)
