@@ -16,9 +16,10 @@ export class EventsService {
   async create(createEventDto: CreateEventDto, userId: string) {
     const { name, date, location, bibRules, pricing } = createEventDto;
     
-    // Generate unique slug from name
+    // Generate unique slug from name with timestamp to ensure uniqueness
     const baseSlug = this.generateSlug(name);
-    const slug = await this.generateUniqueSlug(baseSlug);
+    const timestamp = Date.now();
+    const slug = `${baseSlug}-${timestamp}`;
 
     return this.prisma.event.create({
       data: {
