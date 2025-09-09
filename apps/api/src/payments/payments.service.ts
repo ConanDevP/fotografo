@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Response } from 'express';
+import * as archiver from 'archiver';
 import { PrismaService } from '../common/services/prisma.service';
 import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
@@ -673,6 +675,119 @@ export class PaymentsService {
         code: 'VERIFICATION_ERROR',
         message: 'Error al verificar el retorno de PayPal',
       });
+    }
+  }
+
+  async downloadOrderAsZip(orderId: string, userId: string | undefined, res: Response): Promise<void> {
+    const order = await this.getOrder(orderId, userId);
+
+    if (order.status !== 'PAID') {
+      throw new BadRequestException({
+        code: ERROR_CODES.PAYMENT_FAILED,
+        message: 'El pedido no está pagado',
+      });
+    }
+
+    const photos = order.items.filter(item => item.photo);
+    if (photos.length === 0) {
+      throw new BadRequestException({
+        code: ERROR_CODES.PHOTO_NOT_FOUND,
+        message: 'No hay fotos para descargar',
+      });
+    }
+
+    // Configure response headers for ZIP download
+    const eventName = order.event?.name || 'Fotos';
+    const zipFilename = `${eventName.replace(/[^a-zA-Z0-9]/g, '_')}_${orderId.slice(-8)}.zip`;
+    
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    // Create ZIP archive and pipe to response
+    const archive = archiver('zip', {
+      zlib: { level: 6 } // Compression level
+    });
+
+    // Handle archive events
+    archive.on('error', (err) => {
+      this.logger.error(`Error creating ZIP for order ${orderId}:`, err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Error creating ZIP file' });
+      }
+    });
+
+    archive.on('warning', (err) => {
+      if (err.code === 'ENOENT') {
+        this.logger.warn(`ZIP warning for order ${orderId}:`, err);
+      } else {
+        this.logger.error(`ZIP error for order ${orderId}:`, err);
+      }
+    });
+
+    // Pipe archive to response
+    archive.pipe(res);
+
+    try {
+      // Add each photo to the ZIP
+      for (let i = 0; i < photos.length; i++) {
+        const item = photos[i];
+        const photo = item.photo!;
+        
+        try {
+          this.logger.log(`Adding photo ${i + 1}/${photos.length} to ZIP: ${photo.id}`);
+          
+          // Get photo buffer from storage
+          const photoBuffer = await this.getPhotoBuffer(photo.cloudinaryId);
+          
+          // Generate filename: photo_001.jpg, photo_002.jpg, etc.
+          const filename = `photo_${(i + 1).toString().padStart(3, '0')}.jpg`;
+          
+          // Add to archive
+          archive.append(photoBuffer, { name: filename });
+          
+        } catch (photoError) {
+          this.logger.error(`Error adding photo ${photo.id} to ZIP:`, photoError);
+          // Continue with other photos instead of failing completely
+        }
+      }
+
+      // Finalize the archive
+      await archive.finalize();
+      
+      this.logger.log(`ZIP download completed for order ${orderId} with ${photos.length} photos`);
+      
+    } catch (error) {
+      this.logger.error(`Error creating ZIP for order ${orderId}:`, error);
+      
+      // If headers not sent yet, send error response
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: 'Error creating ZIP file',
+          code: ERROR_CODES.DOWNLOAD_FAILED,
+        });
+      }
+    }
+  }
+
+  private async getPhotoBuffer(cloudinaryId: string): Promise<Buffer> {
+    try {
+      // Get secure download URL from storage service
+      const downloadUrl = await this.storageService.generateSecureDownloadUrl(cloudinaryId, 300);
+      
+      // Fetch the photo
+      const response = await fetch(downloadUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+      
+    } catch (error) {
+      this.logger.error(`Error downloading photo ${cloudinaryId}:`, error);
+      throw error;
     }
   }
 
