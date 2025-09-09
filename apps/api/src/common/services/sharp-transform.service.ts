@@ -55,12 +55,12 @@ export class SharpTransformService {
         throw new Error('No se pudieron obtener las dimensiones de la imagen');
       }
 
-      // Crear múltiples marcas de agua más visibles
-      const fontSize = Math.max(24, Math.floor(width / 40)); // Más grande para mayor visibilidad
-      const svgWidth = Math.floor(width / 4); // Más grande para texto más visible
-      const svgHeight = Math.floor(height / 5); // Más grande para texto más visible
-      const cols = 3; // 3 columnas (menos marcas pero más grandes)
-      const rows = 4; // 4 filas = 12 marcas de agua total
+      // Crear múltiples marcas de agua simples
+      const fontSize = Math.max(14, Math.floor(width / 60)); // Más pequeño para más densidad
+      const svgWidth = Math.floor(width / 5); // Más pequeño para más marcas
+      const svgHeight = Math.floor(height / 7); // Más pequeño para más marcas
+      const cols = 4; // 4 columnas
+      const rows = 6; // 6 filas = 24 marcas de agua total
       const spacingX = Math.floor(width / cols);
       const spacingY = Math.floor(height / rows);
       
@@ -75,17 +75,15 @@ export class SharpTransformService {
           // Alternar horizontal y diagonal
           const isRotated = (row + col) % 2 === 1;
           const rotation = isRotated ? -45 : 0;
-          const opacity = isRotated ? 0.9 : 1.0; // Más opaco para mayor visibilidad
+          const opacity = isRotated ? options.opacity * 0.7 : options.opacity;
           
-          // SVG ajustado al espacio disponible con texto más grueso
+          // SVG ajustado al espacio disponible
           const textSvg = Buffer.from(`
             <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">
               <text x="50%" y="50%" 
                     font-family="Arial, sans-serif" 
                     font-size="${fontSize}" 
-                    font-weight="900"
-                    stroke="rgba(0,0,0,${opacity * 0.3})"
-                    stroke-width="2"
+                    font-weight="bold"
                     fill="rgba(255,255,255,${opacity})" 
                     text-anchor="middle"
                     dominant-baseline="middle"
