@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as sharp from 'sharp';
-import { createCanvas } from 'canvas';
+import { createCanvas, registerFont } from 'canvas';
+import { join } from 'path';
 import { getErrorMessage, getErrorStack } from '@shared/utils';
 
 type GridOptions = {
@@ -9,7 +10,7 @@ type GridOptions = {
   watermarkText?: string;         // texto central
   spacingPct?: number;            // separación entre líneas vs. lado menor (0.06–0.12 típico)
   lineWidthPct?: number;          // grosor vs. lado menor (0.002–0.006 típico)
-  dashPct?: number;               // tamaño del dash vs. lado menor (0.02–0.05 típico)
+  dashPct?: number;            // tamaño del dash vs. lado menor (0.02–0.05 típico)
   lineOpacity?: number;           // opacidad líneas (0..1)
   textOpacity?: number;           // opacidad texto (0..1)
   density?: number;               // DPI al rasterizar el SVG
@@ -17,8 +18,19 @@ type GridOptions = {
 };
 
 @Injectable()
-export class SharpTransformService {
+export class SharpTransformService implements OnModuleInit {
   private readonly logger = new Logger(SharpTransformService.name);
+
+  async onModuleInit() {
+    try {
+      const fontPath = join(process.cwd(), 'apps', 'api', 'src', 'assets', 'fonts', 'ARIAL.TTF');
+      registerFont(fontPath, { family: 'Arial', weight: 'bold' });
+      this.logger.log(`Fuente Arial registrada exitosamente desde: ${fontPath}`);
+    } catch (error) {
+      this.logger.error('CRITICAL: No se pudo registrar la fuente Arial. Las marcas de agua fallarán.', error);
+      throw new Error('Failed to register watermark font.');
+    }
+  }
 
   // -------------------- THUMBNAIL --------------------
   async generateThumbnail(
@@ -124,36 +136,18 @@ export class SharpTransformService {
     const spacing = Math.max(12, Math.round(options.spacingPx ?? 48));
     const angle = (options.angleDeg ?? -32) * Math.PI / 180; // Convertir a radianes
 
-    // CRITICAL FIX: Configurar font y FORZAR validation antes de continuar
+    // CRITICAL FIX: Usar la fuente pre-registrada
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    
-    // MÚLTIPLES INTENTOS para asegurar que la fuente se carga correctamente
-    let fontLoaded = false;
-    const fontOptions = [
-      `bold ${fontPx}px Arial, sans-serif`,
-      `bold ${fontPx}px Helvetica, sans-serif`, 
-      `bold ${fontPx}px "Times New Roman", serif`,
-      `bold ${fontPx}px monospace`,
-      `${fontPx}px sans-serif` // Fallback sin bold
-    ];
-    
-    for (const fontString of fontOptions) {
-      ctx.font = fontString;
-      const testWidth = ctx.measureText('A').width;
-      
-      if (testWidth > 0) {
-        this.logger.debug(`Font loaded successfully: ${fontString} (testWidth: ${testWidth})`);
-        fontLoaded = true;
-        break;
-      } else {
-        this.logger.warn(`Font failed to load: ${fontString}`);
-      }
+    ctx.font = `bold ${fontPx}px Arial`;
+
+    // Validar que la fuente pre-registrada funciona
+    const testWidth = ctx.measureText('A').width;
+    if (testWidth <= 0) {
+      this.logger.error(`CRITICAL: La fuente pre-registrada 'Arial' no se pudo usar. Canvas/font system failure.`);
+      throw new Error(`La fuente pre-registrada 'Arial' no se pudo usar.`);
     }
-    
-    if (!fontLoaded) {
-      throw new Error(`CRITICAL: No se pudo cargar ninguna fuente para watermark. Canvas/font system failure.`);
-    }
+    this.logger.debug(`Fuente pre-registrada 'Arial' validada con éxito (testWidth: ${testWidth})`);
 
     // Colores con opacidad
     const fillOpacity = Math.min(1, Math.max(0, options.fillOpacity ?? 0.18));
