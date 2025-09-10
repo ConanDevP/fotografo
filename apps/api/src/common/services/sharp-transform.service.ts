@@ -124,9 +124,36 @@ export class SharpTransformService {
     const spacing = Math.max(12, Math.round(options.spacingPx ?? 48));
     const angle = (options.angleDeg ?? -32) * Math.PI / 180; // Convertir a radianes
 
-    ctx.font = `bold ${fontPx}px sans-serif`;
+    // CRITICAL FIX: Configurar font y FORZAR validation antes de continuar
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
+    
+    // MÚLTIPLES INTENTOS para asegurar que la fuente se carga correctamente
+    let fontLoaded = false;
+    const fontOptions = [
+      `bold ${fontPx}px Arial, sans-serif`,
+      `bold ${fontPx}px Helvetica, sans-serif`, 
+      `bold ${fontPx}px "Times New Roman", serif`,
+      `bold ${fontPx}px monospace`,
+      `${fontPx}px sans-serif` // Fallback sin bold
+    ];
+    
+    for (const fontString of fontOptions) {
+      ctx.font = fontString;
+      const testWidth = ctx.measureText('A').width;
+      
+      if (testWidth > 0) {
+        this.logger.debug(`Font loaded successfully: ${fontString} (testWidth: ${testWidth})`);
+        fontLoaded = true;
+        break;
+      } else {
+        this.logger.warn(`Font failed to load: ${fontString}`);
+      }
+    }
+    
+    if (!fontLoaded) {
+      throw new Error(`CRITICAL: No se pudo cargar ninguna fuente para watermark. Canvas/font system failure.`);
+    }
 
     // Colores con opacidad
     const fillOpacity = Math.min(1, Math.max(0, options.fillOpacity ?? 0.18));
@@ -139,7 +166,14 @@ export class SharpTransformService {
 
     // Calcular dimensiones rotadas para cubrir toda la imagen
     const diagonal = Math.sqrt(width * width + height * height);
-    const textWidth = ctx.measureText(text).width;
+    let textWidth = ctx.measureText(text).width;
+    
+    // CRITICAL FIX: Validar que measureText funciona correctamente
+    if (textWidth <= 0) {
+      // Fallback si measureText falla - usar aproximación
+      textWidth = text.length * fontPx * 0.6;
+      this.logger.warn(`measureText falló, usando fallback: ${textWidth}px para "${text}"`);
+    }
     const textSpacing = textWidth + 20; // Espaciado horizontal entre repeticiones
 
     // Guardar estado y aplicar transformación
@@ -155,6 +189,8 @@ export class SharpTransformService {
 
     for (let y = startY; y < endY; y += spacing) {
       for (let x = startX; x < endX; x += textSpacing) {
+        // Font ya está cargado y validado arriba - no necesitamos reconfigurar
+        
         // Dibujar borde (stroke) primero
         if (strokeOpacity > 0) {
           ctx.strokeText(text, x, y);
@@ -169,7 +205,15 @@ export class SharpTransformService {
     ctx.restore();
 
     // Convertir canvas a buffer PNG
-    return canvas.toBuffer('image/png');
+    const pngBuffer = canvas.toBuffer('image/png');
+    
+    // CRITICAL FIX: Validar que el buffer no esté corrupto
+    if (pngBuffer.length < 100) {
+      throw new Error(`Watermark PNG demasiado pequeño: ${pngBuffer.length} bytes - posible corrupción`);
+    }
+    
+    this.logger.debug(`Watermark overlay generado: ${pngBuffer.length} bytes, dimensiones: ${width}x${height}`);
+    return pngBuffer;
   }
   
 

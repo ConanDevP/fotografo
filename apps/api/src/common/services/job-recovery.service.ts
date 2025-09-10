@@ -16,7 +16,7 @@ export class JobRecoveryService {
   @Cron('*/2 * * * *')
   async recoverStuckPhotos() {
     try {
-      this.logger.debug('Iniciando recuperación de fotos stuck');
+      this.logger.log('Iniciando recuperación de fotos stuck');
 
       // Buscar fotos que están PENDING por más de 10 minutos
       const stuckPhotos = await this.prisma.photo.findMany({
@@ -41,7 +41,7 @@ export class JobRecoveryService {
       });
 
       if (stuckPhotos.length === 0) {
-        this.logger.debug('No se encontraron fotos stuck');
+        this.logger.log('No se encontraron fotos stuck');
         return;
       }
 
@@ -85,7 +85,7 @@ export class JobRecoveryService {
   @Cron('*/5 * * * *')
   async recoverStuckBatchJobs() {
     try {
-      this.logger.debug('Verificando BatchUploadJobs stuck');
+      this.logger.log('Verificando BatchUploadJobs stuck');
 
       // Buscar batch jobs que están en PROCESSING pero sin actividad reciente
       const stuckBatchJobs = await this.prisma.batchUploadJob.findMany({
@@ -112,7 +112,7 @@ export class JobRecoveryService {
       });
 
       if (stuckBatchJobs.length === 0) {
-        this.logger.debug('No se encontraron BatchUploadJobs stuck');
+        this.logger.log('No se encontraron BatchUploadJobs stuck');
         return;
       }
 
@@ -203,6 +203,71 @@ export class JobRecoveryService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       this.logger.error(`Error en recovery manual de foto ${photoId}: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  // Forzar procesamiento de fotos stuck (para admin)
+  async forceProcessStuckPhotos() {
+    try {
+      this.logger.log('Iniciando procesamiento forzado de fotos stuck');
+
+      // Buscar fotos que están PENDING (independientemente del tiempo)
+      const stuckPhotos = await this.prisma.photo.findMany({
+        where: {
+          status: 'PENDING',
+          cloudinaryId: { not: 'temp' } // Solo fotos que están subidas
+        },
+        select: {
+          id: true,
+          eventId: true,
+          cloudinaryId: true,
+          batchJobId: true,
+          createdAt: true,
+        },
+        take: 100, // Máximo 100 fotos por procesamiento forzado
+      });
+
+      if (stuckPhotos.length === 0) {
+        this.logger.log('No se encontraron fotos stuck para procesar');
+        return { processed: 0, errors: [] };
+      }
+
+      this.logger.log(`Procesamiento forzado: Encontradas ${stuckPhotos.length} fotos stuck`);
+
+      let processedCount = 0;
+      const errors: string[] = [];
+
+      for (const photo of stuckPhotos) {
+        try {
+          await this.queueService.addProcessPhotoJob({
+            photoId: photo.id,
+            eventId: photo.eventId,
+            objectKey: photo.cloudinaryId,
+          }, 30); // Máxima prioridad para procesamiento forzado
+
+          processedCount++;
+          this.logger.log(`Forzado: Re-encolado job para foto ${photo.id}`);
+
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          errors.push(`${photo.id}: ${errorMsg}`);
+          this.logger.error(`Error en procesamiento forzado para foto ${photo.id}: ${errorMsg}`);
+        }
+      }
+
+      this.logger.log(`Procesamiento forzado completado: ${processedCount} fotos re-encoladas, ${errors.length} errores`);
+
+      return {
+        processed: processedCount,
+        total: stuckPhotos.length,
+        errors,
+        timestamp: new Date().toISOString(),
+      };
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      this.logger.error(`Error en procesamiento forzado: ${errorMessage}`, error instanceof Error ? error.stack : undefined);
       throw error;
     }
   }

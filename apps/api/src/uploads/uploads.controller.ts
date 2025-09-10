@@ -114,6 +114,13 @@ export class UploadsController {
     return { data: stats };
   }
 
+  @Post('system/force-process')
+  @Roles(UserRole.ADMIN) // Solo admins pueden forzar procesamiento
+  async forceProcessStuckPhotos(): Promise<ApiResponse> {
+    const result = await this.uploadsService.forceProcessStuckPhotos();
+    return { data: result };
+  }
+
   @Post('photo')
   @Throttle(20, 60)
   @UseInterceptors(

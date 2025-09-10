@@ -46,6 +46,8 @@ export class StorageService {
 
   // Cache para evitar descargar la misma imagen múltiples veces
   private imageBufferCache = new Map<string, Promise<Buffer>>();
+  // Mutex para evitar race conditions en concurrent downloads
+  private downloadMutex = new Map<string, Promise<void>>();
 
   async generateThumbnail(cloudinaryId: string, eventId: string, photoId: string): Promise<string> {
     if (this.provider === 'r2') {
@@ -174,28 +176,76 @@ export class StorageService {
   }
 
   private async getCachedImageBuffer(key: string): Promise<Buffer> {
-    // Evitar descargas duplicadas usando cache de Promises
-    if (!this.imageBufferCache.has(key)) {
-      this.imageBufferCache.set(key, this.getImageBuffer(key));
+    // CRITICAL FIX: Thread-safe concurrent download management
+    
+    // Si ya tenemos el buffer cached, retornarlo inmediatamente
+    if (this.imageBufferCache.has(key)) {
+      return this.imageBufferCache.get(key)!;
+    }
+    
+    // Si ya hay un download en progreso, esperar a que termine
+    if (this.downloadMutex.has(key)) {
+      await this.downloadMutex.get(key)!;
+      // Después de esperar, el buffer debería estar disponible
+      if (this.imageBufferCache.has(key)) {
+        return this.imageBufferCache.get(key)!;
+      }
+    }
+    
+    // CRITICAL: Crear mutex antes de iniciar download
+    let resolveMutex: () => void;
+    const mutexPromise = new Promise<void>(resolve => {
+      resolveMutex = resolve;
+    });
+    this.downloadMutex.set(key, mutexPromise);
+    
+    try {
+      // Solo el primer thread llegará aquí y hará el download
+      this.logger.log(`Iniciando download exclusivo para: ${key}`);
+      const downloadPromise = this.getImageBuffer(key);
+      this.imageBufferCache.set(key, downloadPromise);
+      
+      // Esperar que termine el download
+      const buffer = await downloadPromise;
       
       // Limpiar cache después de 5 minutos para evitar memory leaks
       setTimeout(() => {
         this.imageBufferCache.delete(key);
+        this.logger.debug(`Cache limpiado para: ${key}`);
       }, 5 * 60 * 1000);
+      
+      this.logger.log(`Download completado exitosamente para: ${key} (${buffer.length} bytes)`);
+      return buffer;
+      
+    } finally {
+      // CRITICAL: Siempre liberar el mutex
+      this.downloadMutex.delete(key);
+      resolveMutex!();
     }
-    
-    return this.imageBufferCache.get(key)!;
   }
 
   private async getImageBuffer(key: string): Promise<Buffer> {
-    // Método auxiliar para obtener buffer de imagen desde R2 con retry
+    // ENHANCED: Método auxiliar robusto para descargar imágenes
     let lastError: Error | undefined;
+    const startTime = Date.now();
     
     // Retry hasta 3 veces en caso de errores de red
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const url = await this.r2Service.generateSecureDownloadUrl(key, 300); // 5 minutos (más tiempo)
-        const response = await fetch(url);
+        this.logger.log(`[${key}] Intento ${attempt}/3 - Generando URL firmada...`);
+        
+        // CRITICAL: URL con mayor tiempo de expiración para evitar race conditions
+        const url = await this.r2Service.generateSecureDownloadUrl(key, 900); // 15 minutos
+        
+        this.logger.log(`[${key}] Descargando imagen desde R2...`);
+        const response = await fetch(url, {
+          // ENHANCED: Headers para mejor reliability
+          headers: {
+            'User-Agent': 'Node.js/ImageDownloader',
+          },
+          // CRITICAL: Timeout para evitar hanging requests
+          signal: AbortSignal.timeout(30000) // 30 segundos timeout
+        });
         
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -204,26 +254,61 @@ export class StorageService {
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
         
-        // Validar que el buffer no esté vacío o corrupto
+        // ENHANCED: Validaciones más estrictas
         if (buffer.length < 1000) {
-          throw new Error(`Buffer muy pequeño: ${buffer.length} bytes`);
+          throw new Error(`Buffer muy pequeño: ${buffer.length} bytes - imagen corrupta`);
         }
         
-        this.logger.debug(`Imagen descargada: ${key} (${buffer.length} bytes, intento ${attempt})`);
+        // Validar que sea una imagen válida (magic bytes)
+        const isValidImage = this.validateImageBuffer(buffer);
+        if (!isValidImage) {
+          throw new Error(`Buffer no es una imagen válida para ${key}`);
+        }
+        
+        const downloadTime = Date.now() - startTime;
+        this.logger.log(`[${key}] ✅ Descarga exitosa: ${buffer.length} bytes en ${downloadTime}ms (intento ${attempt})`);
         return buffer;
         
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        this.logger.warn(`Intento ${attempt}/3 fallo para ${key}: ${lastError.message}`);
+        const attemptTime = Date.now() - startTime;
+        this.logger.warn(`[${key}] ❌ Intento ${attempt}/3 falló en ${attemptTime}ms: ${lastError.message}`);
         
         if (attempt < 3) {
-          // Esperar antes del retry (backoff exponencial)
-          await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          // ENHANCED: Backoff exponencial más agresivo para race conditions
+          const backoffMs = Math.min(attempt * 2000, 10000); // Max 10s
+          this.logger.log(`[${key}] Esperando ${backoffMs}ms antes del siguiente intento...`);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
         }
       }
     }
     
-    this.logger.error(`Error descargando imagen ${key} después de 3 intentos:`, lastError);
+    const totalTime = Date.now() - startTime;
+    this.logger.error(`[${key}] 💀 DESCARGA FALLÓ después de 3 intentos en ${totalTime}ms:`, lastError);
     throw lastError || new Error('Error desconocido descargando imagen');
+  }
+  
+  private validateImageBuffer(buffer: Buffer): boolean {
+    // ENHANCED: Validar magic bytes de imágenes comunes
+    if (buffer.length < 8) return false;
+    
+    const header = buffer.subarray(0, 8);
+    
+    // JPEG: FF D8 FF
+    if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) {
+      return true;
+    }
+    
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) {
+      return true;
+    }
+    
+    // WebP: 52 49 46 46 ... 57 45 42 50
+    if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46) {
+      return true;
+    }
+    
+    return false;
   }
 }
