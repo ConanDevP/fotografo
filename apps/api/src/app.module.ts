@@ -1,7 +1,6 @@
 import { Module, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { BullModule } from '@nestjs/bullmq';
 
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -24,19 +23,6 @@ import { ConnectionErrorMiddleware } from './common/middleware/connection-error.
     ThrottlerModule.forRoot({
       ttl: 60000,
       limit: 100,
-    }),
-    BullModule.forRoot({
-      connection: (() => {
-        if (!process.env.REDIS_URL) {
-          throw new Error('REDIS_URL is required! No local Redis allowed.');
-        }
-        const url = new URL(process.env.REDIS_URL);
-        return {
-          host: url.hostname,
-          port: parseInt(url.port) || 6379,
-          password: url.password || undefined,
-        };
-      })(),
     }),
     AuthModule,
     UsersModule,
