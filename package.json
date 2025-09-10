@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Plataforma de fotografía deportiva con detección automática de dorsales",
   "main": "index.js",
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "build": "prisma generate --schema=./apps/api/prisma/schema.prisma && nest build api && nest build worker",
     "format": "prettier --write \"apps/**/*.ts\" \"packages/**/*.ts\"",

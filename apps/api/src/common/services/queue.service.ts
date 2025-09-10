@@ -82,9 +82,25 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async addProcessPhotoJob(job: ProcessPhotoJob, priority = 0) {
+    if (!this.processPhotoQueue) {
+      throw new Error('Process photo queue not initialized');
+    }
+    
+    // Verificar que el job tenga datos válidos
+    if (!job.photoId || !job.eventId || !job.objectKey) {
+      throw new Error(`Job incompleto: ${JSON.stringify(job)}`);
+    }
+    
     return this.processPhotoQueue.add(JOBS.PROCESS_PHOTO, job, {
       priority,
-      delay: 1000, // Small delay to ensure DB transaction is committed
+      delay: 500, // Reducir delay para procesar más rápido
+      removeOnComplete: 100,
+      removeOnFail: 50,
+      attempts: 2, // Retry automático si falla
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
     });
   }
 

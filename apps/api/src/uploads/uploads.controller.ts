@@ -94,6 +94,26 @@ export class UploadsController {
     return { data: status };
   }
 
+  @Post('reprocess/:photoId')
+  async reprocessPhoto(
+    @Param('photoId') photoId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const result = await this.uploadsService.reprocessPhoto(
+      photoId,
+      req.user.id,
+      req.user.role,
+    );
+    return { data: result };
+  }
+
+  @Get('system/stats')
+  @Roles(UserRole.ADMIN) // Solo admins pueden ver stats del sistema
+  async getSystemStats(): Promise<ApiResponse> {
+    const stats = await this.uploadsService.getSystemStats();
+    return { data: stats };
+  }
+
   @Post('photo')
   @Throttle(20, 60)
   @UseInterceptors(

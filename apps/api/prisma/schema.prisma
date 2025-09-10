@@ -236,6 +236,15 @@ model BatchUploadJob {
   totalFiles     Int
   uploadedFiles  Int               @default(0)
   processedFiles Int               @default(0)
+  
+  // Enhanced monitoring: Detailed pipeline tracking
+  watermarkFiles    Int @default(0) @map("watermark_files")    // Photos with watermarks applied
+  geminiFiles       Int @default(0) @map("gemini_files")       // Photos processed through Gemini OCR
+  faceFiles         Int @default(0) @map("face_files")         // Photos processed through facial recognition
+  failedWatermarks  Int @default(0) @map("failed_watermarks")  // Photos that failed watermark step
+  failedGemini      Int @default(0) @map("failed_gemini")      // Photos that failed Gemini OCR step
+  failedFaces       Int @default(0) @map("failed_faces")       // Photos that failed facial recognition step
+  
   ownerId        String            @map("owner_id") @db.Uuid
   eventId        String            @map("event_id") @db.Uuid
   createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
