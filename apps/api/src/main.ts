@@ -1,4 +1,8 @@
-import 'crypto'; // Polyfill para crypto.randomUUID()
+// Polyfill para crypto.randomUUID() requerido por @nestjs/schedule en Node.js v18
+import { randomUUID } from 'crypto';
+if (typeof globalThis.crypto === 'undefined') {
+  globalThis.crypto = { randomUUID } as any;
+}
 import * as dotenv from 'dotenv';
 dotenv.config();
 
