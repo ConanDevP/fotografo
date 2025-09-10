@@ -8,35 +8,36 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email         String   @unique
-  passwordHash  String?  @map("password_hash")
-  name          String?  @map("name")
-  phone         String?  @map("phone")
-  profileImageUrl String? @map("profile_image_url")
-  address       String?  @map("address") // Para fotógrafos principalmente
-  role          UserRole
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String   @unique
+  passwordHash    String?  @map("password_hash")
+  name            String?  @map("name")
+  phone           String?  @map("phone")
+  profileImageUrl String?  @map("profile_image_url")
+  address         String?  @map("address") // Para fotógrafos principalmente
+  role            UserRole
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Photographer profile fields
-  slug            String?   @unique
+  slug            String?  @unique
   bio             String?
   website         String?
   instagram       String?
   facebook        String?
   specialties     String[]
-  experienceYears Int?      @map("experience_years")
+  experienceYears Int?     @map("experience_years")
   location        String?
-  portfolioUrl    String?   @map("portfolio_url")
-  isFeatured      Boolean   @default(false) @map("is_featured")
-  isVerified      Boolean   @default(false) @map("is_verified")
+  portfolioUrl    String?  @map("portfolio_url")
+  isFeatured      Boolean  @default(false) @map("is_featured")
+  isVerified      Boolean  @default(false) @map("is_verified")
 
   // Relations
-  ownedEvents   Event[]  @relation("EventOwner")
-  photographedPhotos Photo[] @relation("PhotoPhotographer")
-  orders        Order[]
-  auditLogs     AuditLog[]
+  ownedEvents        Event[]          @relation("EventOwner")
+  photographedPhotos Photo[]          @relation("PhotoPhotographer")
+  orders             Order[]
+  auditLogs          AuditLog[]
+  BatchUploadJob     BatchUploadJob[]
 
   @@index([slug])
   @@index([role, isFeatured])
@@ -44,25 +45,26 @@ model User {
 }
 
 model Event {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String
-  slug        String   @unique
-  date        DateTime @db.Date
-  location    String?
-  imageUrl    String?  @map("image_url")
-  ownerId     String?  @map("owner_id") @db.Uuid
-  bibRules    Json?    @map("bib_rules")
-  pricing     Json?    @map("pricing")
-  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  slug      String    @unique
+  date      DateTime  @db.Date
+  location  String?
+  imageUrl  String?   @map("image_url")
+  ownerId   String?   @map("owner_id") @db.Uuid
+  bibRules  Json?     @map("bib_rules")
+  pricing   Json?     @map("pricing")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
-  owner            User?              @relation("EventOwner", fields: [ownerId], references: [id])
+  owner            User?             @relation("EventOwner", fields: [ownerId], references: [id])
   photos           Photo[]
   photoBibs        PhotoBib[]
   faceEmbeddings   FaceEmbedding[]
   bibSubscriptions BibSubscription[]
   orders           Order[]
+  BatchUploadJob   BatchUploadJob[]
 
   @@map("events")
 }
@@ -72,7 +74,7 @@ model Photo {
   eventId        String      @map("event_id") @db.Uuid
   photographerId String?     @map("photographer_id") @db.Uuid
   cloudinaryId   String      @map("cloudinary_id")
-  originalUrl    String      @map("original_url") 
+  originalUrl    String      @map("original_url")
   thumbUrl       String?     @map("thumb_url")
   watermarkUrl   String?     @map("watermark_url")
   width          Int?
@@ -82,8 +84,10 @@ model Photo {
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
-  event        Event        @relation(fields: [eventId], references: [id])
-  photographer User?        @relation("PhotoPhotographer", fields: [photographerId], references: [id])
+  event        Event           @relation(fields: [eventId], references: [id])
+  photographer User?           @relation("PhotoPhotographer", fields: [photographerId], references: [id])
+  batchJob     BatchUploadJob? @relation(fields: [batchJobId], references: [id])
+  batchJobId   String?         @map("batch_job_id") @db.Uuid
   bibs         PhotoBib[]
   faces        FaceEmbedding[]
   orderItems   OrderItem[]
@@ -94,16 +98,16 @@ model Photo {
 }
 
 model PhotoBib {
-  id              BigInt  @id @default(autoincrement())
-  photoId         String  @map("photo_id") @db.Uuid
-  eventId         String  @map("event_id") @db.Uuid
-  bib             String
-  confidence      Decimal @db.Decimal(4, 3)
-  bbox            Json?
-  source          String  @default("GEMINI")
-  promptTokens    Int?    @map("prompt_tokens")
-  candidatesTokens Int?   @map("candidates_tokens")
-  totalTokens     Int?    @map("total_tokens")
+  id               BigInt  @id @default(autoincrement())
+  photoId          String  @map("photo_id") @db.Uuid
+  eventId          String  @map("event_id") @db.Uuid
+  bib              String
+  confidence       Decimal @db.Decimal(4, 3)
+  bbox             Json?
+  source           String  @default("GEMINI")
+  promptTokens     Int?    @map("prompt_tokens")
+  candidatesTokens Int?    @map("candidates_tokens")
+  totalTokens      Int?    @map("total_tokens")
 
   // Relations
   photo Photo @relation(fields: [photoId], references: [id], onDelete: Cascade)
@@ -145,11 +149,11 @@ model Order {
 }
 
 model OrderItem {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId    String    @map("order_id") @db.Uuid
-  photoId    String?   @map("photo_id") @db.Uuid
-  itemType   ItemType  @map("item_type")
-  priceCents Int       @map("price_cents")
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId    String   @map("order_id") @db.Uuid
+  photoId    String?  @map("photo_id") @db.Uuid
+  itemType   ItemType @map("item_type")
+  priceCents Int      @map("price_cents")
 
   // Relations
   order Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -216,4 +220,31 @@ enum OrderStatus {
 enum ItemType {
   PHOTO
   PACKAGE
+}
+
+enum BatchUploadStatus {
+  PENDING
+  UPLOADING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model BatchUploadJob {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status         BatchUploadStatus @default(PENDING)
+  totalFiles     Int
+  uploadedFiles  Int               @default(0)
+  processedFiles Int               @default(0)
+  ownerId        String            @map("owner_id") @db.Uuid
+  eventId        String            @map("event_id") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  owner  User    @relation(fields: [ownerId], references: [id])
+  event  Event   @relation(fields: [eventId], references: [id])
+  photos Photo[]
+
+  @@map("batch_upload_jobs")
 }

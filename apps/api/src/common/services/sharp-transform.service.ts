@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as sharp from 'sharp';
+import { createCanvas } from 'canvas';
 import { getErrorMessage, getErrorStack } from '@shared/utils';
 
 type GridOptions = {
@@ -39,131 +40,136 @@ export class SharpTransformService {
   }
 
   // ===================================================
-  // WATERMARK (nombre original) -> líneas diagonales + texto central
+  // WATERMARK - Canvas-based implementation (más estable que SVG)
   // ===================================================
   async generateWatermark(
     imageBuffer: Buffer,
     options: {
-      width?: number;
+      targetWidth?: number;
       quality?: number;
       watermarkText?: string;
-      spacingPct?: number;
-      lineWidthPct?: number;
-      dashPct?: number;
-      lineOpacity?: number;
-      textOpacity?: number;
-      fontFamily?: string;
+      angleDeg?: number;
+      spacingPx?: number;
+      fontPx?: number;
+      fillOpacity?: number;
+      strokeOpacity?: number;
+      strokeWidthPx?: number;
     } = {
-      width: 2000,
+      targetWidth: 2048,
       quality: 85,
       watermarkText: 'fotocorredor.com',
-      spacingPct: 0.09,
-      lineWidthPct: 0.003,
-      dashPct: 0.035,
-      lineOpacity: 0.55,
-      textOpacity: 0.35,
-      fontFamily: 'DejaVu Sans, sans-serif',
+      angleDeg: -32,
+      spacingPx: 48,
+      fontPx: 20,
+      fillOpacity: 0.18,
+      strokeOpacity: 0.35,
+      strokeWidthPx: 1.0,
     }
   ): Promise<Buffer> {
     try {
-      const base = sharp(imageBuffer)
+      // 1) Obtener dimensiones originales primero
+      const originalMeta = await sharp(imageBuffer).metadata();
+      if (!originalMeta.width || !originalMeta.height) {
+        throw new Error('No se pudieron obtener dimensiones originales');
+      }
+
+      // 2) Calcular dimensiones finales después del resize
+      const targetWidth = options.targetWidth ?? 2048;
+      const aspectRatio = originalMeta.width / originalMeta.height;
+      
+      let finalWidth = originalMeta.width;
+      let finalHeight = originalMeta.height;
+      
+      // Aplicar la lógica de resize de Sharp
+      if (originalMeta.width > targetWidth) {
+        finalWidth = targetWidth;
+        finalHeight = Math.round(targetWidth / aspectRatio);
+      }
+      
+      // 3) Crear watermark con dimensiones exactas
+      const watermarkBuffer = await this.createWatermarkOverlay(finalWidth, finalHeight, options);
+
+      // 4) Procesar imagen base y componer
+      const out = await sharp(imageBuffer)
         .rotate()
-        .resize(options.width ?? 2000, null, { fit: 'inside', withoutEnlargement: true });
-  
-      const { width = 0, height = 0 } = await base.metadata();
-      if (!width || !height) throw new Error('No se pudieron obtener dimensiones');
-  
-      const side    = Math.min(width, height);
-      const spacing = Math.max(20, Math.round(side * (options.spacingPct ?? 0.09)));
-      const lineW   = Math.max(1,  Math.round(side * (options.lineWidthPct ?? 0.003)));
-      const dashLen = Math.max(6,  Math.round(side * (options.dashPct ?? 0.035)));
-  
-      // Texto central proporcional
-      const fontSize = Math.max(24, Math.round(side * 0.055));
-      const font     = options.fontFamily ?? 'DejaVu Sans, sans-serif';
-  
-      const lines: string[] = [];
-      const stroke       = `stroke="#FFFFFF" stroke-opacity="${options.lineOpacity ?? 0.55}" stroke-width="${lineW}" stroke-linecap="round"`;
-      const strokeShadow = `stroke="#000000" stroke-opacity="${(options.lineOpacity ?? 0.55) * 0.45}" stroke-width="${lineW + 1.2}" stroke-linecap="round"`;
-  
-      // / (izq-abajo -> der-arriba)
-      for (let o = -height; o <= width; o += spacing) {
-        const x1 = Math.max(0, o);
-        const y1 = Math.max(0, -o);
-        const x2 = Math.min(width, o + height);
-        const y2 = Math.min(height, height - Math.max(0, o + height - width));
-        lines.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${strokeShadow} stroke-dasharray="${dashLen},${dashLen}"/>`);
-        lines.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${stroke}       stroke-dasharray="${dashLen},${dashLen}"/>`);
-      }
-  
-      // \ (izq-arriba -> der-abajo)
-      for (let o = 0; o <= width + height; o += spacing) {
-        const x1 = Math.max(0, o - height);
-        const y1 = Math.max(0, o - width);
-        const x2 = Math.min(width, o);
-        const y2 = Math.min(height, o);
-        lines.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${strokeShadow} stroke-dasharray="${dashLen},${dashLen}"/>`);
-        lines.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${stroke}       stroke-dasharray="${dashLen},${dashLen}"/>`);
-      }
-  
-      const text = options.watermarkText ?? 'fotocorredor.com';
-      const textStroke = Math.max(1, Math.round(fontSize * 0.08));
-      const centerText = `
-        <g transform="translate(${width / 2}, ${height / 2})">
-          <text x="0" y="0"
-                font-family="${font}"
-                font-size="${fontSize}"
-                font-weight="800"
-                text-anchor="middle"
-                dominant-baseline="middle"
-                fill="#FFFFFF" fill-opacity="${options.textOpacity ?? 0.35}"
-                stroke="#000000" stroke-opacity="${(options.textOpacity ?? 0.35) * 0.7}"
-                stroke-width="${textStroke}">
-            ${this.escapeXml(text)}
-          </text>
-        </g>
-      `;
-  
-      // ⚠️ Ojo: hacemos el SVG un pelín más chico para evitar off-by-one
-      const svgW = Math.max(1, width  - 2);
-      const svgH = Math.max(1, height - 2);
-  
-      const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}">
-          <g>${lines.join('')}</g>
-          ${centerText}
-        </svg>
-      `;
-  
-      // 1) Rasteriza SIN density (cuando hay width/height en px no hace falta)
-      let overlay = await sharp(Buffer.from(svg))
-        .png()
-        .toBuffer();
-  
-      // 2) Clamp defensivo por si el raster quedara 1–2 px más grande
-      const om = await sharp(overlay).metadata();
-      if ((om.width ?? Infinity) > width || (om.height ?? Infinity) > height) {
-        overlay = await sharp(overlay)
-          .resize(width, height, { fit: 'inside', withoutEnlargement: true })
-          .toBuffer();
-      }
-  
-      const out = await base
-        .composite([{ input: overlay, left: 0, top: 0, blend: 'over' }])
+        .resize(targetWidth, null, { fit: 'inside', withoutEnlargement: true })
+        .composite([{ input: watermarkBuffer, blend: 'over' }])
         .jpeg({ quality: options.quality ?? 85 })
         .toBuffer();
   
-      this.logger.debug(`Watermark (grid+center) OK (${out.length} bytes)`);
+      this.logger.debug(`Watermark (Canvas-based) OK (${out.length} bytes)`);
       return out;
     } catch (e) {
       this.logger.error(`Watermark error: ${getErrorMessage(e)}`, getErrorStack(e));
-      // Fallback sin watermark
+      // Fallback: imagen sin watermark
       return sharp(imageBuffer)
         .rotate()
-        .resize(options.width ?? 2000, null, { fit: 'inside', withoutEnlargement: true })
+        .resize(options.targetWidth ?? 2048, null, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: options.quality ?? 85 })
         .toBuffer();
     }
+  }
+
+  private async createWatermarkOverlay(
+    width: number, 
+    height: number, 
+    options: any
+  ): Promise<Buffer> {
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Configuración de texto
+    const fontPx = Math.max(10, Math.round(options.fontPx ?? 20));
+    const text = options.watermarkText ?? 'fotocorredor.com';
+    const spacing = Math.max(12, Math.round(options.spacingPx ?? 48));
+    const angle = (options.angleDeg ?? -32) * Math.PI / 180; // Convertir a radianes
+
+    ctx.font = `bold ${fontPx}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+
+    // Colores con opacidad
+    const fillOpacity = Math.min(1, Math.max(0, options.fillOpacity ?? 0.18));
+    const strokeOpacity = Math.min(1, Math.max(0, options.strokeOpacity ?? 0.35));
+    const strokeWidth = Math.max(0.5, options.strokeWidthPx ?? 1.0);
+
+    ctx.fillStyle = `rgba(255, 255, 255, ${fillOpacity})`;
+    ctx.strokeStyle = `rgba(0, 0, 0, ${strokeOpacity})`;
+    ctx.lineWidth = strokeWidth;
+
+    // Calcular dimensiones rotadas para cubrir toda la imagen
+    const diagonal = Math.sqrt(width * width + height * height);
+    const textWidth = ctx.measureText(text).width;
+    const textSpacing = textWidth + 20; // Espaciado horizontal entre repeticiones
+
+    // Guardar estado y aplicar transformación
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    ctx.rotate(angle);
+
+    // Dibujar patrón de texto
+    const startX = -diagonal;
+    const endX = diagonal;
+    const startY = -diagonal;
+    const endY = diagonal;
+
+    for (let y = startY; y < endY; y += spacing) {
+      for (let x = startX; x < endX; x += textSpacing) {
+        // Dibujar borde (stroke) primero
+        if (strokeOpacity > 0) {
+          ctx.strokeText(text, x, y);
+        }
+        // Luego el relleno
+        if (fillOpacity > 0) {
+          ctx.fillText(text, x, y);
+        }
+      }
+    }
+
+    ctx.restore();
+
+    // Convertir canvas a buffer PNG
+    return canvas.toBuffer('image/png');
   }
   
 
@@ -236,13 +242,4 @@ export class SharpTransformService {
     }
   }
 
-  // -------------------- Helpers SVG --------------------
-  private escapeXml(text: string): string {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
-  }
 }

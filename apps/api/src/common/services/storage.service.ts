@@ -44,6 +44,9 @@ export class StorageService {
     return this.cloudinaryService.uploadPhoto(file, eventId, photoId);
   }
 
+  // Cache para evitar descargar la misma imagen múltiples veces
+  private imageBufferCache = new Map<string, Promise<Buffer>>();
+
   async generateThumbnail(cloudinaryId: string, eventId: string, photoId: string): Promise<string> {
     if (this.provider === 'r2') {
       // Con R2, descargamos la imagen original, generamos thumbnail con Sharp y subimos
@@ -51,8 +54,8 @@ export class StorageService {
         const originalKey = cloudinaryId; // En R2, cloudinaryId es el key
         const thumbnailKey = `events/${eventId}/thumb/${photoId}.jpg`;
         
-        // Obtenemos la imagen original
-        const originalBuffer = await this.getImageBuffer(originalKey);
+        // Obtenemos la imagen original (con cache)
+        const originalBuffer = await this.getCachedImageBuffer(originalKey);
         
         // Generamos thumbnail con Sharp
         const thumbnailBuffer = await this.sharpService.generateThumbnail(originalBuffer);
@@ -77,8 +80,8 @@ export class StorageService {
         const originalKey = cloudinaryId;
         const watermarkKey = `events/${eventId}/wm/${photoId}.jpg`;
         
-        // Obtenemos la imagen original
-        const originalBuffer = await this.getImageBuffer(originalKey);
+        // Obtenemos la imagen original (con cache)
+        const originalBuffer = await this.getCachedImageBuffer(originalKey);
         
         // Generamos watermark con Sharp
         const watermarkBuffer = await this.sharpService.generateWatermark(originalBuffer);
@@ -170,16 +173,57 @@ export class StorageService {
     return this.cloudinaryService.deleteImage(publicId);
   }
 
-  private async getImageBuffer(key: string): Promise<Buffer> {
-    // Método auxiliar para obtener buffer de imagen desde R2
-    const url = await this.r2Service.generateSecureDownloadUrl(key, 60); // 1 minuto para uso interno
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`Error descargando imagen: ${response.statusText}`);
+  private async getCachedImageBuffer(key: string): Promise<Buffer> {
+    // Evitar descargas duplicadas usando cache de Promises
+    if (!this.imageBufferCache.has(key)) {
+      this.imageBufferCache.set(key, this.getImageBuffer(key));
+      
+      // Limpiar cache después de 5 minutos para evitar memory leaks
+      setTimeout(() => {
+        this.imageBufferCache.delete(key);
+      }, 5 * 60 * 1000);
     }
     
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    return this.imageBufferCache.get(key)!;
+  }
+
+  private async getImageBuffer(key: string): Promise<Buffer> {
+    // Método auxiliar para obtener buffer de imagen desde R2 con retry
+    let lastError: Error | undefined;
+    
+    // Retry hasta 3 veces en caso de errores de red
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const url = await this.r2Service.generateSecureDownloadUrl(key, 300); // 5 minutos (más tiempo)
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        // Validar que el buffer no esté vacío o corrupto
+        if (buffer.length < 1000) {
+          throw new Error(`Buffer muy pequeño: ${buffer.length} bytes`);
+        }
+        
+        this.logger.debug(`Imagen descargada: ${key} (${buffer.length} bytes, intento ${attempt})`);
+        return buffer;
+        
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        this.logger.warn(`Intento ${attempt}/3 fallo para ${key}: ${lastError.message}`);
+        
+        if (attempt < 3) {
+          // Esperar antes del retry (backoff exponencial)
+          await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+        }
+      }
+    }
+    
+    this.logger.error(`Error descargando imagen ${key} después de 3 intentos:`, lastError);
+    throw lastError || new Error('Error desconocido descargando imagen');
   }
 }
