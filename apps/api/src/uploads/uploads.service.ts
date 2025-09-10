@@ -1,10 +1,11 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
 import { FILE_CONSTRAINTS, ERROR_CODES } from '@shared/constants';
 import { UserRole } from '@shared/types';
 import { getErrorMessage } from '@shared/utils';
+import { InitiateBatchUploadDto } from './dto/initiate-batch-upload.dto';
 
 
 @Injectable()
@@ -15,6 +16,113 @@ export class UploadsService {
     private queueService: QueueService,
   ) {}
 
+  async initiateBatchUpload(initiateDto: InitiateBatchUploadDto, ownerId: string) {
+    // Optional: Check if event exists
+    const event = await this.prisma.event.findUnique({ where: { id: initiateDto.eventId } });
+    if (!event) {
+      throw new NotFoundException({
+        code: ERROR_CODES.EVENT_NOT_FOUND,
+        message: 'Evento no encontrado',
+      });
+    }
+
+    const job = await this.prisma.batchUploadJob.create({
+      data: {
+        eventId: initiateDto.eventId,
+        ownerId: ownerId,
+        totalFiles: initiateDto.totalFiles,
+        status: 'PENDING',
+      },
+    });
+
+    return job;
+  }
+
+  async appendToBatchUpload(
+    jobId: string,
+    files: Express.Multer.File[],
+    userId: string,
+    userRole: UserRole,
+  ) {
+    const job = await this.prisma.batchUploadJob.findUnique({ where: { id: jobId } });
+    if (!job) {
+      throw new NotFoundException({ code: ERROR_CODES.JOB_NOT_FOUND, message: 'Lote de subida no encontrado' });
+    }
+
+    if (job.ownerId !== userId) {
+      throw new ForbiddenException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'No tienes permisos para añadir archivos a este lote',
+      });
+    }
+
+    if (job.status === 'COMPLETED' || job.status === 'FAILED') {
+        throw new BadRequestException({ code: ERROR_CODES.JOB_COMPLETED, message: 'Este lote de subida ya ha sido completado o ha fallado.' });
+    }
+
+    // Set status to uploading if it's the first chunk
+    if (job.status === 'PENDING') {
+        await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'UPLOADING' } });
+    }
+
+    const results = [];
+    const errors = [];
+
+    const chunkPromises = files.map(async (file) => {
+      try {
+        const result = await this.uploadPhoto(file, job.eventId, userId, userRole, { batchJobId: jobId });
+        return { success: true, result, fileName: file.originalname };
+      } catch (error) {
+        return {
+          success: false,
+          error: {
+            fileName: file.originalname,
+            error: getErrorMessage(error),
+          },
+        };
+      }
+    });
+
+    const chunkResults = await Promise.all(chunkPromises);
+
+    chunkResults.forEach(r => (r.success ? results.push(r.result) : errors.push(r.error)));
+
+    // Update uploaded files count
+    const updatedJob = await this.prisma.batchUploadJob.update({
+        where: { id: jobId },
+        data: { uploadedFiles: { increment: results.length } },
+    });
+
+    // If all files are uploaded, mark as processing
+    if (updatedJob.uploadedFiles >= updatedJob.totalFiles) {
+        await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'PROCESSING' } });
+    }
+
+    return {
+      successful: results,
+      errors,
+      totalInChunk: files.length,
+      jobStatus: updatedJob
+    };
+  }
+
+  async getBatchUploadStatus(jobId: string, userId: string) {
+    const job = await this.prisma.batchUploadJob.findUnique({ where: { id: jobId } });
+
+    if (!job) {
+      throw new NotFoundException({ code: ERROR_CODES.JOB_NOT_FOUND, message: 'Lote de subida no encontrado' });
+    }
+
+    if (job.ownerId !== userId) {
+      throw new ForbiddenException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'No tienes permisos para ver el estado de este lote',
+      });
+    }
+
+    return job;
+  }
+
   async uploadPhoto(
     file: Express.Multer.File,
     eventId: string,
@@ -22,6 +130,7 @@ export class UploadsService {
     userRole: UserRole,
     metadata?: {
       takenAt?: string;
+      batchJobId?: string;
     },
   ) {
     // Validate file
@@ -52,6 +161,7 @@ export class UploadsService {
       data: {
         eventId,
         photographerId: userId,
+        batchJobId: metadata?.batchJobId, // Associate with batch job
         cloudinaryId: 'temp', // Will be updated after upload
         originalUrl: 'temp',
         takenAt: metadata?.takenAt ? new Date(metadata.takenAt) : null,
@@ -104,6 +214,7 @@ export class UploadsService {
     }
   }
 
+  /*
   async uploadPhotoBatch(
     files: Express.Multer.File[],
     eventId: string,
@@ -165,6 +276,7 @@ export class UploadsService {
       errorCount: errors.length,
     };
   }
+  */
 
   private validateFile(file: Express.Multer.File) {
     if (!file) {

@@ -131,6 +131,28 @@ export class ProcessPhotoProcessor extends WorkerHost {
         data: { status: 'PROCESSED' },
       });
 
+      // Update processedFiles count in BatchUploadJob
+      const updatedPhoto = await this.prisma.photo.findUnique({
+        where: { id: photoId },
+        select: { batchJobId: true }, // Only fetch batchJobId
+      });
+
+      if (updatedPhoto?.batchJobId) {
+        const batchJob = await this.prisma.batchUploadJob.update({
+          where: { id: updatedPhoto.batchJobId },
+          data: { processedFiles: { increment: 1 } },
+        });
+
+        // Check if all files in the batch job are processed
+        if (batchJob.processedFiles >= batchJob.totalFiles) {
+          await this.prisma.batchUploadJob.update({
+            where: { id: batchJob.id },
+            data: { status: 'COMPLETED' },
+          });
+          this.logger.log(`Batch job ${batchJob.id} completado.`);
+        }
+      }
+
       this.logger.log(`Foto ${photoId} procesada exitosamente`);
 
     } catch (error) {
