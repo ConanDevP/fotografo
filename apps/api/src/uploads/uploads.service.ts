@@ -450,6 +450,28 @@ export class UploadsService {
     }
   }
 
+  async forceProcessStuckPhotos() {
+    try {
+      // Delegar a JobRecoveryService que ya tiene esta funcionalidad
+      const result = await this.jobRecoveryService.forceProcessStuckPhotos();
+      
+      this.logger.log(`Procesamiento forzado iniciado: ${result.processed} fotos re-encoladas`);
+      
+      return {
+        message: 'Procesamiento forzado iniciado',
+        photosReprocessed: result.processed,
+        details: result
+      };
+    } catch (error) {
+      this.logger.error(`Error en procesamiento forzado: ${getErrorMessage(error)}`);
+      throw new BadRequestException({
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: 'Error iniciando procesamiento forzado',
+        details: getErrorMessage(error),
+      });
+    }
+  }
+
   /*
   async uploadPhotoBatch(
     files: Express.Multer.File[],

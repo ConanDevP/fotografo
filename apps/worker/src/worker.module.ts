@@ -39,6 +39,10 @@ import { QUEUES } from '@shared/constants';
         };
         return config;
       })(),
+      defaultJobOptions: {
+        removeOnComplete: 100,
+        removeOnFail: 50,
+      },
     }),
     BullModule.registerQueue(
       { name: QUEUES.PROCESS_PHOTO },
