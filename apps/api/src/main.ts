@@ -1,3 +1,4 @@
+import 'crypto'; // Polyfill para crypto.randomUUID()
 import * as dotenv from 'dotenv';
 dotenv.config();
 
