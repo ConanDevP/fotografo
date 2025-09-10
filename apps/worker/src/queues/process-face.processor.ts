@@ -70,7 +70,25 @@ export class ProcessFaceProcessor extends WorkerHost {
       job.updateProgress(75);
       this.logger.log(`Saved ${faceEmbeddingData.length} face embeddings for photo ${photoId}`);
 
-      // Step 3: Update job progress and complete
+      // Step 3: Update BatchUploadJob face processing counter
+      job.updateProgress(85);
+      const updatedPhoto = await this.prisma.photo.findUnique({
+        where: { id: photoId },
+        select: { batchJobId: true },
+      });
+
+      if (updatedPhoto?.batchJobId) {
+        await this.prisma.batchUploadJob.update({
+          where: { id: updatedPhoto.batchJobId },
+          data: { 
+            faceFiles: { increment: 1 },
+            updatedAt: new Date()
+          },
+        });
+        this.logger.debug(`Face processing completed for photo ${photoId}, batch job updated`);
+      }
+
+      // Step 4: Complete job
       job.updateProgress(100);
       this.logger.log(`Face processing completed for photo ${photoId}`);
 
@@ -78,6 +96,27 @@ export class ProcessFaceProcessor extends WorkerHost {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(`Error processing faces for photo ${photoId}: ${errorMessage}`, errorStack);
+
+      // Update failed faces counter in BatchUploadJob
+      try {
+        const updatedPhoto = await this.prisma.photo.findUnique({
+          where: { id: photoId },
+          select: { batchJobId: true },
+        });
+
+        if (updatedPhoto?.batchJobId) {
+          await this.prisma.batchUploadJob.update({
+            where: { id: updatedPhoto.batchJobId },
+            data: { 
+              failedFaces: { increment: 1 },
+              updatedAt: new Date()
+            },
+          });
+          this.logger.debug(`Face processing failed for photo ${photoId}, batch job updated with failure`);
+        }
+      } catch (updateError) {
+        this.logger.warn(`Failed to update batch job after face processing error: ${updateError instanceof Error ? updateError.message : 'Unknown error'}`);
+      }
 
       // Don't throw error - face processing failure shouldn't fail the entire photo processing
       // The photo can still be searchable by bib number

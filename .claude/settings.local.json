@@ -17,7 +17,8 @@
       "Bash(curl:*)",
       "Bash(grep:*)",
       "Bash(find:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(redis-cli:*)"
     ],
     "deny": [],
     "ask": []

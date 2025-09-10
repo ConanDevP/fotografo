@@ -7,6 +7,7 @@ import { SharpTransformService } from '../common/services/sharp-transform.servic
 import { StorageService } from '../common/services/storage.service';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
+import { JobRecoveryService } from '../common/services/job-recovery.service';
 
 @Module({
   controllers: [UploadsController],
@@ -17,7 +18,8 @@ import { QueueService } from '../common/services/queue.service';
     SharpTransformService, 
     StorageService, 
     PrismaService, 
-    QueueService
+    QueueService,
+    JobRecoveryService,
   ],
   exports: [UploadsService],
 })

@@ -1,7 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
+import { JobRecoveryService } from '../common/services/job-recovery.service';
 import { FILE_CONSTRAINTS, ERROR_CODES } from '@shared/constants';
 import { UserRole } from '@shared/types';
 import { getErrorMessage } from '@shared/utils';
@@ -10,10 +11,13 @@ import { InitiateBatchUploadDto } from './dto/initiate-batch-upload.dto';
 
 @Injectable()
 export class UploadsService {
+  private readonly logger = new Logger(UploadsService.name);
+  
   constructor(
     private prisma: PrismaService,
     private storageService: StorageService,
     private queueService: QueueService,
+    private jobRecoveryService: JobRecoveryService,
   ) {}
 
   async initiateBatchUpload(initiateDto: InitiateBatchUploadDto, ownerId: string) {
@@ -185,12 +189,35 @@ export class UploadsService {
       });
 
 
-      // Enqueue photo for processing
-      await this.queueService.addProcessPhotoJob({
-        photoId: updatedPhoto.id,
-        eventId: eventId,
-        objectKey: uploadResult.cloudinaryId,
-      });
+      // Enqueue photo for processing with retry
+      try {
+        await this.queueService.addProcessPhotoJob({
+          photoId: updatedPhoto.id,
+          eventId: eventId,
+          objectKey: uploadResult.cloudinaryId,
+        });
+        
+        this.logger.log(`Job encolado para foto ${updatedPhoto.id}`);
+      } catch (error) {
+        this.logger.error(`Error encolando job para foto ${updatedPhoto.id}: ${getErrorMessage(error)}`);
+        
+        // Retry inmediato una vez
+        try {
+          await this.queueService.addProcessPhotoJob({
+            photoId: updatedPhoto.id,
+            eventId: eventId,
+            objectKey: uploadResult.cloudinaryId,
+          });
+          this.logger.log(`Job re-encolado exitosamente para foto ${updatedPhoto.id}`);
+        } catch (retryError) {
+          this.logger.error(`FALLÓ retry para foto ${updatedPhoto.id}: ${getErrorMessage(retryError)}`);
+          // No fallar la subida por esto, pero marcar foto como fallida
+          await this.prisma.photo.update({
+            where: { id: updatedPhoto.id },
+            data: { status: 'FAILED' }
+          });
+        }
+      }
 
       
       return {
@@ -210,6 +237,215 @@ export class UploadsService {
         code: ERROR_CODES.UPLOAD_FAILED,
         message: 'Error al subir la foto',
         details: getErrorMessage(error),
+      });
+    }
+  }
+
+  async reprocessPhoto(photoId: string, userId: string, userRole: UserRole) {
+    // Buscar foto
+    const photo = await this.prisma.photo.findUnique({
+      where: { id: photoId },
+      include: { event: true }
+    });
+
+    if (!photo) {
+      throw new NotFoundException({
+        code: ERROR_CODES.PHOTO_NOT_FOUND,
+        message: 'Foto no encontrada',
+      });
+    }
+
+    // Verificar permisos
+    if (userRole !== UserRole.ADMIN && photo.event.ownerId !== userId) {
+      throw new BadRequestException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'No tienes permisos para reprocesar esta foto',
+      });
+    }
+
+    // Marcar como pendiente y re-encolar
+    await this.prisma.photo.update({
+      where: { id: photoId },
+      data: { status: 'PENDING' }
+    });
+
+    try {
+      await this.queueService.addProcessPhotoJob({
+        photoId: photo.id,
+        eventId: photo.eventId,
+        objectKey: photo.cloudinaryId,
+      }, 10); // Alta prioridad
+      
+      this.logger.log(`Foto ${photoId} re-encolada para reprocesamiento`);
+      
+      return { message: 'Foto encolada para reprocesamiento', photoId };
+    } catch (error) {
+      this.logger.error(`Error re-encolando foto ${photoId}: ${getErrorMessage(error)}`);
+      throw new BadRequestException({
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: 'Error encolando foto para reprocesamiento',
+      });
+    }
+  }
+
+  async getSystemStats() {
+    try {
+      // Obtener estadísticas de recovery
+      const recoveryStats = await this.jobRecoveryService.getRecoveryStats();
+
+      // Estadísticas adicionales del sistema
+      const [activeJobs, recentBatches, photosByStatus] = await Promise.all([
+        // BatchJobs activos con estadísticas detalladas del pipeline
+        this.prisma.batchUploadJob.findMany({
+          where: {
+            status: { in: ['PENDING', 'UPLOADING', 'PROCESSING'] }
+          },
+          select: {
+            id: true,
+            status: true,
+            totalFiles: true,
+            uploadedFiles: true,
+            processedFiles: true,
+            watermarkFiles: true,
+            geminiFiles: true,
+            faceFiles: true,
+            failedWatermarks: true,
+            failedGemini: true,
+            failedFaces: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        }),
+
+        // BatchJobs recientes (últimas 24 horas) con estadísticas del pipeline
+        this.prisma.batchUploadJob.findMany({
+          where: {
+            createdAt: {
+              gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
+            }
+          },
+          select: {
+            id: true,
+            status: true,
+            totalFiles: true,
+            processedFiles: true,
+            watermarkFiles: true,
+            geminiFiles: true,
+            faceFiles: true,
+            failedWatermarks: true,
+            failedGemini: true,
+            failedFaces: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        }),
+
+        // Fotos por estado
+        this.prisma.photo.groupBy({
+          by: ['status'],
+          where: {
+            createdAt: {
+              gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
+            }
+          },
+          _count: {
+            id: true
+          }
+        })
+      ]);
+
+      // Calcular estadísticas de performance con métricas detalladas del pipeline
+      const batchStats = recentBatches.reduce((acc, batch) => {
+        acc.total += 1;
+        acc.totalFiles += batch.totalFiles;
+        acc.processedFiles += batch.processedFiles;
+        
+        // Pipeline stats
+        acc.watermarkFiles += batch.watermarkFiles;
+        acc.geminiFiles += batch.geminiFiles;
+        acc.faceFiles += batch.faceFiles;
+        acc.failedWatermarks += batch.failedWatermarks;
+        acc.failedGemini += batch.failedGemini;
+        acc.failedFaces += batch.failedFaces;
+        
+        if (batch.status === 'COMPLETED') acc.completed += 1;
+        else if (batch.status === 'FAILED') acc.failed += 1;
+        else acc.active += 1;
+
+        return acc;
+      }, { 
+        total: 0, 
+        completed: 0, 
+        failed: 0, 
+        active: 0, 
+        totalFiles: 0, 
+        processedFiles: 0,
+        watermarkFiles: 0,
+        geminiFiles: 0,
+        faceFiles: 0,
+        failedWatermarks: 0,
+        failedGemini: 0,
+        failedFaces: 0
+      });
+
+      // Convertir photosByStatus a objeto
+      const statusCounts = photosByStatus.reduce((acc, item) => {
+        acc[item.status] = item._count.id;
+        return acc;
+      }, {} as Record<string, number>);
+
+      return {
+        recovery: recoveryStats,
+        batches: {
+          active: activeJobs,
+          stats24h: {
+            total: batchStats.total,
+            completed: batchStats.completed,
+            failed: batchStats.failed,
+            active: batchStats.active,
+            totalFiles: batchStats.totalFiles,
+            processedFiles: batchStats.processedFiles,
+            successRate: batchStats.total > 0 ? ((batchStats.completed / batchStats.total) * 100).toFixed(1) : '0.0',
+          }
+        },
+        pipeline: {
+          watermarks: {
+            processed: batchStats.watermarkFiles,
+            failed: batchStats.failedWatermarks,
+            successRate: batchStats.totalFiles > 0 ? (((batchStats.watermarkFiles) / batchStats.totalFiles) * 100).toFixed(1) : '0.0',
+          },
+          gemini: {
+            processed: batchStats.geminiFiles,
+            failed: batchStats.failedGemini,
+            successRate: batchStats.watermarkFiles > 0 ? ((batchStats.geminiFiles / batchStats.watermarkFiles) * 100).toFixed(1) : '0.0',
+          },
+          faces: {
+            processed: batchStats.faceFiles,
+            failed: batchStats.failedFaces,
+            successRate: batchStats.geminiFiles > 0 ? ((batchStats.faceFiles / batchStats.geminiFiles) * 100).toFixed(1) : '0.0',
+          },
+          overall: {
+            totalSteps: batchStats.totalFiles * 3, // 3 steps per photo
+            completedSteps: batchStats.watermarkFiles + batchStats.geminiFiles + batchStats.faceFiles,
+            failedSteps: batchStats.failedWatermarks + batchStats.failedGemini + batchStats.failedFaces,
+            efficiency: batchStats.totalFiles > 0 ? (((batchStats.watermarkFiles + batchStats.geminiFiles + batchStats.faceFiles) / (batchStats.totalFiles * 3)) * 100).toFixed(1) : '0.0',
+          }
+        },
+        photos: {
+          statusCounts,
+          total24h: Object.values(statusCounts).reduce((a, b) => a + b, 0),
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+    } catch (error) {
+      this.logger.error(`Error obteniendo estadísticas del sistema: ${getErrorMessage(error)}`);
+      throw new BadRequestException({
+        code: ERROR_CODES.INTERNAL_ERROR,
+        message: 'Error obteniendo estadísticas del sistema',
       });
     }
   }

@@ -27,8 +27,9 @@ export class ProcessPhotoProcessor extends WorkerHost {
 
   async process(job: Job<ProcessPhotoJob>): Promise<void> {
     const { photoId, eventId, objectKey } = job.data;
+    const startTime = Date.now();
     
-    this.logger.log(`Procesando foto ${photoId} para evento ${eventId}`);
+    this.logger.log(`[Job ${job.id}] Iniciando procesamiento de foto ${photoId} para evento ${eventId}`);
 
     try {
       // Get photo and event data
@@ -43,20 +44,29 @@ export class ProcessPhotoProcessor extends WorkerHost {
 
       // Step 1: Generate image derivatives (thumbnail, watermark)
       job.updateProgress(25);
-      const derivatives = await this.imagesService.generateDerivatives(
-        objectKey, 
-        eventId, 
-        photoId
-      );
+      let watermarkSuccess = false;
+      try {
+        const derivatives = await this.imagesService.generateDerivatives(
+          objectKey, 
+          eventId, 
+          photoId
+        );
 
-      // Update photo with derivative URLs
-      await this.prisma.photo.update({
-        where: { id: photoId },
-        data: {
-          thumbUrl: derivatives.thumbUrl,
-          watermarkUrl: derivatives.watermarkUrl,
-        },
-      });
+        // Update photo with derivative URLs
+        await this.prisma.photo.update({
+          where: { id: photoId },
+          data: {
+            thumbUrl: derivatives.thumbUrl,
+            watermarkUrl: derivatives.watermarkUrl,
+          },
+        });
+        
+        watermarkSuccess = true;
+        this.logger.debug(`[Job ${job.id}] Watermark generada exitosamente para foto ${photoId}`);
+      } catch (error) {
+        this.logger.error(`[Job ${job.id}] Error generando watermark para foto ${photoId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Continue processing, but mark watermark as failed
+      }
 
       // Step 2: Get optimized image for OCR
       job.updateProgress(40);
@@ -64,15 +74,24 @@ export class ProcessPhotoProcessor extends WorkerHost {
 
       // Step 3: Perform OCR with Gemini
       job.updateProgress(60);
-      const ocrResult = await this.ocrService.detectBibs(
-        ocrImageUrl,
-        event.bibRules as any,
-        'flash' // Use flash model by default
-      );
+      let geminiSuccess = false;
+      let ocrResult: any;
+      try {
+        ocrResult = await this.ocrService.detectBibs(
+          ocrImageUrl,
+          event.bibRules as any,
+          'flash' // Use flash model by default
+        );
+        geminiSuccess = true;
+        this.logger.debug(`[Job ${job.id}] Gemini OCR procesado exitosamente para foto ${photoId}, ${ocrResult.bibs?.length || 0} dorsales detectados`);
+      } catch (error) {
+        this.logger.error(`[Job ${job.id}] Error en Gemini OCR para foto ${photoId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        ocrResult = { bibs: [] }; // Set empty result to continue processing
+      }
 
       // Step 4: Save detected bibs to database
       job.updateProgress(70);
-      if (ocrResult.bibs.length > 0) {
+      if (ocrResult.bibs && ocrResult.bibs.length > 0) {
         await this.prisma.photoBib.createMany({
           data: ocrResult.bibs.map(bib => ({
             photoId,
@@ -97,7 +116,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
         this.logger.log(`Skipping bib organization for now - photos are already accessible via search`);
 
         // Step 6: Check for subscriptions and send notifications
-        const uniqueBibs = [...new Set(ocrResult.bibs.map(b => b.value))];
+        const uniqueBibs: string[] = [...new Set(ocrResult.bibs.map((b: { value: string }) => b.value) as string[])];
         const subscriptions = await this.prisma.bibSubscription.findMany({
           where: {
             eventId,
@@ -115,13 +134,15 @@ export class ProcessPhotoProcessor extends WorkerHost {
 
       // Step 7: Process facial recognition (parallel to OCR)
       job.updateProgress(85);
+      let faceProcessingEnqueued = false;
       try {
         await this.enqueueFaceProcessing(photoId, eventId, ocrImageUrl);
-        this.logger.log(`Face processing enqueued for photo ${photoId}`);
+        faceProcessingEnqueued = true;
+        this.logger.log(`[Job ${job.id}] Face processing enqueued for photo ${photoId}`);
       } catch (error) {
         // Don't fail the entire job if face processing fails
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.warn(`Failed to enqueue face processing for photo ${photoId}: ${errorMessage}`);
+        this.logger.warn(`[Job ${job.id}] Failed to enqueue face processing for photo ${photoId}: ${errorMessage}`);
       }
 
       // Step 8: Mark photo as processed
@@ -131,17 +152,44 @@ export class ProcessPhotoProcessor extends WorkerHost {
         data: { status: 'PROCESSED' },
       });
 
-      // Update processedFiles count in BatchUploadJob
+      // Update processedFiles count and pipeline tracking in BatchUploadJob
       const updatedPhoto = await this.prisma.photo.findUnique({
         where: { id: photoId },
         select: { batchJobId: true }, // Only fetch batchJobId
       });
 
       if (updatedPhoto?.batchJobId) {
+        // Prepare pipeline increment data
+        const incrementData: any = { 
+          processedFiles: { increment: 1 },
+          updatedAt: new Date() // Actualizar timestamp para recovery
+        };
+
+        // Track successful pipeline steps
+        if (watermarkSuccess) {
+          incrementData.watermarkFiles = { increment: 1 };
+        } else {
+          incrementData.failedWatermarks = { increment: 1 };
+        }
+
+        if (geminiSuccess) {
+          incrementData.geminiFiles = { increment: 1 };
+        } else {
+          incrementData.failedGemini = { increment: 1 };
+        }
+
+        // Note: Face processing success will be tracked in the face processor
+        // For now, we just track that it was enqueued
+        if (!faceProcessingEnqueued) {
+          incrementData.failedFaces = { increment: 1 };
+        }
+
         const batchJob = await this.prisma.batchUploadJob.update({
           where: { id: updatedPhoto.batchJobId },
-          data: { processedFiles: { increment: 1 } },
+          data: incrementData,
         });
+
+        this.logger.debug(`[Job ${job.id}] BatchJob ${batchJob.id} pipeline updated: W:${watermarkSuccess ? '+1' : 'fail'}, G:${geminiSuccess ? '+1' : 'fail'}, F:${faceProcessingEnqueued ? 'enq' : 'fail'}`);
 
         // Check if all files in the batch job are processed
         if (batchJob.processedFiles >= batchJob.totalFiles) {
@@ -149,16 +197,21 @@ export class ProcessPhotoProcessor extends WorkerHost {
             where: { id: batchJob.id },
             data: { status: 'COMPLETED' },
           });
-          this.logger.log(`Batch job ${batchJob.id} completado.`);
+          this.logger.log(`[Job ${job.id}] Batch job ${batchJob.id} completado (${batchJob.processedFiles}/${batchJob.totalFiles})`);
+        } else {
+          this.logger.debug(`[Job ${job.id}] Batch job ${batchJob.id} progreso: ${batchJob.processedFiles}/${batchJob.totalFiles}`);
         }
       }
 
-      this.logger.log(`Foto ${photoId} procesada exitosamente`);
+      const processingTime = Date.now() - startTime;
+      this.logger.log(`[Job ${job.id}] Foto ${photoId} procesada exitosamente en ${processingTime}ms`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       const errorStack = error instanceof Error ? error.stack : undefined;
-      this.logger.error(`Error procesando foto ${photoId}: ${errorMessage}`, errorStack);
+      const processingTime = Date.now() - startTime;
+      
+      this.logger.error(`[Job ${job.id}] Error procesando foto ${photoId} después de ${processingTime}ms: ${errorMessage}`, errorStack);
 
       // Mark photo as failed
       await this.prisma.photo.update({
