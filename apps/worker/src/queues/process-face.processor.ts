@@ -7,7 +7,9 @@ import { PythonFaceApiService } from '../services/python-face-api.service';
 import { ProcessFaceJob } from '@shared/types';
 import { QUEUES, FACE_RECOGNITION } from '@shared/constants';
 
-@Processor(QUEUES.PROCESS_FACE)
+@Processor(QUEUES.PROCESS_FACE, {
+  concurrency: parseInt(process.env.FACE_WORKER_CONCURRENCY || '4')
+})
 export class ProcessFaceProcessor extends WorkerHost {
   private readonly logger = new Logger(ProcessFaceProcessor.name);
 

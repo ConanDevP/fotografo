@@ -71,12 +71,32 @@ async function bootstrap() {
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
   
+  // NUEVO: Límite máximo de conexiones HTTP
+  server.maxConnections = parseInt(configService.get('MAX_HTTP_CONNECTIONS', '200'));
+  
+  // NUEVO: Timeout para requests largos
+  server.timeout = parseInt(configService.get('HTTP_TIMEOUT', '120000')); // 2 minutos
+  
   // Manejar errores de conexión
   server.on('clientError', (err, socket) => {
     if (err.code === 'ECONNRESET' || !socket.writable) {
+      // MEJORADO: Cerrar socket explícitamente
+      if (socket && !socket.destroyed) {
+        socket.destroy();
+      }
       return;
     }
     socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  });
+
+  // NUEVO: Manejar conexiones que se cierran abruptamente
+  server.on('connection', (socket) => {
+    socket.on('error', (err) => {
+      if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
+        return; // Silenciar errores comunes de conexión
+      }
+      console.error('Socket error:', err);
+    });
   });
 
   // Silenciar errores ECONNRESET globalmente
