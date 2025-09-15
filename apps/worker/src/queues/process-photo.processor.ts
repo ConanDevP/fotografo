@@ -11,7 +11,9 @@ import { QUEUES } from '@shared/constants';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 
-@Processor(QUEUES.PROCESS_PHOTO)
+@Processor(QUEUES.PROCESS_PHOTO, {
+  concurrency: parseInt(process.env.WORKER_CONCURRENCY || '8')
+})
 export class ProcessPhotoProcessor extends WorkerHost {
   private readonly logger = new Logger(ProcessPhotoProcessor.name);
 

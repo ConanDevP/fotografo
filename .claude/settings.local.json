@@ -18,7 +18,9 @@
       "Bash(grep:*)",
       "Bash(find:*)",
       "Bash(npm run dev:*)",
-      "Bash(redis-cli:*)"
+      "Bash(redis-cli:*)",
+      "Bash(lsof:*)",
+      "Bash(brew services:*)"
     ],
     "deny": [],
     "ask": []

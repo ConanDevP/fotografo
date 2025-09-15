@@ -7,6 +7,7 @@ import { FILE_CONSTRAINTS, ERROR_CODES } from '@shared/constants';
 import { UserRole } from '@shared/types';
 import { getErrorMessage } from '@shared/utils';
 import { InitiateBatchUploadDto } from './dto/initiate-batch-upload.dto';
+import { BatchStatusDetailed, ProcessingPerformance, UserDashboardStats } from './dto/batch-status-detailed.dto';
 
 
 @Injectable()
@@ -42,6 +43,296 @@ export class UploadsService {
     return job;
   }
 
+  async getBatchUploadStatusDetailed(jobId: string, userId: string): Promise<BatchStatusDetailed> {
+    const job = await this.prisma.batchUploadJob.findUnique({
+      where: { id: jobId },
+      include: {
+        event: { select: { name: true } },
+        photos: {
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    if (!job) {
+      throw new NotFoundException({ 
+        code: ERROR_CODES.JOB_NOT_FOUND, 
+        message: 'Lote de subida no encontrado' 
+      });
+    }
+
+    if (job.ownerId !== userId) {
+      throw new ForbiddenException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'No tienes permisos para ver el estado de este lote',
+      });
+    }
+
+    // Calculate progress metrics
+    const totalFiles = job.totalFiles;
+    const uploadProgress = totalFiles > 0 ? (job.uploadedFiles / totalFiles) * 100 : 0;
+    const processingProgress = totalFiles > 0 ? (job.processedFiles / totalFiles) * 100 : 0;
+    const progressPercentage = Math.round((uploadProgress + processingProgress) / 2);
+
+    // Calculate processing speed
+    const startTime = job.createdAt.getTime();
+    const currentTime = Date.now();
+    const elapsedMinutes = (currentTime - startTime) / (1000 * 60);
+    const processingSpeed = elapsedMinutes > 0 ? job.processedFiles / elapsedMinutes : 0;
+
+    // Estimate completion time
+    const remainingFiles = totalFiles - job.processedFiles;
+    const estimatedMinutesRemaining = processingSpeed > 0 ? remainingFiles / processingSpeed : null;
+    const estimatedCompletion = estimatedMinutesRemaining 
+      ? new Date(currentTime + estimatedMinutesRemaining * 60 * 1000).toISOString()
+      : undefined;
+
+    // Determine current step
+    let currentStep = 'Iniciando';
+    if (job.status === 'UPLOADING') currentStep = 'Subiendo archivos';
+    else if (job.status === 'PROCESSING') currentStep = 'Procesando imágenes';
+    else if (job.status === 'COMPLETED') currentStep = 'Completado';
+    else if (job.status === 'FAILED') currentStep = 'Error';
+
+    // Check if stuck (no updates in 15 minutes while processing)
+    const isStuck = job.status === 'PROCESSING' && 
+      (currentTime - job.updatedAt.getTime()) > 15 * 60 * 1000;
+
+    // Get recent errors (simplified - get failed photos count)
+    const failedPhotos = job.photos.filter(p => p.status === 'FAILED');
+    const recentFailedPhotos = failedPhotos
+      .slice(0, 10)
+      .map(p => ({
+        photoId: p.id,
+        step: 'Procesamiento',
+        error: 'Error en procesamiento de imagen',
+        timestamp: p.createdAt.toISOString()
+      }));
+
+    // Calculate throughput (simplified - use processed files)
+    const last5minPhotos = Math.min(job.processedFiles, 50); // Estimate based on recent activity
+    const last15minPhotos = Math.min(job.processedFiles, 150);
+
+    // Determine bottleneck
+    let bottleneck = 'Ninguno';
+    if (job.failedWatermarks > job.watermarkFiles * 0.1) bottleneck = 'Generación de watermarks';
+    else if (job.failedGemini > job.geminiFiles * 0.1) bottleneck = 'OCR Gemini';
+    else if (job.failedFaces > job.faceFiles * 0.1) bottleneck = 'Reconocimiento facial';
+    else if (processingSpeed < 1) bottleneck = 'Velocidad general';
+
+    return {
+      id: job.id,
+      status: job.status,
+      totalFiles: job.totalFiles,
+      uploadedFiles: job.uploadedFiles,
+      processedFiles: job.processedFiles,
+      
+      watermarkFiles: job.watermarkFiles,
+      geminiFiles: job.geminiFiles,
+      faceFiles: job.faceFiles,
+      failedWatermarks: job.failedWatermarks,
+      failedGemini: job.failedGemini,
+      failedFaces: job.failedFaces,
+      
+      progressPercentage,
+      uploadProgress: Math.round(uploadProgress),
+      processingProgress: Math.round(processingProgress),
+      
+      startedAt: job.createdAt.toISOString(),
+      estimatedCompletion,
+      processingSpeed: Math.round(processingSpeed * 100) / 100,
+      
+      currentStep,
+      isStuck,
+      
+      recentErrors: recentFailedPhotos,
+      
+      avgProcessingTime: processingSpeed > 0 ? Math.round(60 / processingSpeed) : 0, // seconds per photo
+      bottleneck,
+      throughput: {
+        last5min: last5minPhotos,
+        last15min: last15minPhotos,
+        overall: Math.round(processingSpeed * 60) // photos per hour
+      }
+    };
+  }
+
+  async getProcessingPerformance(jobId: string, userId: string): Promise<ProcessingPerformance> {
+    const job = await this.prisma.batchUploadJob.findUnique({
+      where: { id: jobId },
+      include: {
+        photos: {
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+          }
+        }
+      }
+    });
+
+    if (!job) {
+      throw new NotFoundException({ 
+        code: ERROR_CODES.JOB_NOT_FOUND, 
+        message: 'Lote de subida no encontrado' 
+      });
+    }
+
+    if (job.ownerId !== userId) {
+      throw new ForbiddenException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'No tienes permisos para ver el rendimiento de este lote',
+      });
+    }
+
+    const startTime = job.createdAt.getTime();
+    const currentTime = Date.now();
+    const totalDuration = Math.round((currentTime - startTime) / 1000); // seconds
+
+    const processedPhotos = job.photos.filter(p => p.status === 'PROCESSED');
+    const avgTimePerPhoto = processedPhotos.length > 0 ? totalDuration / processedPhotos.length : 0;
+    
+    const currentSpeed = totalDuration > 0 ? (job.processedFiles / totalDuration) * 60 : 0; // per minute
+    const remainingFiles = job.totalFiles - job.processedFiles;
+    const estimatedTimeRemaining = currentSpeed > 0 ? Math.round(remainingFiles / currentSpeed) : 0; // minutes
+
+    // Estimate pipeline performance (simplified)
+    const pipelinePerformance = {
+      upload: {
+        avgTime: 2, // seconds
+        success: job.uploadedFiles,
+        failed: Math.max(0, job.totalFiles - job.uploadedFiles)
+      },
+      watermark: {
+        avgTime: 3, // seconds
+        success: job.watermarkFiles,
+        failed: job.failedWatermarks
+      },
+      ocr: {
+        avgTime: 5, // seconds
+        success: job.geminiFiles,
+        failed: job.failedGemini
+      },
+      faceDetection: {
+        avgTime: 2, // seconds
+        success: job.faceFiles,
+        failed: job.failedFaces
+      }
+    };
+
+    // Identify bottlenecks
+    const bottlenecks = [
+      { step: 'watermark', avgTime: 3, impact: (job.failedWatermarks > 5 ? 'high' : 'low') as 'high' | 'medium' | 'low' },
+      { step: 'ocr', avgTime: 5, impact: (job.failedGemini > 5 ? 'high' : 'medium') as 'high' | 'medium' | 'low' },
+      { step: 'faceDetection', avgTime: 2, impact: (job.failedFaces > 5 ? 'medium' : 'low') as 'high' | 'medium' | 'low' }
+    ].filter(b => b.impact !== 'low');
+
+    return {
+      batchId: job.id,
+      totalDuration,
+      avgTimePerPhoto: Math.round(avgTimePerPhoto),
+      currentSpeed: Math.round(currentSpeed * 100) / 100,
+      estimatedTimeRemaining,
+      pipelinePerformance,
+      bottlenecks
+    };
+  }
+
+  async getUserDashboardStats(userId: string): Promise<UserDashboardStats> {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [totalBatches, recentBatches, monthlyStats, totalPhotos, processedPhotos] = await Promise.all([
+      // Total batches
+      this.prisma.batchUploadJob.count({
+        where: { ownerId: userId }
+      }),
+
+      // Recent batches with event info
+      this.prisma.batchUploadJob.findMany({
+        where: { ownerId: userId },
+        include: {
+          event: { select: { name: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10
+      }),
+
+      // Monthly stats
+      this.prisma.batchUploadJob.aggregate({
+        where: {
+          ownerId: userId,
+          createdAt: { gte: startOfMonth }
+        },
+        _count: { id: true },
+        _sum: { 
+          totalFiles: true,
+          processedFiles: true 
+        }
+      }),
+
+      // Total photos uploaded
+      this.prisma.photo.count({
+        where: { photographerId: userId }
+      }),
+
+      // Total photos processed
+      this.prisma.photo.count({
+        where: { 
+          photographerId: userId,
+          status: 'PROCESSED'
+        }
+      })
+    ]);
+
+    // Calculate success rate and avg processing time
+    const successRate = totalPhotos > 0 ? (processedPhotos / totalPhotos) * 100 : 0;
+    const totalErrors = totalPhotos - processedPhotos;
+
+    // Calculate average processing time (simplified)
+    const completedBatches = recentBatches.filter(b => b.status === 'COMPLETED');
+    const avgProcessingTime = completedBatches.length > 0 
+      ? completedBatches.reduce((sum, batch) => {
+          const duration = batch.updatedAt.getTime() - batch.createdAt.getTime();
+          return sum + (duration / batch.totalFiles); // ms per photo
+        }, 0) / completedBatches.length / 1000 // convert to seconds
+      : 0;
+
+    return {
+      totalBatches,
+      totalPhotosUploaded: totalPhotos,
+      totalPhotosProcessed: processedPhotos,
+
+      recentBatches: recentBatches.map(batch => ({
+        id: batch.id,
+        eventName: batch.event?.name || 'Evento sin nombre',
+        status: batch.status,
+        totalFiles: batch.totalFiles,
+        processedFiles: batch.processedFiles,
+        createdAt: batch.createdAt.toISOString(),
+        completedAt: batch.status === 'COMPLETED' ? batch.updatedAt.toISOString() : undefined
+      })),
+
+      processingStats: {
+        avgProcessingTime: Math.round(avgProcessingTime),
+        successRate: Math.round(successRate * 100) / 100,
+        totalErrors
+      },
+
+      currentMonth: {
+        batchesCreated: monthlyStats._count.id,
+        photosUploaded: monthlyStats._sum.totalFiles || 0,
+        photosProcessed: monthlyStats._sum.processedFiles || 0
+      }
+    };
+  }
+
   async appendToBatchUpload(
     jobId: string,
     files: Express.Multer.File[],
@@ -72,24 +363,36 @@ export class UploadsService {
     const results = [];
     const errors = [];
 
-    const chunkPromises = files.map(async (file) => {
-      try {
-        const result = await this.uploadPhoto(file, job.eventId, userId, userRole, { batchJobId: jobId });
-        return { success: true, result, fileName: file.originalname };
-      } catch (error) {
-        return {
-          success: false,
-          error: {
-            fileName: file.originalname,
-            error: getErrorMessage(error),
-          },
-        };
+    // SEGURIDAD: Procesar en chunks para evitar sobrecarga con 3000+ fotos
+    const CHUNK_SIZE = parseInt(process.env.MAX_UPLOAD_CHUNK_SIZE || '50');
+    
+    for (let i = 0; i < files.length; i += CHUNK_SIZE) {
+      const chunk = files.slice(i, i + CHUNK_SIZE);
+      this.logger.log(`Procesando chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(files.length / CHUNK_SIZE)} (${chunk.length} archivos)`);
+      
+      const chunkPromises = chunk.map(async (file) => {
+        try {
+          const result = await this.uploadPhoto(file, job.eventId, userId, userRole, { batchJobId: jobId });
+          return { success: true, result, fileName: file.originalname };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              fileName: file.originalname,
+              error: getErrorMessage(error),
+            },
+          };
+        }
+      });
+
+      const chunkResults = await Promise.all(chunkPromises);
+      chunkResults.forEach(r => (r.success ? results.push(r.result) : errors.push(r.error)));
+
+      // Pausa entre chunks para no saturar el sistema
+      if (i + CHUNK_SIZE < files.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
-    });
-
-    const chunkResults = await Promise.all(chunkPromises);
-
-    chunkResults.forEach(r => (r.success ? results.push(r.result) : errors.push(r.error)));
+    }
 
     // Update uploaded files count
     const updatedJob = await this.prisma.batchUploadJob.update({

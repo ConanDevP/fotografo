@@ -94,6 +94,38 @@ export class UploadsController {
     return { data: status };
   }
 
+  @Get('batch/status/:jobId/detailed')
+  async getBatchUploadStatusDetailed(
+    @Param('jobId') jobId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const status = await this.uploadsService.getBatchUploadStatusDetailed(
+      jobId,
+      req.user.id,
+    );
+    return { data: status };
+  }
+
+  @Get('batch/:jobId/performance')
+  async getProcessingPerformance(
+    @Param('jobId') jobId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const performance = await this.uploadsService.getProcessingPerformance(
+      jobId,
+      req.user.id,
+    );
+    return { data: performance };
+  }
+
+  @Get('user/dashboard')
+  async getUserDashboardStats(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const stats = await this.uploadsService.getUserDashboardStats(req.user.id);
+    return { data: stats };
+  }
+
   @Post('reprocess/:photoId')
   async reprocessPhoto(
     @Param('photoId') photoId: string,

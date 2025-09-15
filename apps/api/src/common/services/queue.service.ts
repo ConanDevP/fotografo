@@ -21,6 +21,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     if (redisUrl) {
       this.connection = new IORedis(redisUrl, {
         maxRetriesPerRequest: 3,
+        lazyConnect: true,
+        family: 4,
       });
     } else {
       this.connection = new IORedis({
@@ -28,14 +30,16 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         port: this.configService.get('REDIS_PORT', 6379),
         password: this.configService.get('REDIS_PASSWORD'),
         maxRetriesPerRequest: 3,
+        lazyConnect: true,
+        family: 4,
       });
     }
 
     this.processPhotoQueue = new Queue<ProcessPhotoJob>(QUEUES.PROCESS_PHOTO, {
       connection: this.connection,
       defaultJobOptions: {
-        removeOnComplete: 100,
-        removeOnFail: 50,
+        removeOnComplete: 1000, // MEJORADO: Para 3000+ fotos
+        removeOnFail: 500,      // MEJORADO: Mantener más jobs fallidos
         attempts: 3,
         backoff: {
           type: 'exponential',
@@ -47,8 +51,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.sendEmailQueue = new Queue<SendBibEmailJob>(QUEUES.SEND_BIB_EMAIL, {
       connection: this.connection,
       defaultJobOptions: {
-        removeOnComplete: 200,
-        removeOnFail: 100,
+        removeOnComplete: 500,  // MEJORADO: Para emails masivos
+        removeOnFail: 200,      // MEJORADO: Más jobs fallidos
         attempts: 2,
         backoff: {
           type: 'exponential',
