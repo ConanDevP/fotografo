@@ -503,24 +503,6 @@ export class SearchService {
         originalUrl: true,
         takenAt: true,
         createdAt: true,
-        bibs: {
-          select: {
-            confidence: true,
-          },
-          orderBy: {
-            confidence: 'desc',
-          },
-          take: 1, // Get highest confidence bib for sorting
-        },
-        faces: {
-          select: {
-            confidence: true,
-          },
-          orderBy: {
-            confidence: 'desc',
-          },
-          take: 1, // Get highest confidence face for sorting
-        },
       },
       orderBy: [
         { takenAt: 'desc' },
@@ -535,20 +517,12 @@ export class SearchService {
 
     // Transform to response format - only watermark URLs
     const items: PhotoSearchResult[] = results.map(photo => {
-      // Use highest confidence from either bibs or faces for sorting
-      let confidence = 0;
-      if (photo.bibs.length > 0) {
-        confidence = Number(photo.bibs[0].confidence);
-      } else if (photo.faces.length > 0) {
-        confidence = Number(photo.faces[0].confidence);
-      }
-
       return {
         photoId: photo.id,
         watermarkUrl: photo.watermarkUrl!,
         thumbUrl: '',
         originalUrl: '',
-        confidence,
+        confidence: 1.0, // Default confidence since we removed complex JOINs
         takenAt: photo.takenAt?.toISOString() || photo.createdAt.toISOString(),
       };
     });
