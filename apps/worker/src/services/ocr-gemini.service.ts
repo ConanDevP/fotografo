@@ -21,7 +21,6 @@ export class OcrGeminiService {
 
   constructor(
     private configService: ConfigService,
-    private circuitBreaker: any // TODO: Import CircuitBreakerService
   ) {
     const apiKey = this.configService.get('GEMINI_API_KEY');
     if (!apiKey) {
@@ -35,18 +34,7 @@ export class OcrGeminiService {
     bibRules?: BibRules,
     strategy: 'flash' | 'pro' = 'flash',
   ): Promise<GeminiOCRResponse> {
-    // MEJORADO: Circuit breaker con fallback
-    return await this.circuitBreaker.execute(
-      'gemini',
-      async () => {
-        return await this.performOCR(imageUrl, bibRules, strategy);
-      },
-      async () => {
-        // Fallback: Skip OCR but don't fail the job
-        this.logger.warn(`Gemini API circuit breaker OPEN - Skipping OCR for image ${imageUrl}`);
-        return { bibs: [], notes: 'OCR skipped due to service unavailability' };
-      }
-    );
+    return await this.performOCR(imageUrl, bibRules, strategy);
   }
 
   private async performOCR(
