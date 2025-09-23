@@ -41,6 +41,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         removeOnComplete: 1000, // MEJORADO: Para 3000+ fotos
         removeOnFail: 500,      // MEJORADO: Mantener más jobs fallidos
         attempts: 3,
+        delay: 0,              // CRÍTICO: Sin delay por defecto para procesamiento inmediato
         backoff: {
           type: 'exponential',
           delay: 2000,
@@ -97,7 +98,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     
     return this.processPhotoQueue.add(JOBS.PROCESS_PHOTO, job, {
       priority,
-      delay: 500, // Reducir delay para procesar más rápido
+      delay: 0, // CRÍTICO: Sin delay para procesamiento inmediato durante uploads masivos
       removeOnComplete: 100,
       removeOnFail: 50,
       attempts: 2, // Retry automático si falla

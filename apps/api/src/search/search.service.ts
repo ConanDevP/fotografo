@@ -467,13 +467,15 @@ export class SearchService {
     if (cursor) {
       try {
         const decodedCursor = JSON.parse(Buffer.from(cursor, 'base64').toString());
+        const cursorDate = new Date(decodedCursor.takenAt);
+        
         cursorCondition = {
           OR: [
             {
-              takenAt: { lt: new Date(decodedCursor.takenAt) },
+              takenAt: { lt: cursorDate },
             },
             {
-              takenAt: new Date(decodedCursor.takenAt),
+              takenAt: cursorDate,
               id: { lt: decodedCursor.photoId },
             },
           ],
@@ -554,7 +556,7 @@ export class SearchService {
     // Generate next cursor
     let nextCursor;
     if (hasMore && results.length > 0) {
-      const lastItem = results[results.length - 1];
+      const lastItem = results[results.length - 1]; // This is the last Photo from Prisma
       const cursorData = {
         takenAt: lastItem.takenAt?.toISOString() || lastItem.createdAt.toISOString(),
         photoId: lastItem.id,

@@ -30,8 +30,10 @@ export class ProcessPhotoProcessor extends WorkerHost {
   async process(job: Job<ProcessPhotoJob>): Promise<void> {
     const { photoId, eventId, objectKey } = job.data;
     const startTime = Date.now();
+    const enqueuedAt = job.timestamp;
+    const delayFromEnqueue = startTime - enqueuedAt;
     
-    this.logger.log(`[Job ${job.id}] Iniciando procesamiento de foto ${photoId} para evento ${eventId}`);
+    this.logger.log(`🚀 [Job ${job.id}] WORKER INICIANDO procesamiento de foto ${photoId} - Delay desde enqueue: ${delayFromEnqueue}ms`);
 
     try {
       // Get photo and event data

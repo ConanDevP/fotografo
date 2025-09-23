@@ -339,12 +339,18 @@ export class UploadsService {
     userId: string,
     userRole: UserRole,
   ) {
+    this.logger.log(`📤 INICIANDO appendToBatchUpload - Job: ${jobId}, Files: ${files?.length || 0}`);
+    
     const job = await this.prisma.batchUploadJob.findUnique({ where: { id: jobId } });
     if (!job) {
+      this.logger.error(`❌ Job no encontrado: ${jobId}`);
       throw new NotFoundException({ code: ERROR_CODES.JOB_NOT_FOUND, message: 'Lote de subida no encontrado' });
     }
 
+    this.logger.log(`✅ Job encontrado: ${job.id}, Status: ${job.status}, Owner: ${job.ownerId}`);
+
     if (job.ownerId !== userId) {
+      this.logger.error(`🚫 Usuario sin permisos - Owner: ${job.ownerId}, User: ${userId}`);
       throw new ForbiddenException({
         code: ERROR_CODES.FORBIDDEN,
         message: 'No tienes permisos para añadir archivos a este lote',
@@ -352,11 +358,13 @@ export class UploadsService {
     }
 
     if (job.status === 'COMPLETED' || job.status === 'FAILED') {
+        this.logger.error(`⛔ Job ya completado/fallido: ${job.status}`);
         throw new BadRequestException({ code: ERROR_CODES.JOB_COMPLETED, message: 'Este lote de subida ya ha sido completado o ha fallado.' });
     }
 
     // Set status to uploading if it's the first chunk
     if (job.status === 'PENDING') {
+        this.logger.log(`🔄 Cambiando status a UPLOADING`);
         await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'UPLOADING' } });
     }
 
@@ -365,16 +373,24 @@ export class UploadsService {
 
     // SEGURIDAD: Procesar en chunks para evitar sobrecarga con 3000+ fotos
     const CHUNK_SIZE = parseInt(process.env.MAX_UPLOAD_CHUNK_SIZE || '50');
+    this.logger.log(`🔢 Procesando ${files.length} archivos en chunks de ${CHUNK_SIZE}`);
     
     for (let i = 0; i < files.length; i += CHUNK_SIZE) {
       const chunk = files.slice(i, i + CHUNK_SIZE);
-      this.logger.log(`Procesando chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(files.length / CHUNK_SIZE)} (${chunk.length} archivos)`);
+      const chunkNumber = Math.floor(i / CHUNK_SIZE) + 1;
+      const totalChunks = Math.ceil(files.length / CHUNK_SIZE);
       
-      const chunkPromises = chunk.map(async (file) => {
+      this.logger.log(`📦 CHUNK ${chunkNumber}/${totalChunks}: Procesando ${chunk.length} archivos`);
+      
+      const chunkPromises = chunk.map(async (file, chunkIndex) => {
+        const globalIndex = i + chunkIndex;
         try {
+          this.logger.debug(`📸 Subiendo archivo ${globalIndex + 1}/${files.length}: ${file.originalname}`);
           const result = await this.uploadPhoto(file, job.eventId, userId, userRole, { batchJobId: jobId });
+          this.logger.debug(`✅ Archivo ${globalIndex + 1} subido exitosamente: ${result.photoId}`);
           return { success: true, result, fileName: file.originalname };
         } catch (error) {
+          this.logger.error(`❌ Error subiendo archivo ${globalIndex + 1} (${file.originalname}): ${getErrorMessage(error)}`);
           return {
             success: false,
             error: {
@@ -386,24 +402,38 @@ export class UploadsService {
       });
 
       const chunkResults = await Promise.all(chunkPromises);
+      const successCount = chunkResults.filter(r => r.success).length;
+      const errorCount = chunkResults.filter(r => !r.success).length;
+      
+      this.logger.log(`📊 CHUNK ${chunkNumber} COMPLETADO: ${successCount} exitosos, ${errorCount} errores`);
+      
       chunkResults.forEach(r => (r.success ? results.push(r.result) : errors.push(r.error)));
 
       // Pausa entre chunks para no saturar el sistema
       if (i + CHUNK_SIZE < files.length) {
+        this.logger.debug(`⏸️ Pausa de 500ms antes del siguiente chunk`);
         await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
 
+    this.logger.log(`🎯 UPLOAD BATCH COMPLETADO: ${results.length} exitosos, ${errors.length} errores de ${files.length} total`)
+
     // Update uploaded files count
+    this.logger.log(`💾 Actualizando contador de archivos subidos: +${results.length}`);
     const updatedJob = await this.prisma.batchUploadJob.update({
         where: { id: jobId },
         data: { uploadedFiles: { increment: results.length } },
     });
 
+    this.logger.log(`📈 Job actualizado: ${updatedJob.uploadedFiles}/${updatedJob.totalFiles} archivos subidos`);
+
     // If all files are uploaded, mark as processing
     if (updatedJob.uploadedFiles >= updatedJob.totalFiles) {
+        this.logger.log(`🎉 TODOS LOS ARCHIVOS SUBIDOS! Cambiando status a PROCESSING`);
         await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'PROCESSING' } });
     }
+
+    this.logger.log(`📤 RETORNANDO RESPONSE: ${results.length} successful, ${errors.length} errors`);
 
     return {
       successful: results,
@@ -440,8 +470,16 @@ export class UploadsService {
       batchJobId?: string;
     },
   ) {
+    this.logger.debug(`🔍 uploadPhoto INICIADO: ${file.originalname}, Event: ${eventId}, Batch: ${metadata?.batchJobId}`);
+    
     // Validate file
-    this.validateFile(file);
+    try {
+      this.validateFile(file);
+      this.logger.debug(`✅ Archivo validado: ${file.originalname}`);
+    } catch (error) {
+      this.logger.error(`❌ Validación falló: ${file.originalname} - ${getErrorMessage(error)}`);
+      throw error;
+    }
 
     // Check if event exists and user has permission
     const event = await this.prisma.event.findUnique({
@@ -494,24 +532,24 @@ export class UploadsService {
 
       // Enqueue photo for processing with retry
       try {
-        await this.queueService.addProcessPhotoJob({
+        const enqueuedJob = await this.queueService.addProcessPhotoJob({
           photoId: updatedPhoto.id,
           eventId: eventId,
           objectKey: uploadResult.cloudinaryId,
         });
         
-        this.logger.log(`Job encolado para foto ${updatedPhoto.id}`);
+        this.logger.log(`✅ JOB ENCOLADO INMEDIATAMENTE - Foto: ${updatedPhoto.id}, Job ID: ${enqueuedJob.id}, Delay: 0ms`);
       } catch (error) {
         this.logger.error(`Error encolando job para foto ${updatedPhoto.id}: ${getErrorMessage(error)}`);
         
         // Retry inmediato una vez
         try {
-          await this.queueService.addProcessPhotoJob({
+          const retryJob = await this.queueService.addProcessPhotoJob({
             photoId: updatedPhoto.id,
             eventId: eventId,
             objectKey: uploadResult.cloudinaryId,
           });
-          this.logger.log(`Job re-encolado exitosamente para foto ${updatedPhoto.id}`);
+          this.logger.log(`🔄 JOB RE-ENCOLADO EXITOSAMENTE - Foto: ${updatedPhoto.id}, Job ID: ${retryJob.id}`);
         } catch (retryError) {
           this.logger.error(`FALLÓ retry para foto ${updatedPhoto.id}: ${getErrorMessage(retryError)}`);
           // No fallar la subida por esto, pero marcar foto como fallida

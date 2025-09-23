@@ -70,16 +70,28 @@ export class UploadsController {
     @UploadedFiles() files: Express.Multer.File[],
     @Req() req: AuthenticatedRequest,
   ): Promise<ApiResponse> {
+    console.log(`🚀 CONTROLLER appendToBatchUpload - JobId: ${jobId}, Files: ${files?.length || 0}, User: ${req.user?.id}`);
+    
     if (!files || files.length === 0) {
+      console.log(`❌ No files provided in request`);
       throw new BadRequestException('No se proporcionaron archivos en el chunk');
     }
-    const result = await this.uploadsService.appendToBatchUpload(
-      jobId,
-      files,
-      req.user.id,
-      req.user.role,
-    );
-    return { data: result };
+    
+    console.log(`📁 Files received: ${files.map(f => f.originalname).join(', ')}`);
+    
+    try {
+      const result = await this.uploadsService.appendToBatchUpload(
+        jobId,
+        files,
+        req.user.id,
+        req.user.role,
+      );
+      console.log(`✅ CONTROLLER upload successful: ${result.successful?.length || 0} files processed`);
+      return { data: result };
+    } catch (error) {
+      console.error(`❌ CONTROLLER upload error:`, error);
+      throw error;
+    }
   }
 
   @Get('batch/status/:jobId')
