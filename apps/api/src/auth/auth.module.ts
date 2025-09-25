@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
+import { RedisService } from './redis.service';
 import { UsersModule } from '../users/users.module';
 import { R2Service } from '../common/services/r2.service';
 import { PrismaService } from '../common/services/prisma.service';
@@ -28,7 +29,7 @@ import { LocalStrategy } from './strategies/local.strategy';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, JwtStrategy, LocalStrategy, R2Service, PrismaService],
+  providers: [AuthService, RedisService, JwtStrategy, LocalStrategy, R2Service, PrismaService],
   controllers: [AuthController],
   exports: [AuthService],
 })

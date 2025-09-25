@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
 
 import { UsersService } from '../users/users.service';
+import { RedisService } from './redis.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthTokens, UserProfile, UserRole } from '@shared/types';
@@ -12,12 +13,11 @@ import { ERROR_CODES } from '@shared/constants';
 
 @Injectable()
 export class AuthService {
-  private refreshTokens = new Map<string, { userId: string; expiresAt: number }>();
-
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private redisService: RedisService,
   ) {}
 
   async register(registerDto: RegisterDto): Promise<{ tokens: AuthTokens; user: UserProfile }> {
@@ -71,10 +71,10 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<{ accessToken: string }> {
-    const tokenData = this.refreshTokens.get(refreshToken);
+    const tokenData = await this.redisService.getRefreshToken(refreshToken);
     
     if (!tokenData || Date.now() > tokenData.expiresAt) {
-      this.refreshTokens.delete(refreshToken);
+      await this.redisService.deleteRefreshToken(refreshToken);
       throw new UnauthorizedException({
         code: ERROR_CODES.TOKEN_EXPIRED,
         message: 'Token de refresh expirado',
@@ -83,7 +83,7 @@ export class AuthService {
 
     const user = await this.usersService.findById(tokenData.userId);
     if (!user) {
-      this.refreshTokens.delete(refreshToken);
+      await this.redisService.deleteRefreshToken(refreshToken);
       throw new UnauthorizedException({
         code: ERROR_CODES.USER_NOT_FOUND,
         message: 'Usuario no encontrado',
@@ -100,7 +100,7 @@ export class AuthService {
   }
 
   async logout(refreshToken: string): Promise<void> {
-    this.refreshTokens.delete(refreshToken);
+    await this.redisService.deleteRefreshToken(refreshToken);
   }
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -127,7 +127,7 @@ export class AuthService {
     const expiryTime = this.configService.get('JWT_REFRESH_EXPIRY', '7d');
     const expiresAt = Date.now() + this.parseExpiry(expiryTime);
 
-    this.refreshTokens.set(refreshToken, { userId, expiresAt });
+    await this.redisService.setRefreshToken(refreshToken, userId, expiresAt);
 
     return { accessToken, refreshToken };
   }
