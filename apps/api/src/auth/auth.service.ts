@@ -156,4 +156,21 @@ export class AuthService {
       createdAt: user.createdAt.toISOString(),
     };
   }
+
+  /**
+   * Método especial para crear usuarios administradores
+   * Solo debe usarse en setup inicial o por otros admins
+   */
+  async createAdmin(data: { email: string; password: string; name: string }) {
+    const passwordHash = await argon2.hash(data.password);
+
+    const admin = await this.usersService.create({
+      email: data.email,
+      passwordHash,
+      name: data.name,
+      role: UserRole.ADMIN,
+    });
+
+    return admin;
+  }
 }
