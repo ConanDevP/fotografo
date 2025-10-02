@@ -3,7 +3,7 @@ import { PrismaService } from '../common/services/prisma.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
 import { UpdateUserDto } from './dto/update-user.dto';
-import * as bcrypt from 'bcrypt';
+import * as argon2 from 'argon2';
 
 @Injectable()
 export class AdminUsersService {
@@ -342,7 +342,7 @@ export class AdminUsersService {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashedPassword = await argon2.hash(newPassword);
 
     await this.prisma.user.update({
       where: { id: userId },

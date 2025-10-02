@@ -39,7 +39,8 @@ export class AdminSystemService {
       await this.prisma.$queryRaw`SELECT 1`;
       return { ok: true, message: 'Database connected' };
     } catch (error) {
-      return { ok: false, message: 'Database connection failed', error: error.message };
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { ok: false, message: 'Database connection failed', error: errorMessage };
     }
   }
 
@@ -62,7 +63,8 @@ export class AdminSystemService {
         },
       };
     } catch (error) {
-      return { ok: false, message: 'Queue connection failed', error: error.message };
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      return { ok: false, message: 'Queue connection failed', error: errorMessage };
     }
   }
 
