@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus, Put, Get, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus, Put, Get, UploadedFile, UseInterceptors, BadRequestException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request } from 'express';
@@ -10,6 +10,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { CreateAdminDto } from './dto/create-admin.dto';
 import { ApiResponse } from '@shared/types';
 
 @Controller('auth')
@@ -110,5 +111,45 @@ export class AuthController {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Error al subir avatar: ${errorMessage}`);
     }
+  }
+
+  /**
+   * Endpoint especial para crear el primer usuario admin
+   * IMPORTANTE: Solo usar en desarrollo o setup inicial
+   * Protegido con clave secreta en variables de entorno
+   */
+  @Post('create-admin')
+  async createAdmin(@Body() createAdminDto: CreateAdminDto): Promise<ApiResponse> {
+    // Validar clave secreta
+    const adminSecretKey = process.env.ADMIN_SECRET_KEY || 'change-this-secret-key-in-production';
+
+    if (createAdminDto.secretKey !== adminSecretKey) {
+      throw new BadRequestException('Clave secreta inválida');
+    }
+
+    // Verificar si ya existe un admin
+    const existingAdmin = await this.usersService.findByEmail(createAdminDto.email);
+    if (existingAdmin) {
+      throw new BadRequestException('El usuario ya existe');
+    }
+
+    // Crear admin
+    const admin = await this.authService.createAdmin({
+      email: createAdminDto.email,
+      password: createAdminDto.password,
+      name: createAdminDto.name,
+    });
+
+    return {
+      data: {
+        message: 'Usuario administrador creado exitosamente',
+        user: {
+          id: admin.id,
+          email: admin.email,
+          name: admin.name,
+          role: admin.role,
+        },
+      },
+    };
   }
 }
