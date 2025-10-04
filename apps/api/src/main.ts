@@ -29,6 +29,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
+
+  // Enable graceful shutdown
+  app.enableShutdownHooks();
+
   const configService = app.get(ConfigService);
 
   // Security
