@@ -82,7 +82,7 @@ export const IMAGE_SIZES = {
 
 // Gemini
 export const GEMINI_MODELS = {
-  FLASH: 'gemini-1.5-flash',
+  FLASH: 'gemini-2.5-flash-lite',
   PRO: 'gemini-1.5-pro',
 } as const;
 
