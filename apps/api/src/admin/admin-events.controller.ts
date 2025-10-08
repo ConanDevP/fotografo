@@ -131,4 +131,19 @@ export class AdminEventsController {
     const event = await this.adminEventsService.reassignEventOwner(id, newOwnerId, req.user.role);
     return { data: event };
   }
+
+  @Patch(':id/free-download')
+  async updateFreeDownloadSettings(
+    @Param('id') id: string,
+    @Body() settings: {
+      isFreeDownload: boolean;
+      freeDownloadUntil?: string;
+      requireEmailForFree?: boolean;
+      freeDownloadLimit?: number;
+    },
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const event = await this.adminEventsService.updateFreeDownloadSettings(id, settings, req.user.role);
+    return { data: event };
+  }
 }
