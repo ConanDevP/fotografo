@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "Plataforma de fotografía deportiva con detección automática de dorsales",
   "main": "index.js",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "build": "prisma generate --schema=./apps/api/prisma/schema.prisma && nest build api && nest build worker",
     "format": "prettier --write \"apps/**/*.ts\" \"packages/**/*.ts\"",
@@ -43,6 +46,7 @@
     "@types/archiver": "^6.0.3",
     "archiver": "^7.0.1",
     "argon2": "^0.31.0",
+    "axios": "^1.12.2",
     "bcryptjs": "^2.4.3",
     "bullmq": "^4.8.0",
     "canvas": "^3.2.0",
