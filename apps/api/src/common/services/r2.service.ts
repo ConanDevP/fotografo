@@ -84,23 +84,24 @@ export class R2Service {
 
   async generateSecureDownloadUrl(key: string, expiresIn = 300): Promise<string> {
     try {
+      // Extract filename from key for better download experience
+      const filename = key.split('/').pop() || 'download.jpg';
+
       const command = new GetObjectCommand({
         Bucket: this.bucketName,
         Key: key,
+        ResponseContentDisposition: `attachment; filename="${filename}"`, // Force download with filename
+        ResponseContentType: 'image/jpeg', // Explicitly set content type
       });
 
       const signedUrl = await getSignedUrl(this.s3Client, command, {
         expiresIn,
       });
 
-      // Si tenemos un dominio personalizado configurado, reemplazar el dominio de R2
-      if (this.publicUrl) {
-        const url = new URL(signedUrl);
-        const customUrl = new URL(this.publicUrl);
-        
-        // Mantener el path y query parameters, solo cambiar el dominio
-        return `${customUrl.origin}${url.pathname}${url.search}`;
-      }
+      // IMPORTANT: Do NOT use custom domain for signed URLs with response headers
+      // Custom domains (R2 custom domains) do not respect ResponseContentDisposition
+      // We must use the direct R2 endpoint URL for downloads to work properly
+      this.logger.log(`Generated download URL for key: ${key}, expires in ${expiresIn}s`);
 
       return signedUrl;
     } catch (error) {

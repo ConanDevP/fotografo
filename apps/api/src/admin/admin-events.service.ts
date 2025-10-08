@@ -405,4 +405,55 @@ export class AdminEventsService {
 
     return updatedEvent;
   }
+
+  async updateFreeDownloadSettings(
+    eventId: string,
+    settings: {
+      isFreeDownload: boolean;
+      freeDownloadUntil?: string;
+      requireEmailForFree?: boolean;
+      freeDownloadLimit?: number;
+    },
+    userRole: UserRole,
+  ) {
+    if (userRole !== UserRole.ADMIN) {
+      throw new ForbiddenException({
+        code: ERROR_CODES.FORBIDDEN,
+        message: 'Solo administradores pueden modificar configuración de descargas gratuitas',
+      });
+    }
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+    });
+
+    if (!event) {
+      throw new NotFoundException({
+        code: ERROR_CODES.EVENT_NOT_FOUND,
+        message: 'Evento no encontrado',
+      });
+    }
+
+    const updatedEvent = await this.prisma.event.update({
+      where: { id: eventId },
+      data: {
+        isFreeDownload: settings.isFreeDownload,
+        freeDownloadUntil: settings.freeDownloadUntil ? new Date(settings.freeDownloadUntil) : null,
+        requireEmailForFree: settings.requireEmailForFree !== undefined ? settings.requireEmailForFree : true,
+        freeDownloadLimit: settings.freeDownloadLimit || null,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        action: 'EVENT_FREE_DOWNLOAD_UPDATED',
+        data: {
+          eventId,
+          settings,
+        },
+      },
+    });
+
+    return updatedEvent;
+  }
 }

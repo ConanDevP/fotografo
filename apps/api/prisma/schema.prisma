@@ -67,6 +67,13 @@ model Event {
   deletedAt           DateTime? @map("deleted_at") @db.Timestamptz
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
+  // Free download configuration
+  isFreeDownload       Boolean   @default(false) @map("is_free_download")
+  freeDownloadUntil    DateTime? @map("free_download_until") @db.Timestamptz
+  requireEmailForFree  Boolean   @default(true) @map("require_email_for_free")
+  freeDownloadLimit    Int?      @map("free_download_limit")
+  totalFreeDownloads   Int       @default(0) @map("total_free_downloads")
+
   // Relations
   owner            User?             @relation("EventOwner", fields: [ownerId], references: [id])
   photos           Photo[]
@@ -75,6 +82,7 @@ model Event {
   bibSubscriptions BibSubscription[]
   orders           Order[]
   BatchUploadJob   BatchUploadJob[]
+  freeDownloads    FreeDownload[]
 
   @@map("events")
 }
@@ -102,6 +110,7 @@ model Photo {
   faces        FaceEmbedding[]
   orderItems   OrderItem[]
   auditLogs    AuditLog[]
+  freeDownloads FreeDownload[]
 
   @@index([eventId])
   @@map("photos")
@@ -266,4 +275,38 @@ model BatchUploadJob {
   photos Photo[]
 
   @@map("batch_upload_jobs")
+}
+
+model FreeDownload {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // Relations
+  eventId    String   @map("event_id") @db.Uuid
+  photoId    String   @map("photo_id") @db.Uuid
+
+  // User data (collected for analytics)
+  email      String?
+  name       String?
+  phone      String?
+  bibNumber  String?  @map("bib_number")
+
+  // Tracking
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  referer    String?
+  country    String?
+  city       String?
+
+  // Metadata
+  downloadedAt DateTime @default(now()) @map("downloaded_at") @db.Timestamptz
+
+  // Relations
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photo Photo @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([photoId])
+  @@index([email])
+  @@index([downloadedAt])
+  @@map("free_downloads")
 }
