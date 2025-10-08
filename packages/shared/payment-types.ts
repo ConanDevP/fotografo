@@ -24,6 +24,10 @@ export interface PaymentRequest {
   returnUrl: string;
   cancelUrl: string;
   description?: string;
+  // Marketplace/Platform fields
+  photographerPayPalMerchantId?: string; // PayPal merchant_id of photographer
+  platformFeeAmount?: number; // Platform commission in cents
+  platformFeePercent?: number; // Platform commission percentage
 }
 
 export interface PaymentItem {

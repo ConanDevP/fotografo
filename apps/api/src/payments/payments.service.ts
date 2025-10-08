@@ -35,10 +35,18 @@ export class PaymentsService {
     // Validate event exists and get pricing
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      select: { 
-        id: true, 
-        name: true, 
+      select: {
+        id: true,
+        name: true,
         pricing: true,
+        platformFeePercent: true,
+        owner: {
+          select: {
+            id: true,
+            paypalMerchantId: true,
+            paypalOnboardingCompleted: true,
+          },
+        },
       },
     });
 
@@ -151,7 +159,23 @@ export class PaymentsService {
     // Usar pasarela real (PayPal, Stripe, MercadoPago)
     const finalCurrency = currency || pricing.currency;
     const frontendUrl = this.configService.get('FRONTEND_URL', 'https://fotocorredor.com');
-    
+
+    // Calculate platform fee for marketplace split
+    const platformFeePercent = event.platformFeePercent ? parseFloat(event.platformFeePercent.toString()) : 15.0;
+    const platformFeeAmount = Math.round((totalCents * platformFeePercent) / 100);
+    const photographerPayPalMerchantId = event.owner?.paypalMerchantId;
+
+    // Only use marketplace mode if:
+    // 1. Gateway is PayPal (other gateways don't support it yet)
+    // 2. Photographer has completed PayPal onboarding
+    const useMarketplaceMode = gateway === PaymentGateway.PAYPAL &&
+                               event.owner?.paypalOnboardingCompleted &&
+                               photographerPayPalMerchantId;
+
+    if (!useMarketplaceMode && gateway === PaymentGateway.PAYPAL) {
+      this.logger.warn(`Photographer ${event.owner?.id} hasn't completed PayPal onboarding. Using standard mode.`);
+    }
+
     const paymentRequest: PaymentRequest = {
       orderId: order.id,
       eventId,
@@ -167,6 +191,10 @@ export class PaymentsService {
         unitAmount: item.priceCents,
         photoId: item.photoId,
       })),
+      // Marketplace fields (only for PayPal with onboarded photographers)
+      photographerPayPalMerchantId: useMarketplaceMode ? photographerPayPalMerchantId : undefined,
+      platformFeeAmount: useMarketplaceMode ? platformFeeAmount : undefined,
+      platformFeePercent: useMarketplaceMode ? platformFeePercent : undefined,
     };
 
     try {

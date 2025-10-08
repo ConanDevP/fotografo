@@ -9,12 +9,14 @@ import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
 import { PaymentGatewayFactory } from './factories/payment-gateway.factory';
 import { PayPalGatewayService } from './gateways/paypal-gateway.service';
+import { PayPalPartnerService } from './gateways/paypal-partner.service';
+import { PayPalOnboardingController } from '../photographers/paypal-onboarding.controller';
 
 @Module({
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, PayPalOnboardingController],
   providers: [
-    PaymentsService, 
-    PrismaService, 
+    PaymentsService,
+    PrismaService,
     CloudinaryService,
     R2Service,
     SharpTransformService,
@@ -22,7 +24,8 @@ import { PayPalGatewayService } from './gateways/paypal-gateway.service';
     QueueService,
     PaymentGatewayFactory,
     PayPalGatewayService,
+    PayPalPartnerService,
   ],
-  exports: [PaymentsService],
+  exports: [PaymentsService, PayPalPartnerService],
 })
 export class PaymentsModule {}
