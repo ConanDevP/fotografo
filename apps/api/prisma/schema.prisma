@@ -32,6 +32,15 @@ model User {
   isFeatured      Boolean  @default(false) @map("is_featured")
   isVerified      Boolean  @default(false) @map("is_verified")
 
+  // PayPal Platform (Marketplace) fields
+  paypalMerchantId            String?   @unique @map("paypal_merchant_id") // merchant_id from PayPal
+  paypalMerchantIdInPayPal    String?   @map("paypal_merchant_id_in_paypal") // merchantIdInPayPal
+  paypalEmail                 String?   @map("paypal_email")
+  paypalOnboardingCompleted   Boolean   @default(false) @map("paypal_onboarding_completed")
+  paypalPermissionsGranted    Boolean   @default(false) @map("paypal_permissions_granted")
+  paypalTrackingId            String?   @map("paypal_tracking_id") // For tracking onboarding
+  paypalOnboardedAt           DateTime? @map("paypal_onboarded_at") @db.Timestamptz
+
   // Relations
   ownedEvents        Event[]          @relation("EventOwner")
   photographedPhotos Photo[]          @relation("PhotoPhotographer")
@@ -45,17 +54,18 @@ model User {
 }
 
 model Event {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String
-  slug      String    @unique
-  date      DateTime  @db.Date
-  location  String?
-  imageUrl  String?   @map("image_url")
-  ownerId   String?   @map("owner_id") @db.Uuid
-  bibRules  Json?     @map("bib_rules")
-  pricing   Json?     @map("pricing")
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String
+  slug                String    @unique
+  date                DateTime  @db.Date
+  location            String?
+  imageUrl            String?   @map("image_url")
+  ownerId             String?   @map("owner_id") @db.Uuid
+  bibRules            Json?     @map("bib_rules")
+  pricing             Json?     @map("pricing")
+  platformFeePercent  Decimal?  @default(15.00) @map("platform_fee_percent") @db.Decimal(5, 2) // % commission for platform
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
   owner            User?             @relation("EventOwner", fields: [ownerId], references: [id])

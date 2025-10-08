@@ -38,7 +38,79 @@ export class PayPalGatewayService implements IPaymentGateway {
   async createPayment(request: PaymentRequest): Promise<PaymentResponse> {
     try {
       const paypalRequest = new paypal.orders.OrdersCreateRequest();
-      
+
+      // Build purchase units with platform fees and payee if provided
+      const purchaseUnits = [];
+
+      // If we have photographer info (marketplace mode)
+      if (request.photographerPayPalMerchantId) {
+        const platformFeeAmount = request.platformFeeAmount || 0;
+        const photographerAmount = request.totalAmount - platformFeeAmount;
+
+        purchaseUnits.push({
+          reference_id: request.orderId,
+          description: request.description || 'Compra de fotos',
+          payee: {
+            merchant_id: request.photographerPayPalMerchantId, // Photographer receives payment
+          },
+          amount: {
+            currency_code: request.currency.toUpperCase(),
+            value: (request.totalAmount / 100).toFixed(2), // Total amount
+            breakdown: {
+              item_total: {
+                currency_code: request.currency.toUpperCase(),
+                value: (request.totalAmount / 100).toFixed(2),
+              },
+            },
+          },
+          payment_instruction: {
+            disbursement_mode: 'INSTANT',
+            platform_fees: platformFeeAmount > 0 ? [
+              {
+                amount: {
+                  currency_code: request.currency.toUpperCase(),
+                  value: (platformFeeAmount / 100).toFixed(2), // Platform commission
+                },
+              },
+            ] : undefined,
+          },
+          items: request.items.map(item => ({
+            name: item.name,
+            description: item.description || '',
+            quantity: item.quantity.toString(),
+            unit_amount: {
+              currency_code: request.currency.toUpperCase(),
+              value: (item.unitAmount / 100).toFixed(2),
+            },
+          })),
+        });
+      } else {
+        // Standard mode (no marketplace split)
+        purchaseUnits.push({
+          reference_id: request.orderId,
+          description: request.description || 'Compra de fotos',
+          amount: {
+            currency_code: request.currency.toUpperCase(),
+            value: (request.totalAmount / 100).toFixed(2),
+            breakdown: {
+              item_total: {
+                currency_code: request.currency.toUpperCase(),
+                value: (request.totalAmount / 100).toFixed(2),
+              },
+            },
+          },
+          items: request.items.map(item => ({
+            name: item.name,
+            description: item.description || '',
+            quantity: item.quantity.toString(),
+            unit_amount: {
+              currency_code: request.currency.toUpperCase(),
+              value: (item.unitAmount / 100).toFixed(2),
+            },
+          })),
+        });
+      }
+
       // Configurar orden PayPal
       paypalRequest.requestBody({
         intent: 'CAPTURE',
@@ -50,31 +122,7 @@ export class PayPalGatewayService implements IPaymentGateway {
           return_url: request.returnUrl,
           cancel_url: request.cancelUrl,
         },
-        purchase_units: [
-          {
-            reference_id: request.orderId,
-            description: request.description || 'Compra de fotos',
-            amount: {
-              currency_code: request.currency.toUpperCase(),
-              value: (request.totalAmount / 100).toFixed(2), // Convertir de centavos
-              breakdown: {
-                item_total: {
-                  currency_code: request.currency.toUpperCase(),
-                  value: (request.totalAmount / 100).toFixed(2),
-                },
-              },
-            },
-            items: request.items.map(item => ({
-              name: item.name,
-              description: item.description || '',
-              quantity: item.quantity.toString(),
-              unit_amount: {
-                currency_code: request.currency.toUpperCase(),
-                value: (item.unitAmount / 100).toFixed(2),
-              },
-            })),
-          },
-        ],
+        purchase_units: purchaseUnits,
       });
 
       // Ejecutar request a PayPal
