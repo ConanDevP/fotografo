@@ -63,12 +63,18 @@ export interface PhotoSearchResult {
   originalUrl: string;
   confidence: number;
   takenAt?: string;
+  type?: 'DETECTED' | 'INFERRED'; // NEW: Type of bib detection
+  faceBbox?: [number, number, number, number]; // NEW: For inferred bibs
 }
 
 export interface SearchResponse {
   items: PhotoSearchResult[];
   nextCursor?: string;
   total?: number;
+  stats?: { // NEW: Statistics for detected vs inferred
+    detected: number;
+    inferred: number;
+  };
 }
 
 // Job payloads
@@ -94,6 +100,12 @@ export interface ProcessFaceJob {
   photoId: string;
   eventId: string;
   imageUrl: string;
+}
+
+// NEW: Infer Bibs Job
+export interface InferBibsJob {
+  photoId: string;
+  eventId: string;
 }
 
 // Face Recognition Types
@@ -180,4 +192,62 @@ export interface UserProfile {
   address?: string;
   role: UserRole;
   createdAt: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Face-Bib Linking Types (NEW)
+// ═══════════════════════════════════════════════════════════════════
+
+export interface FaceBibMatch {
+  faceIndex: number;
+  bibValue: string;
+  spatialScore: number;
+}
+
+export interface FaceBibAssociationData {
+  id: string;
+  faceEmbeddingId: string;
+  photoBibId: number;
+  photoId: string;
+  eventId: string;
+  bib: string;
+  spatialScore: number;
+  method: 'SPATIAL' | 'MANUAL' | 'INFERRED';
+  createdAt: string;
+}
+
+export interface AthleteSignatureData {
+  id: string;
+  eventId: string;
+  bib: string;
+  faceSignature: number[];
+  sampleCount: number;
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InferredBibData {
+  id: string;
+  photoId: string;
+  faceEmbeddingId: string;
+  eventId: string;
+  bib: string;
+  confidence: number;
+  faceDistance: number;
+  inferredFrom: string;
+  verified: boolean;
+  rejected: boolean;
+  createdAt: string;
+}
+
+export interface InferredBibReview {
+  id: string;
+  photoId: string;
+  thumbUrl: string;
+  bib: string;
+  confidence: number;
+  faceBbox: [number, number, number, number];
+  verified: boolean;
+  rejected: boolean;
 }

@@ -6,6 +6,7 @@ export const QUEUES = {
   PROCESS_FACE: 'process-face',
   SEND_BIB_EMAIL: 'send-bib-email',
   REPROCESS_PHOTO: 'reprocess-photo',
+  INFER_BIBS: 'infer-bibs', // NEW: Queue for bib inference
 } as const;
 
 // Job names
@@ -134,7 +135,28 @@ export const FACE_RECOGNITION = {
 // Face Search Rate Limits
 export const FACE_SEARCH_LIMITS = {
   ANONYMOUS: 3,    // 3 searches per day for anonymous users
-  REGISTERED: 10,  // 10 searches per day for registered users  
+  REGISTERED: 10,  // 10 searches per day for registered users
   PREMIUM: 100,    // 100 searches per day for premium users
   UNLIMITED: -1,   // Unlimited for photographers/admins
+} as const;
+
+// Face-Bib Linking Configuration (NEW)
+export const FACE_BIB_LINKING = {
+  // Spatial matching thresholds
+  SPATIAL_SCORE_THRESHOLD: 0.5,        // Minimum score for face-bib spatial association
+  MAX_HORIZONTAL_DISTANCE_RATIO: 1.0,  // Max horizontal distance as ratio of bbox width
+  MIN_VERTICAL_DISTANCE: 50,           // Minimum pixels between face and bib
+  MAX_VERTICAL_DISTANCE: 600,          // Maximum pixels between face and bib
+  OPTIMAL_VERTICAL_DISTANCE: 250,      // Optimal distance for score calculation
+
+  // Inference thresholds
+  INFERENCE_THRESHOLD: 0.30,           // Stricter than search (0.40) for high precision
+  MIN_SIGNATURE_SAMPLES: 2,            // Minimum photos to create reliable signature
+  SIGNATURE_CONFIDENCE_START: 0.70,    // Initial confidence for new signature
+  SIGNATURE_CONFIDENCE_INCREMENT: 0.02, // Confidence increase per new sample
+  SIGNATURE_EMA_ALPHA: 0.3,            // Weight for new embedding in moving average
+
+  // Quality filters
+  MIN_GEMINI_CONFIDENCE: 0.85,         // Only use high-confidence Gemini detections for signatures
+  MIN_INFERRED_CONFIDENCE: 0.70,       // Minimum confidence to show inferred bib to users
 } as const;

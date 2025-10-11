@@ -3,7 +3,7 @@ import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { SearchResponse, PhotoSearchResult } from '@shared/types';
-import { ERROR_CODES, PAGINATION } from '@shared/constants';
+import { ERROR_CODES, PAGINATION, FACE_BIB_LINKING } from '@shared/constants';
 import { getErrorMessage } from '@shared/utils';
 
 @Injectable()
@@ -115,15 +115,75 @@ export class SearchService {
     const hasMore = photoBibs.length > limitNum;
     const results = hasMore ? photoBibs.slice(0, limitNum) : photoBibs;
 
-    // Transform to response format
-    const items: PhotoSearchResult[] = results.map(photoBib => ({
+    // Transform direct matches to response format
+    const directItems: PhotoSearchResult[] = results.map(photoBib => ({
       photoId: photoBib.photo.id,
       thumbUrl: photoBib.photo.thumbUrl!,
       watermarkUrl: photoBib.photo.watermarkUrl!,
       originalUrl: photoBib.photo.originalUrl!,
       confidence: Number(photoBib.confidence),
+      type: 'DETECTED' as const,
       takenAt: photoBib.photo.takenAt?.toISOString() || photoBib.photo.createdAt.toISOString(),
     }));
+
+    // ═══════════════════════════════════════════════════════
+    // NEW: Get inferred bibs (photos without detected bibs but with face match)
+    // ═══════════════════════════════════════════════════════
+    const inferredBibs = await this.prisma.inferredBib.findMany({
+      where: {
+        eventId,
+        bib: normalizedBib,
+        rejected: false,
+        confidence: {
+          gte: FACE_BIB_LINKING.MIN_INFERRED_CONFIDENCE
+        },
+        photo: {
+          status: 'PROCESSED',
+          watermarkUrl: { not: null },
+          thumbUrl: { not: null },
+        }
+      },
+      include: {
+        photo: {
+          select: {
+            id: true,
+            thumbUrl: true,
+            watermarkUrl: true,
+            originalUrl: true,
+            takenAt: true,
+            createdAt: true,
+          }
+        },
+        faceEmbedding: {
+          select: {
+            bbox: true
+          }
+        }
+      },
+      orderBy: {
+        confidence: 'desc'
+      },
+      take: limitNum
+    });
+
+    const inferredItems: PhotoSearchResult[] = inferredBibs.map(ib => ({
+      photoId: ib.photo.id,
+      thumbUrl: ib.photo.thumbUrl!,
+      watermarkUrl: ib.photo.watermarkUrl!,
+      originalUrl: ib.photo.originalUrl!,
+      confidence: Number(ib.confidence),
+      type: 'INFERRED' as const,
+      faceBbox: ib.faceEmbedding.bbox as [number, number, number, number],
+      takenAt: ib.photo.takenAt?.toISOString() || ib.photo.createdAt.toISOString(),
+    }));
+
+    // Combine and sort by confidence (detected takes priority if same confidence)
+    const items = [...directItems, ...inferredItems].sort((a, b) => {
+      if (Math.abs(a.confidence - b.confidence) < 0.05) {
+        return a.type === 'DETECTED' ? -1 : 1;
+      }
+      return b.confidence - a.confidence;
+    });
 
     // Generate next cursor
     let nextCursor;
@@ -137,22 +197,42 @@ export class SearchService {
       nextCursor = Buffer.from(JSON.stringify(cursorData)).toString('base64');
     }
 
-    // Get total count for this bib (for analytics)
-    const totalCount = await this.prisma.photoBib.count({
-      where: {
-        eventId,
-        bib: normalizedBib,
-        photo: {
-          status: 'PROCESSED',
-          watermarkUrl: { not: null },
+    // Get total counts for this bib (for analytics)
+    const [detectedCount, inferredCount] = await Promise.all([
+      this.prisma.photoBib.count({
+        where: {
+          eventId,
+          bib: normalizedBib,
+          photo: {
+            status: 'PROCESSED',
+            watermarkUrl: { not: null },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.inferredBib.count({
+        where: {
+          eventId,
+          bib: normalizedBib,
+          rejected: false,
+          confidence: {
+            gte: FACE_BIB_LINKING.MIN_INFERRED_CONFIDENCE
+          },
+          photo: {
+            status: 'PROCESSED',
+            watermarkUrl: { not: null },
+          },
+        },
+      })
+    ]);
 
     return {
       items,
       nextCursor,
-      total: totalCount,
+      total: detectedCount + inferredCount,
+      stats: {
+        detected: detectedCount,
+        inferred: inferredCount
+      }
     };
   }
 

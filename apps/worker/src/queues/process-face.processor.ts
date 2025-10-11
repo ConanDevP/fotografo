@@ -1,10 +1,13 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 
 import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { PythonFaceApiService } from '../services/python-face-api.service';
-import { ProcessFaceJob } from '@shared/types';
+import { SpatialMatchingService } from '../services/spatial-matching.service';
+import { AthleteSignatureService } from '../services/athlete-signature.service';
+import { ProcessFaceJob, InferBibsJob } from '@shared/types';
 import { QUEUES, FACE_RECOGNITION } from '@shared/constants';
 
 @Processor(QUEUES.PROCESS_FACE, {
@@ -16,6 +19,9 @@ export class ProcessFaceProcessor extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private pythonFaceApiService: PythonFaceApiService,
+    private spatialMatchingService: SpatialMatchingService,
+    private athleteSignatureService: AthleteSignatureService,
+    @InjectQueue(QUEUES.INFER_BIBS) private inferBibsQueue: Queue<InferBibsJob>,
   ) {
     super();
   }
@@ -72,7 +78,106 @@ export class ProcessFaceProcessor extends WorkerHost {
       job.updateProgress(75);
       this.logger.log(`Saved ${faceEmbeddingData.length} face embeddings for photo ${photoId}`);
 
-      // Step 3: Update BatchUploadJob face processing counter
+      // ═══════════════════════════════════════════════════════
+      // Step 3: NEW - Associate faces with bibs (spatial matching)
+      // ═══════════════════════════════════════════════════════
+      job.updateProgress(78);
+
+      // Get detected bibs for this photo
+      const photoBibs = await this.prisma.photoBib.findMany({
+        where: { photoId },
+        select: {
+          id: true,
+          bib: true,
+          confidence: true,
+          bbox: true
+        }
+      });
+
+      if (photoBibs.length > 0 && detectedFaces.length > 0) {
+        this.logger.log(
+          `Photo ${photoId}: Matching ${detectedFaces.length} face(s) with ${photoBibs.length} bib(s)`
+        );
+
+        // Perform spatial matching
+        const matches = this.spatialMatchingService.matchFacesWithBibs(
+          detectedFaces.map(f => ({
+            bbox: f.bbox,
+            embedding: f.embedding,
+            confidence: f.confidence
+          })),
+          photoBibs.map(pb => ({
+            bib: pb.bib,
+            confidence: Number(pb.confidence),
+            bbox: pb.bbox as [number, number, number, number]
+          }))
+        );
+
+        // Save face-bib associations
+        const savedFaces = await this.prisma.faceEmbedding.findMany({
+          where: { photoId },
+          orderBy: { createdAt: 'asc' } // Same order as detectedFaces
+        });
+
+        for (const match of matches) {
+          const faceEmbedding = savedFaces[match.faceIndex];
+          const photoBib = photoBibs.find(pb => pb.bib === match.bibValue);
+
+          if (faceEmbedding && photoBib) {
+            await this.prisma.faceBibAssociation.create({
+              data: {
+                faceEmbeddingId: faceEmbedding.id,
+                photoBibId: photoBib.id,
+                photoId,
+                eventId,
+                bib: match.bibValue,
+                spatialScore: match.spatialScore,
+                method: 'SPATIAL'
+              }
+            });
+
+            // Update athlete signature
+            await this.athleteSignatureService.updateAthleteSignature(
+              eventId,
+              match.bibValue,
+              faceEmbedding.embedding,
+              Number(photoBib.confidence)
+            );
+          }
+        }
+
+        this.logger.log(
+          `Created ${matches.length} face-bib associations for photo ${photoId}`
+        );
+      }
+
+      // ═══════════════════════════════════════════════════════
+      // Step 4: NEW - Enqueue inference job if no bibs detected
+      // ═══════════════════════════════════════════════════════
+      if (photoBibs.length === 0 && detectedFaces.length > 0) {
+        this.logger.log(
+          `Photo ${photoId}: No bibs detected but ${detectedFaces.length} face(s) found - enqueueing inference job`
+        );
+
+        await this.inferBibsQueue.add(
+          'infer-bibs',
+          {
+            photoId,
+            eventId
+          } as InferBibsJob,
+          {
+            attempts: 3,
+            backoff: {
+              type: 'exponential',
+              delay: 10000 // Start with 10s delay
+            },
+            removeOnComplete: 10,
+            removeOnFail: 5
+          }
+        );
+      }
+
+      // Step 5: Update BatchUploadJob face processing counter
       job.updateProgress(85);
       const updatedPhoto = await this.prisma.photo.findUnique({
         where: { id: photoId },

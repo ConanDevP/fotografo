@@ -20,7 +20,8 @@
       "Bash(npm run dev:*)",
       "Bash(redis-cli:*)",
       "Bash(lsof:*)",
-      "Bash(brew services:*)"
+      "Bash(brew services:*)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []
