@@ -6,6 +6,7 @@ import { ProcessPhotoProcessor } from './queues/process-photo.processor';
 import { ProcessFaceProcessor } from './queues/process-face.processor';
 import { SendBibEmailProcessor } from './queues/send-bib-email.processor';
 import { ReprocessPhotoProcessor } from './queues/reprocess-photo.processor';
+import { InferBibsProcessor } from './queues/infer-bibs.processor';
 
 // Services
 import { PrismaService } from '../../api/src/common/services/prisma.service';
@@ -18,6 +19,8 @@ import { FaceApiService } from './services/face-api.service';
 import { PythonFaceApiService } from './services/python-face-api.service';
 import { ImagesService } from './services/images.service';
 import { MailService } from './services/mail.service';
+import { SpatialMatchingService } from './services/spatial-matching.service';
+import { AthleteSignatureService } from './services/athlete-signature.service';
 
 import { QUEUES } from '@shared/constants';
 
@@ -49,13 +52,15 @@ import { QUEUES } from '@shared/constants';
       { name: QUEUES.PROCESS_FACE },
       { name: QUEUES.SEND_BIB_EMAIL },
       { name: QUEUES.REPROCESS_PHOTO },
+      { name: QUEUES.INFER_BIBS },
     ),
   ],
   providers: [
     ProcessPhotoProcessor,
     ProcessFaceProcessor,
-    SendBibEmailProcessor, 
+    SendBibEmailProcessor,
     ReprocessPhotoProcessor,
+    InferBibsProcessor,
     PrismaService,
     CloudinaryService,
     R2Service,
@@ -66,6 +71,8 @@ import { QUEUES } from '@shared/constants';
     PythonFaceApiService,
     ImagesService,
     MailService,
+    SpatialMatchingService,
+    AthleteSignatureService,
   ],
 })
 export class WorkerModule {}

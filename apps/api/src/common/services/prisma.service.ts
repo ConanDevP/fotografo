@@ -8,7 +8,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   constructor() {
     const baseUrl = process.env.DATABASE_URL || '';
     const separator = baseUrl.includes('?') ? '&' : '?';
-    const pooledUrl = `${baseUrl}${separator}connection_limit=10&pool_timeout=20`;
+
+    // Pool optimized for Railway (32GB RAM / 32 vCPU)
+    // 20 workers + 10 API requests + 10 buffer = 40 connections
+    const pooledUrl = `${baseUrl}${separator}connection_limit=40&pool_timeout=30`;
 
     super({
       log: [
