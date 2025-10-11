@@ -3,6 +3,8 @@ import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
 
+
+
 async function main() {
   console.log('🌱 Creando usuario administrador...');
 
