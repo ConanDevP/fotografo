@@ -1,22 +1,23 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # Dockerfile para Fotocorredor API + Worker
-# Optimizado para DigitalOcean App Platform
+# Usando Debian para mejor compatibilidad con canvas, sharp, argon2
 # ═══════════════════════════════════════════════════════════════════════════════
 
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 # Instalar dependencias del sistema para canvas, sharp, argon2
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
-    cairo-dev \
-    pango-dev \
-    jpeg-dev \
-    giflib-dev \
-    librsvg-dev \
-    pixman-dev \
-    libc6-compat
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    libpixman-1-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -39,18 +40,19 @@ RUN npm run build
 # ─────────────────────────────────────────────────────────────────────────────
 # Production
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:20-slim AS runner
 
 # Librerías runtime
-RUN apk add --no-cache \
-    cairo \
-    pango \
-    jpeg \
-    giflib \
-    librsvg \
-    pixman \
-    libc6-compat \
-    dumb-init
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libjpeg62-turbo \
+    libgif7 \
+    librsvg2-2 \
+    libpixman-1-0 \
+    dumb-init \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
