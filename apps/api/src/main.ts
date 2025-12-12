@@ -39,9 +39,9 @@ async function bootstrap() {
   app.use(helmet());
   app.use(compression());
 
-  // Increase payload limit for face search images (base64)
-  app.use(bodyParser.json({ limit: '10mb' }));
-  app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
+  // Increase payload limit for batch uploads and face search images (base64)
+  app.use(bodyParser.json({ limit: '500mb' })); // Para batch uploads grandes
+  app.use(bodyParser.urlencoded({ limit: '500mb', extended: true }));
 
   // CORS
   app.enableCors({

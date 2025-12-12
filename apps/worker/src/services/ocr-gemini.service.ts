@@ -4,6 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
 import { GeminiOCRResponse, DetectedBib, BibRules } from '@shared/types';
 import { GEMINI_MODELS } from '@shared/constants';
+import * as sharp from 'sharp';
 
 const GeminiResponseSchema = z.object({
   bibs: z.array(z.object({
@@ -85,6 +86,7 @@ export class OcrGeminiService {
       return {
         bibs: processedBibs,
         notes: validated.notes,
+        imageDimensions: this.geminiImageDimensions || undefined,
         usage: usageMetadata ? {
           promptTokens: usageMetadata.promptTokenCount || 0,
           candidatesTokens: usageMetadata.candidatesTokenCount || 0,
@@ -103,12 +105,20 @@ export class OcrGeminiService {
     let prompt = `
 Analiza esta imagen de un evento deportivo y detecta todos los números de dorsal visibles.
 
-Instrucciones:
+REGLAS ESTRICTAS - MUY IMPORTANTE:
+- SOLO detecta dorsales COMPLETOS donde TODOS los dígitos sean claramente visibles
+- Si algún dígito está cortado, borroso, tapado u oculto parcialmente, NO reportes ese dorsal
+- Si solo puedes ver parte del número (ejemplo: solo "23" de "1234"), NO lo reportes
+- Es preferible NO detectar un dorsal que reportar un número incompleto o parcial
+- Un dorsal válido debe tener TODOS sus dígitos completamente visibles y legibles
+
+Instrucciones adicionales:
 - Busca números en petos/dorsales de corredores o ciclistas
 - Enfócate en números grandes y visibles en el pecho o espalda
 - Ignora números pequeños como relojes, timing chips, etc.
 - Proporciona coordenadas aproximadas del bounding box [x, y, width, height]
 - Asigna confianza 0-1 basada en claridad y certeza
+- Usa confianza BAJA (< 0.7) si tienes dudas sobre si está completo
 
 Responde SOLO en formato JSON:
 {
@@ -232,15 +242,62 @@ Responde SOLO en formato JSON:
     return true;
   }
 
+  private geminiImageDimensions: { width: number; height: number } | null = null;
+
   private async fetchImageAsBase64(url: string): Promise<string> {
     try {
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      
+
       const buffer = await response.arrayBuffer();
-      return Buffer.from(buffer).toString('base64');
+      const image = sharp(Buffer.from(buffer));
+      const metadata = await image.metadata();
+
+      if (!metadata.width || !metadata.height) {
+        throw new Error('No se pudieron obtener las dimensiones de la imagen');
+      }
+
+      const GEMINI_MAX_SIZE = 3072;
+      const maxDim = Math.max(metadata.width, metadata.height);
+
+      let finalWidth: number;
+      let finalHeight: number;
+      let processedBuffer: Buffer;
+
+      if (maxDim > GEMINI_MAX_SIZE) {
+        // Resize manteniendo aspect ratio
+        if (metadata.width > metadata.height) {
+          finalWidth = GEMINI_MAX_SIZE;
+          finalHeight = Math.round(metadata.height * (GEMINI_MAX_SIZE / metadata.width));
+        } else {
+          finalHeight = GEMINI_MAX_SIZE;
+          finalWidth = Math.round(metadata.width * (GEMINI_MAX_SIZE / metadata.height));
+        }
+
+        processedBuffer = await image
+          .rotate()
+          .resize(finalWidth, finalHeight, { fit: 'inside' })
+          .toBuffer();
+
+        this.logger.log(
+          `Imagen redimensionada para Gemini: ${metadata.width}×${metadata.height} → ${finalWidth}×${finalHeight}`
+        );
+      } else {
+        finalWidth = metadata.width;
+        finalHeight = metadata.height;
+        processedBuffer = await image.rotate().toBuffer();
+
+        this.logger.log(
+          `Imagen enviada a Gemini sin resize: ${finalWidth}×${finalHeight}`
+        );
+      }
+
+      // Guardar dimensiones para incluirlas en la respuesta
+      this.geminiImageDimensions = { width: finalWidth, height: finalHeight };
+
+      return processedBuffer.toString('base64');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       throw new Error(`Error descargando imagen: ${errorMessage}`);

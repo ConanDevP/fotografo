@@ -102,6 +102,24 @@ export class SearchService {
             createdAt: true,
           },
         },
+        faceBibAssociations: {
+          where: {
+            method: {
+              in: ['INFERRED', 'AUTO_KNN'],
+            },
+          },
+          orderBy: {
+            spatialScore: 'desc',
+          },
+          take: 1,
+          include: {
+            faceEmbedding: {
+              select: {
+                bbox: true,
+              },
+            },
+          },
+        },
       },
       orderBy: [
         { confidence: 'desc' },
@@ -116,15 +134,24 @@ export class SearchService {
     const results = hasMore ? photoBibs.slice(0, limitNum) : photoBibs;
 
     // Transform direct matches to response format
-    const directItems: PhotoSearchResult[] = results.map(photoBib => ({
-      photoId: photoBib.photo.id,
-      thumbUrl: photoBib.photo.thumbUrl!,
-      watermarkUrl: photoBib.photo.watermarkUrl!,
-      originalUrl: photoBib.photo.originalUrl!,
-      confidence: Number(photoBib.confidence),
-      type: 'DETECTED' as const,
-      takenAt: photoBib.photo.takenAt?.toISOString() || photoBib.photo.createdAt.toISOString(),
-    }));
+    const directItems: PhotoSearchResult[] = results.map(photoBib => {
+      const detectionType = photoBib.source === 'FACE_INFERRED' ? 'INFERRED' as const : 'DETECTED' as const;
+      const inferredAssociation = photoBib.faceBibAssociations?.[0];
+      const faceBbox = detectionType === 'INFERRED' && inferredAssociation?.faceEmbedding?.bbox
+        ? (inferredAssociation.faceEmbedding.bbox as [number, number, number, number])
+        : undefined;
+
+      return {
+        photoId: photoBib.photo.id,
+        thumbUrl: photoBib.photo.thumbUrl!,
+        watermarkUrl: photoBib.photo.watermarkUrl!,
+        originalUrl: photoBib.photo.originalUrl!,
+        confidence: Number(photoBib.confidence),
+        type: detectionType,
+        takenAt: photoBib.photo.takenAt?.toISOString() || photoBib.photo.createdAt.toISOString(),
+        faceBbox,
+      };
+    });
 
     // ═══════════════════════════════════════════════════════
     // NEW: Get inferred bibs (photos without detected bibs but with face match)
@@ -134,6 +161,7 @@ export class SearchService {
         eventId,
         bib: normalizedBib,
         rejected: false,
+        verified: false,
         confidence: {
           gte: FACE_BIB_LINKING.MIN_INFERRED_CONFIDENCE
         },
@@ -214,6 +242,7 @@ export class SearchService {
           eventId,
           bib: normalizedBib,
           rejected: false,
+          verified: false,
           confidence: {
             gte: FACE_BIB_LINKING.MIN_INFERRED_CONFIDENCE
           },

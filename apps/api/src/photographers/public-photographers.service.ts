@@ -6,18 +6,18 @@ import { UserRole, PhotoStatus } from '@shared/types';
 
 @Injectable()
 export class PublicPhotographersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async findPhotographers(
     query: PhotographerQueryDto,
     page: number = 1,
     limit: number = 20
-  ): Promise<{ 
-    items: PhotographerListResponse[]; 
+  ): Promise<{
+    items: PhotographerListResponse[];
     pagination: { page: number; limit: number; total: number; pages: number };
   }> {
     const skip = (page - 1) * limit;
-    
+
     // Construir filtros
     const where: any = {
       role: UserRole.PHOTOGRAPHER,
@@ -32,10 +32,10 @@ export class PublicPhotographersService {
     }
 
     if (query.specialties) {
-      const specialtiesArray = typeof query.specialties === 'string' 
+      const specialtiesArray = typeof query.specialties === 'string'
         ? query.specialties.split(',').map(s => s.trim().toLowerCase())
         : query.specialties.map(s => s.trim().toLowerCase());
-      
+
       if (specialtiesArray.length > 0) {
         where.specialties = {
           hasSome: specialtiesArray
@@ -44,17 +44,11 @@ export class PublicPhotographersService {
     }
 
     if (query.featured !== undefined) {
-      const featured = typeof query.featured === 'string' 
-        ? query.featured.toLowerCase() === 'true'
-        : Boolean(query.featured);
-      where.isFeatured = featured;
+      where.isFeatured = query.featured === true;
     }
 
     if (query.verified !== undefined) {
-      const verified = typeof query.verified === 'string'
-        ? query.verified.toLowerCase() === 'true' 
-        : Boolean(query.verified);
-      where.isVerified = verified;
+      where.isVerified = query.verified === true;
     }
 
     if (query.search) {
@@ -130,7 +124,7 @@ export class PublicPhotographersService {
 
   async getPhotographerBySlug(slug: string): Promise<PhotographerProfileResponse> {
     const photographer = await this.prisma.user.findUnique({
-      where: { 
+      where: {
         slug,
         role: UserRole.PHOTOGRAPHER
       },
@@ -194,7 +188,7 @@ export class PublicPhotographersService {
     limit: number = 20
   ) {
     const photographer = await this.prisma.user.findUnique({
-      where: { 
+      where: {
         slug,
         role: UserRole.PHOTOGRAPHER
       },
@@ -209,7 +203,7 @@ export class PublicPhotographersService {
 
     const [events, total] = await Promise.all([
       this.prisma.event.findMany({
-        where: { 
+        where: {
           ownerId: photographer.id,
           deletedAt: null
         },
@@ -227,7 +221,7 @@ export class PublicPhotographersService {
         take: limit
       }),
       this.prisma.event.count({
-        where: { 
+        where: {
           ownerId: photographer.id,
           deletedAt: null
         }

@@ -21,7 +21,8 @@
       "Bash(redis-cli:*)",
       "Bash(lsof:*)",
       "Bash(brew services:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Read(//Users/christianrivera/Desktop/python v1/app/**)"
     ],
     "deny": [],
     "ask": []

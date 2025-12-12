@@ -62,7 +62,8 @@ export class FaceApiService implements OnModuleInit {
       this.modelsLoaded = true;
       this.logger.log('Face-API models loaded successfully');
     } catch (error) {
-      this.logger.error('Failed to load Face-API models:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to load Face-API models: ${errorMessage}`);
       // Don't throw - continue without face recognition
       this.logger.warn('Face recognition will be disabled');
     }
@@ -183,7 +184,8 @@ export class FaceApiService implements OnModuleInit {
         const faces = await this.detectAllFaces(imageUrl);
         results.set(imageUrl, faces);
       } catch (error) {
-        this.logger.error(`Failed to process ${imageUrl}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(`Failed to process ${imageUrl}: ${errorMessage}`);
         results.set(imageUrl, []);
       }
     }

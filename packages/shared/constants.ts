@@ -24,7 +24,7 @@ export const ERROR_CODES = {
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
   UNAUTHORIZED: 'UNAUTHORIZED',
   FORBIDDEN: 'FORBIDDEN',
-  
+
   // Users
   USER_NOT_FOUND: 'USER_NOT_FOUND',
   EMAIL_ALREADY_EXISTS: 'EMAIL_ALREADY_EXISTS',
@@ -60,7 +60,7 @@ export const ERROR_CODES = {
 
   // Subscriptions
   SUBSCRIPTION_NOT_FOUND: 'SUBSCRIPTION_NOT_FOUND',
-  
+
   // General
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   RATE_LIMITED: 'RATE_LIMITED',
@@ -69,7 +69,7 @@ export const ERROR_CODES = {
 
 // File constraints
 export const FILE_CONSTRAINTS = {
-  MAX_SIZE: 20 * 1024 * 1024, // 20MB
+  MAX_SIZE: 50 * 1024 * 1024, // 50MB
   ALLOWED_TYPES: ['image/jpeg', 'image/jpg', 'image/png'] as readonly string[],
   ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png'],
 } as const;
@@ -103,11 +103,11 @@ export const PAGINATION = {
 
 // Cloudinary paths
 export const CLOUDINARY_FOLDERS = {
-  ORIGINAL: (eventId: string, bib?: string) => 
+  ORIGINAL: (eventId: string, bib?: string) =>
     bib ? `events/${eventId}/original/dorsal-${bib}` : `events/${eventId}/original`,
-  THUMB: (eventId: string, bib?: string) => 
-    bib ? `events/${eventId}/thumb/dorsal-${bib}` : `events/${eventId}/thumb`, 
-  WATERMARK: (eventId: string, bib?: string) => 
+  THUMB: (eventId: string, bib?: string) =>
+    bib ? `events/${eventId}/thumb/dorsal-${bib}` : `events/${eventId}/thumb`,
+  WATERMARK: (eventId: string, bib?: string) =>
     bib ? `events/${eventId}/wm/dorsal-${bib}` : `events/${eventId}/wm`,
 } as const;
 
@@ -143,20 +143,42 @@ export const FACE_SEARCH_LIMITS = {
 // Face-Bib Linking Configuration (NEW)
 export const FACE_BIB_LINKING = {
   // Spatial matching thresholds
-  SPATIAL_SCORE_THRESHOLD: 0.5,        // Minimum score for face-bib spatial association
-  MAX_HORIZONTAL_DISTANCE_RATIO: 1.0,  // Max horizontal distance as ratio of bbox width
-  MIN_VERTICAL_DISTANCE: 50,           // Minimum pixels between face and bib
-  MAX_VERTICAL_DISTANCE: 600,          // Maximum pixels between face and bib
-  OPTIMAL_VERTICAL_DISTANCE: 250,      // Optimal distance for score calculation
+  SPATIAL_SCORE_THRESHOLD: 0.35,       // Relaxed for running photos where bib is far from face
+  HORIZONTAL_DECAY: 4.0,               // More tolerant horizontal alignment
+  MAX_HORIZONTAL_REJECTION_RATIO: 6.0, // Allow wider horizontal distance
+  HORIZONTAL_WEIGHT: 0.45,             // Weight applied to horizontal alignment component
+  VERTICAL_WEIGHT: 0.55,               // Weight applied to vertical position component
+  MAX_NORMALIZED_VERTICAL_DISTANCE: 12, // Allow bibs up to 12 face-heights away (running photos)
+  MIN_VERTICAL_ZONE_SCORE: 0.05,        // Lower threshold for zone scoring
 
   // Inference thresholds
-  INFERENCE_THRESHOLD: 0.30,           // Stricter than search (0.40) for high precision
-  MIN_SIGNATURE_SAMPLES: 2,            // Minimum photos to create reliable signature
-  SIGNATURE_CONFIDENCE_START: 0.70,    // Initial confidence for new signature
-  SIGNATURE_CONFIDENCE_INCREMENT: 0.02, // Confidence increase per new sample
-  SIGNATURE_EMA_ALPHA: 0.3,            // Weight for new embedding in moving average
+  INFERENCE_THRESHOLD: 0.45,           // Relaxed for better recall
+  MIN_SIGNATURE_SAMPLES: 1,            // Allow inference from first photo
+  MIN_SIGNATURE_CONFIDENCE: 0.60,      // Lower threshold for signature reliability
+  SIGNATURE_CONFIDENCE_START: 0.75,    // Higher initial confidence
+  SIGNATURE_CONFIDENCE_INCREMENT: 0.03, // Faster confidence increase
+  SIGNATURE_EMA_ALPHA: 0.4,            // More weight to new embeddings
+  AUTO_VERIFY_CONFIDENCE: 0.85,        // Lower auto-verify threshold
+  KNN_STRICT_DISTANCE: 0.30,           // Relaxed: auto-assign when distance below this
+  KNN_RELAXED_DISTANCE: 0.45,          // Relaxed: create pending inference
+  KNN_MAX_RESULTS: 10,                 // More neighbours to evaluate
+  INDEX_MIN_CONFIDENCE: 0.5,           // Lower threshold to index more embeddings
 
   // Quality filters
-  MIN_GEMINI_CONFIDENCE: 0.85,         // Only use high-confidence Gemini detections for signatures
-  MIN_INFERRED_CONFIDENCE: 0.70,       // Minimum confidence to show inferred bib to users
+  MIN_GEMINI_CONFIDENCE: 0.70,         // Lower threshold for Gemini detections
+  MIN_INFERRED_CONFIDENCE: 0.55,       // Lower threshold to show inferred bibs
+
+  // Vertical zones (normalized by face height) to support bibs in different body locations
+  // NEGATIVE values = bib is ABOVE face (common in running photos where camera is low)
+  // POSITIVE values = bib is BELOW face (standard portrait orientation)
+  VERTICAL_ZONES: [
+    { id: 'RUNNING_FAR', mean: -8.0, stdDev: 3.0, weight: 0.50 }, // Running photo - bib far above face
+    { id: 'RUNNING_NEAR', mean: -5.0, stdDev: 2.5, weight: 0.55 }, // Running photo - bib moderately above
+    { id: 'HELMET', mean: -1.6, stdDev: 1.2, weight: 0.40 }, // Casco / cabeza
+    { id: 'SHOULDERS', mean: 0.2, stdDev: 1.0, weight: 0.35 }, // Parte superior espalda
+    { id: 'CHEST', mean: 3.5, stdDev: 1.5, weight: 0.60 }, // Pecho / torso
+    { id: 'WAIST', mean: 5.2, stdDev: 1.5, weight: 0.50 }, // Cintura / cadera
+    { id: 'THIGH', mean: 7.2, stdDev: 1.5, weight: 0.45 }, // Muslo / pierna
+    { id: 'BIKE_FRAME', mean: 4.8, stdDev: 1.5, weight: 0.45 }, // Tubo bici / placa lateral
+  ] as const,
 } as const;

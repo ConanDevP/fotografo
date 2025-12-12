@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../api/src/common/services/prisma.service';
+import { AthleteSignature } from '@prisma/client';
 import { FACE_BIB_LINKING } from '@shared/constants';
 
 @Injectable()
@@ -25,17 +26,22 @@ export class AthleteSignatureService {
     newEmbedding: number[],
     geminiConfidence?: number
   ): Promise<void> {
+    this.logger.log(
+      `🎭 [SIGNATURE-UPDATE] Bib "${bib}" - geminiConfidence: ${geminiConfidence !== undefined ? geminiConfidence.toFixed(3) : 'undefined (bypassed)'}`
+    );
+
     // Only use high-confidence Gemini detections for building signatures
     if (
       geminiConfidence !== undefined &&
       geminiConfidence < FACE_BIB_LINKING.MIN_GEMINI_CONFIDENCE
     ) {
-      this.logger.debug(
-        `Skipping signature update for bib ${bib} - ` +
-        `Gemini confidence ${geminiConfidence.toFixed(3)} < ${FACE_BIB_LINKING.MIN_GEMINI_CONFIDENCE}`
+      this.logger.warn(
+        `   ❌ REJECTED: Gemini confidence ${geminiConfidence.toFixed(3)} < ${FACE_BIB_LINKING.MIN_GEMINI_CONFIDENCE} threshold`
       );
       return;
     }
+
+    this.logger.log(`   ✅ Confidence check passed - proceeding with signature update`);
 
     try {
       const existing = await this.prisma.athleteSignature.findUnique({
@@ -52,6 +58,27 @@ export class AthleteSignatureService {
         const currentSignature = existing.faceSignature;
         const currentCount = existing.sampleCount;
         const alpha = FACE_BIB_LINKING.SIGNATURE_EMA_ALPHA;
+
+        if (currentSignature.length !== newEmbedding.length) {
+          this.logger.warn(
+            `   ⚠️ Dimension mismatch for bib "${bib}" signature (${currentSignature.length} vs ${newEmbedding.length}) - resetting signature with fresh embedding`
+          );
+
+          await this.prisma.athleteSignature.update({
+            where: { id: existing.id },
+            data: {
+              faceSignature: newEmbedding,
+              sampleCount: 1,
+              confidence: FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START,
+              updatedAt: new Date()
+            }
+          });
+
+          this.logger.log(
+            `   🔄 Signature for bib "${bib}" reset to new embedding (sampleCount=1, confidence=${FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START.toFixed(3)})`
+          );
+          return;
+        }
 
         // Exponential Moving Average (EMA)
         // new_signature = (1 - alpha) * old_signature + alpha * new_embedding
@@ -76,8 +103,8 @@ export class AthleteSignatureService {
         });
 
         this.logger.log(
-          `✅ Updated signature for bib ${bib} ` +
-          `(${currentCount + 1} samples, confidence: ${newConfidence.toFixed(3)})`
+          `   💾 UPDATED signature for bib "${bib}" ` +
+          `(samples: ${currentCount} → ${currentCount + 1}, confidence: ${Number(existing.confidence).toFixed(3)} → ${newConfidence.toFixed(3)})`
         );
 
       } else {
@@ -96,8 +123,8 @@ export class AthleteSignatureService {
         });
 
         this.logger.log(
-          `🆕 Created signature for bib ${bib} ` +
-          `(confidence: ${FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START.toFixed(3)})`
+          `   🆕 CREATED NEW signature for bib "${bib}" ` +
+          `(samples: 1, confidence: ${FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START.toFixed(3)})`
         );
       }
 
@@ -111,21 +138,61 @@ export class AthleteSignatureService {
   }
 
   /**
+   * Determine if a signature is reliable enough to be used for inference
+   */
+  public isSignatureReliable(signature: Pick<AthleteSignature, 'sampleCount' | 'confidence'>): boolean {
+    if (signature.sampleCount >= FACE_BIB_LINKING.MIN_SIGNATURE_SAMPLES) {
+      return true;
+    }
+    const confidenceValue = Number(signature.confidence ?? 0);
+    return confidenceValue >= FACE_BIB_LINKING.MIN_SIGNATURE_CONFIDENCE;
+  }
+
+  /**
+   * Filter signatures down to only those considered reliable
+   */
+  public filterReliableSignatures<T extends { sampleCount: number; confidence: any }>(
+    signatures: T[]
+  ): T[] {
+    return signatures.filter(signature => this.isSignatureReliable(signature));
+  }
+
+  /**
    * Get all reliable athlete signatures for an event
-   * Only returns signatures with enough samples to be trustworthy
+   * Only returns signatures trustworthy enough for inference
    */
   async getReliableSignatures(eventId: string) {
-    return await this.prisma.athleteSignature.findMany({
+    const signatures = await this.prisma.athleteSignature.findMany({
+      where: { eventId },
+      orderBy: {
+        confidence: 'desc'
+      }
+    });
+
+    return this.filterReliableSignatures(signatures);
+  }
+
+  /**
+   * Get reliable signatures for a subset of bibs within an event
+   */
+  async getReliableSignaturesForBibs(eventId: string, bibs: string[]) {
+    if (!bibs.length) {
+      return [];
+    }
+
+    const signatures = await this.prisma.athleteSignature.findMany({
       where: {
         eventId,
-        sampleCount: {
-          gte: FACE_BIB_LINKING.MIN_SIGNATURE_SAMPLES
+        bib: {
+          in: bibs
         }
       },
       orderBy: {
         confidence: 'desc'
       }
     });
+
+    return this.filterReliableSignatures(signatures);
   }
 
   /**
@@ -152,9 +219,7 @@ export class AthleteSignatureService {
       }
     });
 
-    const reliableSignatures = allSignatures.filter(
-      s => s.sampleCount >= FACE_BIB_LINKING.MIN_SIGNATURE_SAMPLES
-    );
+    const reliableSignatures = this.filterReliableSignatures(allSignatures);
 
     const avgSampleCount = allSignatures.length > 0
       ? allSignatures.reduce((sum, s) => sum + s.sampleCount, 0) / allSignatures.length
