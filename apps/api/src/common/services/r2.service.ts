@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import * as https from 'https';
 import { getErrorMessage, getErrorStack } from '@shared/utils';
 
 @Injectable()
@@ -15,9 +17,18 @@ export class R2Service {
     const accountId = this.configService.get('R2_ACCOUNT_ID');
     const accessKeyId = this.configService.get('R2_ACCESS_KEY_ID');
     const secretAccessKey = this.configService.get('R2_SECRET_ACCESS_KEY');
-    
+
     this.bucketName = this.configService.get('R2_BUCKET_NAME', 'fotografos-images');
     this.publicUrl = this.configService.get('R2_PUBLIC_URL', '');
+
+    // Create HTTPS agent with proper TLS configuration
+    const httpsAgent = new https.Agent({
+      keepAlive: true,
+      maxSockets: 50,
+      timeout: 120000, // 2 minutes
+      // Force TLS 1.2+ for Cloudflare compatibility
+      minVersion: 'TLSv1.2',
+    });
 
     this.s3Client = new S3Client({
       region: 'auto',
@@ -26,6 +37,12 @@ export class R2Service {
         accessKeyId,
         secretAccessKey,
       },
+      maxAttempts: 3,
+      requestHandler: new NodeHttpHandler({
+        httpsAgent,
+        connectionTimeout: 30000, // 30 seconds to establish connection
+        socketTimeout: 120000, // 2 minutes for data transfer
+      }),
     });
   }
 
@@ -41,7 +58,7 @@ export class R2Service {
   }> {
     try {
       const key = `events/${eventId}/original/${photoId}.jpg`;
-      
+
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: key,
@@ -56,7 +73,7 @@ export class R2Service {
 
       await this.s3Client.send(command);
 
-      const originalUrl = this.publicUrl 
+      const originalUrl = this.publicUrl
         ? `${this.publicUrl}/${key}`
         : `https://${this.bucketName}.r2.dev/${key}`;
 
@@ -126,7 +143,7 @@ export class R2Service {
   }
 
   buildUrl(key: string): string {
-    return this.publicUrl 
+    return this.publicUrl
       ? `${this.publicUrl}/${key}`
       : `https://${this.bucketName}.r2.dev/${key}`;
   }
@@ -148,7 +165,7 @@ export class R2Service {
 
       const url = this.buildUrl(key);
       this.logger.log(`Imagen subida a R2: ${key}`);
-      
+
       return url;
     } catch (error) {
       this.logger.error(`Error subiendo imagen: ${getErrorMessage(error)}`, getErrorStack(error));
@@ -170,7 +187,7 @@ export class R2Service {
     try {
       const extension = file.originalname.split('.').pop() || 'jpg';
       const key = `avatars/${userId}/avatar.${extension}`;
-      
+
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: key,
@@ -185,7 +202,7 @@ export class R2Service {
 
       await this.s3Client.send(command);
 
-      const publicUrl = this.publicUrl 
+      const publicUrl = this.publicUrl
         ? `${this.publicUrl}/${key}`
         : `https://${this.bucketName}.r2.cloudflarestorage.com/${key}`;
 

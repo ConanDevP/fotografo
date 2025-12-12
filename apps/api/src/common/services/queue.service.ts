@@ -38,8 +38,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.processPhotoQueue = new Queue<ProcessPhotoJob>(QUEUES.PROCESS_PHOTO, {
       connection: this.connection,
       defaultJobOptions: {
-        removeOnComplete: 1000, // MEJORADO: Para 3000+ fotos
-        removeOnFail: 500,      // MEJORADO: Mantener más jobs fallidos
+        removeOnComplete: 5000, // ULTRA: Para 10,000+ fotos
+        removeOnFail: 1000,     // ULTRA: Mantener más jobs fallidos para debugging
         attempts: 3,
         delay: 0,              // CRÍTICO: Sin delay por defecto para procesamiento inmediato
         backoff: {

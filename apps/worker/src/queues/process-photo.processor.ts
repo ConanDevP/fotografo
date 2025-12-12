@@ -6,7 +6,7 @@ import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { OcrGeminiService } from '../services/ocr-gemini.service';
 import { ImagesService } from '../services/images.service';
 import { CloudinaryService } from '../../../api/src/common/services/cloudinary.service';
-import { ProcessPhotoJob, ProcessFaceJob } from '@shared/types';
+import { ProcessPhotoJob, ProcessFaceJob, InferBibsJob } from '@shared/types';
 import { QUEUES } from '@shared/constants';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -23,6 +23,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
     private imagesService: ImagesService,
     private cloudinaryService: CloudinaryService,
     @InjectQueue(QUEUES.PROCESS_FACE) private faceQueue: Queue<ProcessFaceJob>,
+    @InjectQueue(QUEUES.INFER_BIBS) private inferQueue: Queue<InferBibsJob>,
   ) {
     super();
   }
@@ -107,6 +108,8 @@ export class ProcessPhotoProcessor extends WorkerHost {
             promptTokens: ocrResult.usage?.promptTokens,
             candidatesTokens: ocrResult.usage?.candidatesTokens,
             totalTokens: ocrResult.usage?.totalTokens,
+            geminiImageWidth: ocrResult.imageDimensions?.width,
+            geminiImageHeight: ocrResult.imageDimensions?.height,
           })),
           skipDuplicates: true,
         });
@@ -147,6 +150,25 @@ export class ProcessPhotoProcessor extends WorkerHost {
         // Don't fail the entire job if face processing fails
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         this.logger.warn(`[Job ${job.id}] Failed to enqueue face processing for photo ${photoId}: ${errorMessage}`);
+      }
+
+      // Guard: encolar inferencias con un pequeño delay para asegurar ejecución aunque el face job se retrase
+      try {
+        await this.inferQueue.add(
+          'infer-bibs',
+          { photoId, eventId },
+          {
+            jobId: `infer-guard-${photoId}`,
+            delay: 45_000, // 45s después, normalmente el face ya habrá guardado embeddings
+            attempts: 2,
+            backoff: { type: 'exponential', delay: 10_000 },
+            removeOnComplete: 10,
+            removeOnFail: 5,
+          }
+        );
+        this.logger.log(`[Job ${job.id}] Guard infer-bibs enqueued (delayed) for photo ${photoId}`);
+      } catch (e) {
+        this.logger.warn(`[Job ${job.id}] Failed to enqueue guard infer-bibs for photo ${photoId}`);
       }
 
       // Step 8: Mark photo as processed
@@ -271,6 +293,21 @@ export class ProcessPhotoProcessor extends WorkerHost {
 
   private async enqueueFaceProcessing(photoId: string, eventId: string, imageUrl: string): Promise<void> {
     try {
+      // Remove existing job if it exists to allow retries
+      try {
+        const existingJob = await this.faceQueue.getJob(`face-${photoId}`);
+        if (existingJob) {
+          const state = await existingJob.getState();
+          // Only remove if stuck (waiting/delayed but not active)
+          if (state === 'waiting' || state === 'delayed') {
+            await existingJob.remove();
+            this.logger.log(`Removed stuck face job for photo ${photoId} (state: ${state})`);
+          }
+        }
+      } catch (e) {
+        // Job doesn't exist, continue
+      }
+
       await this.faceQueue.add(
         'process-face',
         {
@@ -279,6 +316,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
           imageUrl,
         } as ProcessFaceJob,
         {
+          // REMOVED jobId to allow automatic ID generation and retries
           attempts: 3,
           backoff: {
             type: 'exponential',

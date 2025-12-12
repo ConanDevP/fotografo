@@ -136,8 +136,7 @@ export class FaceSearchService {
         };
       }
       
-      this.logger.log(`User descriptor length: ${userDescriptor.length}`);
-      this.logger.log(`First DB embedding length: ${eventFaces[0].embedding.length}`);
+      this.logger.log(`Comparing against ${eventFaces.length} faces (descriptor dim: ${userDescriptor.length})`);
       const matches: FaceSearchResult[] = [];
 
       for (const eventFace of eventFaces) {
@@ -148,14 +147,14 @@ export class FaceSearchService {
 
         // Convert embedding to number array for comparison
         const faceDescriptor = eventFace.embedding.map(d => Number(d));
-        
+
         // Calculate cosine distance using Python Face API service (lower is better)
         const distance = this.pythonFaceApiService.calculateDistance(
           userDescriptor,
           faceDescriptor
         );
 
-        this.logger.debug(`Photo ${eventFace.photoId}: distance=${distance.toFixed(4)}, threshold=${threshold}`);
+        // Removed verbose per-photo debug log to reduce console spam
 
         // Check if it's a match (distance is below the threshold)
         if (distance <= threshold) {
@@ -231,7 +230,8 @@ export class FaceSearchService {
         averageFacesPerPhoto: Number(averageFacesPerPhoto.toFixed(2)),
       };
     } catch (error) {
-      this.logger.error(`Error getting face stats for event ${eventId}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Error getting face stats for event ${eventId}: ${errorMessage}`);
       throw error;
     }
   }

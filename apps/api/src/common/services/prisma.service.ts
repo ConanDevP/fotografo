@@ -6,32 +6,16 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
-    const baseUrl = process.env.DATABASE_URL || '';
-    const separator = baseUrl.includes('?') ? '&' : '?';
-
-    // Pool optimized for Railway (32GB RAM / 32 vCPU)
-    // 20 workers + 10 API requests + 10 buffer = 40 connections
-    const pooledUrl = `${baseUrl}${separator}connection_limit=40&pool_timeout=30`;
-
+    // Usar DATABASE_URL del .env directamente (ya incluye connection_limit optimizado)
     super({
       log: [
-        { level: 'warn', emit: 'event' },
-        { level: 'error', emit: 'event' },
+        { level: 'error', emit: 'event' }, // Solo errors, no warnings para reducir logs
       ],
-      datasources: {
-        db: {
-          url: pooledUrl,
-        },
-      },
     });
   }
 
   async onModuleInit() {
-    // Log warnings and errors
-    this.$on('warn' as never, (e: any) => {
-      this.logger.warn(e.message);
-    });
-
+    // Log errors only
     this.$on('error' as never, (e: any) => {
       this.logger.error(e.message);
     });

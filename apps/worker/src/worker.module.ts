@@ -21,6 +21,8 @@ import { ImagesService } from './services/images.service';
 import { MailService } from './services/mail.service';
 import { SpatialMatchingService } from './services/spatial-matching.service';
 import { AthleteSignatureService } from './services/athlete-signature.service';
+import { FaceKnnService } from './services/face-knn.service';
+import { RescueJobsService } from './services/rescue-jobs.service';
 
 import { QUEUES } from '@shared/constants';
 
@@ -73,6 +75,8 @@ import { QUEUES } from '@shared/constants';
     MailService,
     SpatialMatchingService,
     AthleteSignatureService,
+    FaceKnnService,
+    RescueJobsService,
   ],
 })
 export class WorkerModule {}

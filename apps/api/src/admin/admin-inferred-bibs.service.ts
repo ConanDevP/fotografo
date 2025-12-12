@@ -1,12 +1,108 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { InferredBibReview } from '@shared/types';
+import { Prisma, PhotoBib } from '@prisma/client';
+
+type InferredBibWithEmbedding = Prisma.InferredBibGetPayload<{
+  include: {
+    faceEmbedding: {
+      select: {
+        embedding: true;
+        bbox: true;
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class AdminInferredBibsService {
   private readonly logger = new Logger(AdminInferredBibsService.name);
 
   constructor(private prisma: PrismaService) {}
+
+  /**
+   * Ensure the inferred bib is persisted as a real photo_bib and linked to the face embedding
+   */
+  private async assignInferredBibToPhoto(inferred: InferredBibWithEmbedding): Promise<void> {
+    if (!inferred.faceEmbedding) {
+      this.logger.warn(`Inferred bib ${inferred.id} has no face embedding linked; skipping assignment`);
+      return;
+    }
+
+    const existingPhotoBib = await this.prisma.photoBib.findFirst({
+      where: {
+        photoId: inferred.photoId,
+        bib: inferred.bib,
+      },
+    });
+
+    const newConfidence = Number(inferred.confidence ?? 0);
+    let targetPhotoBib: PhotoBib;
+
+    if (!existingPhotoBib) {
+      targetPhotoBib = await this.prisma.photoBib.create({
+        data: {
+          photoId: inferred.photoId,
+          eventId: inferred.eventId,
+          bib: inferred.bib,
+          confidence: inferred.confidence,
+          source: 'FACE_INFERRED',
+          bbox: null,
+        },
+      });
+
+      this.logger.log(
+        `   ➕ Created FACE_INFERRED photo_bib for photo ${inferred.photoId} ↔ bib "${inferred.bib}" (confidence: ${newConfidence.toFixed(3)})`,
+      );
+    } else {
+      targetPhotoBib = existingPhotoBib;
+      const existingConfidence = Number(existingPhotoBib.confidence ?? 0);
+
+      if (newConfidence > existingConfidence) {
+        targetPhotoBib = await this.prisma.photoBib.update({
+          where: { id: existingPhotoBib.id },
+          data: {
+            confidence: inferred.confidence,
+            source: existingPhotoBib.source || 'FACE_INFERRED',
+          },
+        });
+
+        this.logger.log(
+          `   🔁 Updated photo_bib ${existingPhotoBib.id.toString()} confidence ${existingConfidence.toFixed(
+            3,
+          )} → ${newConfidence.toFixed(3)}`,
+        );
+      }
+    }
+
+    const existingAssociation = await this.prisma.faceBibAssociation.findFirst({
+      where: {
+        faceEmbeddingId: inferred.faceEmbeddingId,
+        photoBibId: targetPhotoBib.id,
+      },
+    });
+
+    if (!existingAssociation) {
+      const distance = Number(inferred.faceDistance ?? 1);
+      const associationScore = Math.max(0, Math.min(1, 1 - distance));
+
+      await this.prisma.faceBibAssociation.create({
+        data: {
+          faceEmbeddingId: inferred.faceEmbeddingId,
+          photoBibId: targetPhotoBib.id,
+          photoId: inferred.photoId,
+          eventId: inferred.eventId,
+          bib: inferred.bib,
+          spatialScore: associationScore,
+          method: 'INFERRED',
+        },
+      });
+
+      this.logger.log(
+        `   🔗 Linked face ${inferred.faceEmbeddingId} with bib "${inferred.bib}" (score: ${associationScore.toFixed(3)})`,
+      );
+    }
+  }
 
   /**
    * Get inferred bibs for review by photographer
@@ -76,7 +172,8 @@ export class AdminInferredBibsService {
       include: {
         faceEmbedding: {
           select: {
-            embedding: true
+            embedding: true,
+            bbox: true,
           }
         }
       }
@@ -86,41 +183,60 @@ export class AdminInferredBibsService {
       throw new NotFoundException('Inferred bib not found');
     }
 
-    // Mark as verified
-    await this.prisma.inferredBib.update({
-      where: { id: inferredBibId },
-      data: {
-        verified: true,
-        rejected: false
-      }
-    });
+    const wasAlreadyVerified = inferred.verified && !inferred.rejected;
+
+    if (!wasAlreadyVerified) {
+      await this.prisma.inferredBib.update({
+        where: { id: inferredBibId },
+        data: {
+          verified: true,
+          rejected: false
+        }
+      });
+      inferred.verified = true;
+      inferred.rejected = false;
+    } else {
+      this.logger.log(`ℹ️ Inferred bib ${inferredBibId} was already verified; refreshing links`);
+    }
+
+    await this.assignInferredBibToPhoto(inferred);
 
     // Update athlete signature with this verified match
     // This improves future inferences
-    const existing = await this.prisma.athleteSignature.findUnique({
-      where: {
-        eventId_bib: {
-          eventId: inferred.eventId,
-          bib: inferred.bib
-        }
-      }
-    });
-
-    if (existing) {
-      // Update signature with verified embedding
-      const alpha = 0.3;
-      const updatedSignature = existing.faceSignature.map((val, idx) =>
-        val * (1 - alpha) + inferred.faceEmbedding.embedding[idx] * alpha
-      );
-
-      await this.prisma.athleteSignature.update({
-        where: { id: existing.id },
-        data: {
-          faceSignature: updatedSignature,
-          sampleCount: { increment: 1 },
-          confidence: Math.min(0.99, Number(existing.confidence) + 0.02)
+    if (!wasAlreadyVerified) {
+      if (!inferred.faceEmbedding?.embedding) {
+        this.logger.warn(
+          `   ⚠️ Missing embedding data for inferred bib ${inferredBibId}; skipping signature update`
+        );
+      } else {
+        const existing = await this.prisma.athleteSignature.findUnique({
+          where: {
+            eventId_bib: {
+              eventId: inferred.eventId,
+              bib: inferred.bib
+          }
         }
       });
+
+        if (existing) {
+          // Update signature with verified embedding
+          const alpha = 0.3;
+          const updatedSignature = existing.faceSignature.map((val, idx) =>
+            val * (1 - alpha) + inferred.faceEmbedding.embedding[idx] * alpha
+          );
+
+          await this.prisma.athleteSignature.update({
+            where: { id: existing.id },
+            data: {
+              faceSignature: updatedSignature,
+              sampleCount: { increment: 1 },
+              confidence: Math.min(0.99, Number(existing.confidence) + 0.02)
+            }
+          });
+        }
+      }
+    } else {
+      this.logger.log(`   ↪️ Signature already reinforced previously; skipping EMA update`);
     }
 
     this.logger.log(`✅ Verified inferred bib ${inferredBibId} (bib: ${inferred.bib})`);
@@ -153,19 +269,23 @@ export class AdminInferredBibsService {
    * Bulk verify multiple inferred bibs
    */
   async bulkVerifyInferredBibs(inferredBibIds: string[]): Promise<{ verified: number }> {
-    const result = await this.prisma.inferredBib.updateMany({
-      where: {
-        id: { in: inferredBibIds }
-      },
-      data: {
-        verified: true,
-        rejected: false
+    let verifiedCount = 0;
+
+    for (const id of inferredBibIds) {
+      try {
+        await this.verifyInferredBib(id);
+        verifiedCount++;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn(
+          `   ⚠️ Failed to verify inferred bib ${id}: ${errorMessage}`
+        );
       }
-    });
+    }
 
-    this.logger.log(`✅ Bulk verified ${result.count} inferred bibs`);
+    this.logger.log(`✅ Bulk verified ${verifiedCount} inferred bibs (requested: ${inferredBibIds.length})`);
 
-    return { verified: result.count };
+    return { verified: verifiedCount };
   }
 
   /**

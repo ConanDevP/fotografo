@@ -52,9 +52,11 @@ export class UploadsController {
 
   @Post('batch/append/:jobId')
   @UseInterceptors(
-    FilesInterceptor('files', 100, { // Limite por chunk
+    FilesInterceptor('files', 100, { // Limite por chunk: 100 archivos
       limits: {
-        fileSize: FILE_CONSTRAINTS.MAX_SIZE,
+        fileSize: FILE_CONSTRAINTS.MAX_SIZE, // 20MB por archivo
+        files: 100, // Máximo 100 archivos
+        fieldSize: 500 * 1024 * 1024, // 500MB total por request
       },
       fileFilter: (req, file, cb) => {
         if (FILE_CONSTRAINTS.ALLOWED_TYPES.includes(file.mimetype)) {

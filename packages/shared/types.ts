@@ -49,6 +49,10 @@ export interface DetectedBib {
 export interface GeminiOCRResponse {
   bibs: DetectedBib[];
   notes?: string;
+  imageDimensions?: {
+    width: number;
+    height: number;
+  };
   usage?: {
     promptTokens: number;
     candidatesTokens: number;

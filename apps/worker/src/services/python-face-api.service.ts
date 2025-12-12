@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FaceDetectionResult } from '@shared/types';
+import * as sharp from 'sharp';
 
 interface PythonFaceApiResponse {
   success: boolean;
@@ -22,25 +23,26 @@ export class PythonFaceApiService {
     this.pythonApiUrl = this.configService.get('PYTHON_FACE_API_URL', 'http://localhost:8000');
   }
 
-  async detectAllFaces(imageUrl: string, maxFaces = 10): Promise<FaceDetectionResult[]> {
+  async detectAllFaces(imageUrl: string, maxFaces = 10, minConfidence = 0.5): Promise<FaceDetectionResult[]> {
     try {
-      this.logger.debug(`Detecting faces in image: ${imageUrl}`);
-      
+      this.logger.log(`Calling Python Face API with image URL...`);
+
       const response = await fetch(`${this.pythonApiUrl}/extract-faces`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          image_url: imageUrl,
+          image_url: imageUrl, // Send signed URL directly
           max_faces: maxFaces,
-          min_confidence: 0.3,
+          min_confidence: minConfidence,
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Python API returned ${response.status}: ${errorText}`);
+        const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + '...[truncated]' : errorText;
+        throw new Error(`Python API returned ${response.status}: ${truncatedError}`);
       }
 
       const data: PythonFaceApiResponse = await response.json();
@@ -66,28 +68,29 @@ export class PythonFaceApiService {
       return results;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Error calling Python Face API: ${errorMessage}`);
+      // NO loggear el error completo porque puede incluir la imagen base64
+      this.logger.error(`Error calling Python Face API: ${errorMessage.substring(0, 200)}`);
       return [];
     }
   }
 
   async extractFaceDescriptor(imageBuffer: Buffer): Promise<Float32Array | null> {
     try {
-      // Convert buffer to base64 for sending to Python API
-      const base64Image = imageBuffer.toString('base64');
+      // Comprimir AGRESIVAMENTE para no exceder límite de 2083 caracteres
+      // Para detección facial, 200px es suficiente y genera ~15KB = ~20K chars base64
+      const compressedBuffer = await sharp(imageBuffer)
+        .resize(200, 200, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 50 })
+        .toBuffer();
+
+      const base64Image = compressedBuffer.toString('base64');
       const dataUrl = `data:image/jpeg;base64,${base64Image}`;
-      
-      this.logger.log(`Calling Python API for face extraction...`);
-      this.logger.log(`Image buffer size: ${imageBuffer.length} bytes`);
-      this.logger.log(`Base64 image size: ${base64Image.length} characters`);
-      
+
       const requestPayload = {
-        image_url: dataUrl, // Send as data URL
+        image_url: dataUrl, // Send as data URL (comprimida)
         max_faces: 1, // Only extract first face
         min_confidence: 0.3,
       };
-      
-      this.logger.log(`Sending request to ${this.pythonApiUrl}/extract-faces with confidence: ${requestPayload.min_confidence}`);
       
       const response = await fetch(`${this.pythonApiUrl}/extract-faces`, {
         method: 'POST',
@@ -97,41 +100,38 @@ export class PythonFaceApiService {
         body: JSON.stringify(requestPayload),
       });
 
-      this.logger.log(`Python API responded with status: ${response.status}`);
-
       if (!response.ok) {
         const errorText = await response.text();
-        this.logger.error(`Python API error response: ${errorText}`);
-        throw new Error(`Python API returned ${response.status}: ${errorText}`);
+        // Truncar errorText para no loggear payloads con imágenes base64
+        const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + '...[truncated]' : errorText;
+        this.logger.error(`Python API error ${response.status}: ${truncatedError}`);
+        throw new Error(`Python API returned ${response.status}`);
       }
 
       const data: PythonFaceApiResponse = await response.json();
-      
-      this.logger.log(`Python API response: success=${data.success}, faces_detected=${data.faces_detected}`);
-      
+
       if (data.error) {
-        this.logger.warn(`Python API returned error: ${data.error}`);
-      }
-      
-      if (!data.success || data.faces.length === 0) {
-        this.logger.warn(`No face detected in search image - success: ${data.success}, faces: ${data.faces.length}`);
-        return null;
+        this.logger.warn(`Python API error: ${data.error}`);
       }
 
-      this.logger.log(`Face detected successfully! Confidence: ${data.faces[0].confidence}, embedding size: ${data.faces[0].embedding.length}`);
+      if (!data.success || data.faces.length === 0) {
+        this.logger.warn(`No face detected in search image`);
+        return null;
+      }
       
       // Return first face's embedding as Float32Array
       return new Float32Array(data.faces[0].embedding);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Error extracting face descriptor: ${errorMessage}`);
+      // NO loggear el error completo porque puede incluir la imagen base64
+      this.logger.error(`Error extracting face descriptor: ${errorMessage.substring(0, 200)}`);
       return null;
     }
   }
 
   calculateDistance(descriptor1: number[], descriptor2: number[]): number {
     if (descriptor1.length !== descriptor2.length) {
-      this.logger.error('Descriptors must have the same length for distance calculation');
+      this.logger.error(`Descriptor length mismatch: ${descriptor1.length} vs ${descriptor2.length}`);
       return 999; // Return large distance for non-match
     }
 
