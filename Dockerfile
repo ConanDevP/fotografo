@@ -23,7 +23,6 @@ WORKDIR /app
 # Copiar archivos de dependencias
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
-COPY apps/worker/package*.json ./apps/worker/
 
 # Instalar dependencias
 RUN npm ci --legacy-peer-deps
