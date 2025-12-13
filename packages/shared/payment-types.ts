@@ -8,7 +8,7 @@ export enum PaymentGateway {
 
 export enum PaymentStatus {
   CREATED = 'created',
-  PENDING = 'pending', 
+  PENDING = 'pending',
   APPROVED = 'approved',
   FAILED = 'failed',
   CANCELLED = 'cancelled',
@@ -26,6 +26,7 @@ export interface PaymentRequest {
   description?: string;
   // Marketplace/Platform fields
   photographerPayPalMerchantId?: string; // PayPal merchant_id of photographer
+  photographerStripeAccountId?: string; // Stripe Connect account_id of photographer
   platformFeeAmount?: number; // Platform commission in cents
   platformFeePercent?: number; // Platform commission percentage
 }

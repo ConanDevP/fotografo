@@ -41,6 +41,14 @@ model User {
   paypalTrackingId          String?   @map("paypal_tracking_id") // For tracking onboarding
   paypalOnboardedAt         DateTime? @map("paypal_onboarded_at") @db.Timestamptz
 
+  // Stripe Connect fields
+  stripeAccountId           String?   @unique @map("stripe_account_id") // acct_xxx from Stripe Connect
+  stripeAccountStatus       String?   @map("stripe_account_status") // pending, active, restricted
+  stripeOnboardingCompleted Boolean   @default(false) @map("stripe_onboarding_completed")
+  stripeChargesEnabled      Boolean   @default(false) @map("stripe_charges_enabled")
+  stripePayoutsEnabled      Boolean   @default(false) @map("stripe_payouts_enabled")
+  stripeOnboardedAt         DateTime? @map("stripe_onboarded_at") @db.Timestamptz
+
   // Relations
   ownedEvents        Event[]          @relation("EventOwner")
   photographedPhotos Photo[]          @relation("PhotoPhotographer")
