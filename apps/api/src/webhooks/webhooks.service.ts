@@ -1,8 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PaymentsService } from '../payments/payments.service';
 import { PrismaService } from '../common/services/prisma.service';
-import { PaymentGateway, PayPalWebhookEvent } from '@shared/payment-types';
+import { StripeGatewayService } from '../payments/gateways/stripe-gateway.service';
+import { StripeConnectService } from '../payments/gateways/stripe-connect.service';
+import { PaymentGateway } from '@shared/payment-types';
+import Stripe from 'stripe';
 
+/* PayPal comentado temporalmente
 interface MerchantOnboardingWebhook {
   event_type: 'MERCHANT.ONBOARDING.COMPLETED' | 'MERCHANT.PARTNER-CONSENT.REVOKED';
   resource: {
@@ -11,6 +15,7 @@ interface MerchantOnboardingWebhook {
     partner_client_id?: string;
   };
 }
+*/
 
 @Injectable()
 export class WebhooksService {
@@ -19,9 +24,12 @@ export class WebhooksService {
   constructor(
     private readonly paymentsService: PaymentsService,
     private readonly prisma: PrismaService,
-  ) {}
+    @Optional() private readonly stripeGateway: StripeGatewayService,
+    @Optional() private readonly stripeConnect: StripeConnectService,
+  ) { }
 
-  async handlePayPalWebhook(body: PayPalWebhookEvent, headers: any): Promise<{ success: boolean }> {
+  /* PayPal comentado temporalmente
+  async handlePayPalWebhook(body: any, headers: any): Promise<{ success: boolean }> {
     try {
       this.logger.log(`Processing PayPal webhook: ${body.event_type}`);
       this.logger.debug('PayPal webhook body:', JSON.stringify(body, null, 2));
@@ -61,18 +69,18 @@ export class WebhooksService {
         case 'PAYMENT.CAPTURE.COMPLETED':
           // Intentar múltiples rutas para obtener el order ID
           paymentId = body.resource?.supplementary_data?.related_ids?.order_id ||
-                     body.resource?.custom_id ||
-                     body.resource?.invoice_id ||
-                     body.resource?.id;
+            body.resource?.custom_id ||
+            body.resource?.invoice_id ||
+            body.resource?.id;
           orderStatus = 'completed';
           this.logger.log(`Extracted payment ID for CAPTURE.COMPLETED: ${paymentId}`);
           break;
 
         case 'PAYMENT.CAPTURE.DENIED':
           paymentId = body.resource?.supplementary_data?.related_ids?.order_id ||
-                     body.resource?.custom_id ||
-                     body.resource?.invoice_id ||
-                     body.resource?.id;
+            body.resource?.custom_id ||
+            body.resource?.invoice_id ||
+            body.resource?.id;
           orderStatus = 'denied';
           break;
 
@@ -107,11 +115,159 @@ export class WebhooksService {
       return { success: false };
     }
   }
+  */
 
-  async handleStripeWebhook(body: any, signature: string): Promise<{ success: boolean }> {
-    // TODO: Implementar cuando se agregue Stripe
-    this.logger.warn('Stripe webhook handling not implemented');
-    return { success: true };
+  async handleStripeWebhook(rawBody: Buffer | string, signature: string): Promise<{ success: boolean }> {
+    try {
+      if (!this.stripeGateway) {
+        this.logger.warn('Stripe not configured, ignoring webhook');
+        return { success: true };
+      }
+
+      // Verify and construct event
+      let event: Stripe.Event;
+      try {
+        event = this.stripeGateway.constructWebhookEvent(rawBody, signature);
+      } catch (err) {
+        this.logger.error('Stripe webhook signature verification failed', err);
+        return { success: false };
+      }
+
+      this.logger.log(`Processing Stripe webhook: ${event.type}`);
+
+      // Log full event for debugging
+      this.logger.log(`Stripe webhook event data: ${JSON.stringify({
+        type: event.type,
+        id: event.id,
+        data: event.data.object
+      }, null, 2)}`);
+
+      switch (event.type) {
+        // Payment events
+        case 'checkout.session.completed': {
+          const session = event.data.object as Stripe.Checkout.Session;
+          this.logger.log(`Checkout session completed: ${session.id}, payment_status: ${session.payment_status}, metadata: ${JSON.stringify(session.metadata)}`);
+
+          if (session.payment_status === 'paid') {
+            this.logger.log(`Processing paid session ${session.id}...`);
+            try {
+              await this.paymentsService.confirmPaymentFromWebhook(
+                session.id,
+                PaymentGateway.STRIPE,
+                event
+              );
+              this.logger.log(`Successfully confirmed payment for session ${session.id}`);
+            } catch (error) {
+              this.logger.error(`Error confirming payment for session ${session.id}:`, error);
+            }
+          } else {
+            this.logger.log(`Session ${session.id} not paid yet, status: ${session.payment_status}`);
+          }
+          break;
+        }
+
+        case 'checkout.session.expired': {
+          const session = event.data.object as Stripe.Checkout.Session;
+          this.logger.log(`Checkout session expired: ${session.id}`);
+          // Optionally mark order as cancelled
+          break;
+        }
+
+        // Connect account events
+        case 'account.updated': {
+          const account = event.data.object as Stripe.Account;
+          if (this.stripeConnect) {
+            await this.stripeConnect.handleAccountUpdated(account);
+          }
+          break;
+        }
+
+        case 'account.application.deauthorized': {
+          const application = event.data.object as Stripe.Application;
+          this.logger.log(`Application deauthorized: ${application.id}`);
+          // Handle account disconnection if needed
+          break;
+        }
+
+        // Payment intent events (for more granular tracking)
+        case 'payment_intent.succeeded': {
+          const paymentIntent = event.data.object as Stripe.PaymentIntent;
+          this.logger.log(`Payment intent succeeded: ${paymentIntent.id}, metadata: ${JSON.stringify(paymentIntent.metadata)}`);
+
+          // Confirm payment using orderId from metadata
+          if (paymentIntent.metadata?.orderId) {
+            const orderId = paymentIntent.metadata.orderId;
+            this.logger.log(`Confirming payment for orderId: ${orderId}`);
+
+            try {
+              // Update order directly since we have the orderId
+              const order = await this.prisma.order.findUnique({
+                where: { id: orderId },
+                include: {
+                  items: { include: { photo: true } },
+                  event: { select: { name: true } },
+                  user: { select: { email: true } },
+                },
+              });
+
+              if (!order) {
+                this.logger.error(`Order not found: ${orderId}`);
+                break;
+              }
+
+              if (order.status === 'PAID') {
+                this.logger.log(`Order ${orderId} already paid, skipping`);
+                break;
+              }
+
+              // Update order to PAID
+              await this.prisma.order.update({
+                where: { id: orderId },
+                data: {
+                  status: 'PAID',
+                  stripeSessionId: paymentIntent.id, // Store payment intent ID
+                },
+              });
+
+              this.logger.log(`✅ Order ${orderId} marked as PAID via payment_intent.succeeded`);
+
+            } catch (error) {
+              this.logger.error(`Error confirming payment for order ${orderId}:`, error);
+            }
+          } else {
+            this.logger.warn(`No orderId in payment_intent metadata`);
+          }
+          break;
+        }
+
+        case 'payment_intent.payment_failed': {
+          const paymentIntent = event.data.object as Stripe.PaymentIntent;
+          this.logger.log(`Payment intent failed: ${paymentIntent.id}`);
+          break;
+        }
+
+        // Transfer events (for Connect payouts)
+        case 'transfer.created': {
+          const transfer = event.data.object as Stripe.Transfer;
+          this.logger.log(`Transfer created: ${transfer.id} to ${transfer.destination}`);
+          break;
+        }
+
+        case 'payout.paid': {
+          const payout = event.data.object as Stripe.Payout;
+          this.logger.log(`Payout completed: ${payout.id}`);
+          break;
+        }
+
+        default:
+          this.logger.log(`Unhandled Stripe event type: ${event.type}`);
+      }
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error('Error processing Stripe webhook', error);
+      return { success: false };
+    }
   }
 
   async handleMercadoPagoWebhook(body: any, headers: any): Promise<{ success: boolean }> {
@@ -120,11 +276,8 @@ export class WebhooksService {
     return { success: true };
   }
 
-  /**
-   * Handle MERCHANT.ONBOARDING.COMPLETED webhook
-   * Fired when a photographer completes PayPal onboarding
-   */
-  private async handleMerchantOnboardingCompleted(body: MerchantOnboardingWebhook): Promise<{ success: boolean }> {
+  /* PayPal comentado temporalmente
+  private async handleMerchantOnboardingCompleted(body: any): Promise<{ success: boolean }> {
     try {
       const { merchant_id, tracking_id } = body.resource;
 
@@ -171,11 +324,7 @@ export class WebhooksService {
     }
   }
 
-  /**
-   * Handle MERCHANT.PARTNER-CONSENT.REVOKED webhook
-   * Fired when a photographer revokes permissions
-   */
-  private async handleMerchantConsentRevoked(body: MerchantOnboardingWebhook): Promise<{ success: boolean }> {
+  private async handleMerchantConsentRevoked(body: any): Promise<{ success: boolean }> {
     try {
       const { merchant_id, tracking_id } = body.resource;
 
@@ -214,4 +363,5 @@ export class WebhooksService {
       return { success: false };
     }
   }
+  */
 }

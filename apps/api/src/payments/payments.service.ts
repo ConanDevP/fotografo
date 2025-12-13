@@ -9,25 +9,25 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { EventPricing } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
 import { PaymentGatewayFactory } from './factories/payment-gateway.factory';
-import { 
-  PaymentGateway, 
-  PaymentRequest, 
-  PaymentItem, 
+import {
+  PaymentGateway,
+  PaymentRequest,
+  PaymentItem,
   PaymentStatus,
-  PaymentConfirmation 
+  PaymentConfirmation
 } from '@shared/payment-types';
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
-  
+
   constructor(
     private prisma: PrismaService,
     private storageService: StorageService,
     private queueService: QueueService,
     private configService: ConfigService,
     private paymentGatewayFactory: PaymentGatewayFactory,
-  ) {}
+  ) { }
 
   async createOrder(orderData: CreateOrderDto, userId?: string) {
     const { eventId, items, gateway = PaymentGateway.DEMO, currency, returnUrl, cancelUrl } = orderData;
@@ -45,6 +45,9 @@ export class PaymentsService {
             id: true,
             paypalMerchantId: true,
             paypalOnboardingCompleted: true,
+            stripeAccountId: true,
+            stripeOnboardingCompleted: true,
+            stripeChargesEnabled: true,
           },
         },
       },
@@ -140,10 +143,10 @@ export class PaymentsService {
 
     // Determinar si usar modo demo o pasarela real
     const isDemoMode = this.configService.get('DEMO_PAYMENTS', 'false') === 'true' || gateway === PaymentGateway.DEMO;
-    
+
     if (isDemoMode && gateway === PaymentGateway.DEMO) {
       await this.processPayment(order.id, 'demo-session-id');
-      
+
       return {
         orderId: order.id,
         paymentId: 'demo-payment-' + order.id,
@@ -161,19 +164,38 @@ export class PaymentsService {
     const frontendUrl = this.configService.get('FRONTEND_URL', 'https://fotocorredor.com');
 
     // Calculate platform fee for marketplace split
-    const platformFeePercent = event.platformFeePercent ? parseFloat(event.platformFeePercent.toString()) : 15.0;
-    const platformFeeAmount = Math.round((totalCents * platformFeePercent) / 100);
+    // Fixed split: Photographer gets $5.00 per photo, platform keeps the rest ($2.99 per photo at $7.99 price)
+    const PHOTOGRAPHER_AMOUNT_PER_PHOTO_CENTS = 500; // $5.00 in cents
+    const numberOfPhotos = validatedItems.length;
+    const photographerTotalCents = PHOTOGRAPHER_AMOUNT_PER_PHOTO_CENTS * numberOfPhotos;
+    const platformFeeAmount = Math.max(0, totalCents - photographerTotalCents);
+    const platformFeePercent = totalCents > 0 ? (platformFeeAmount / totalCents) * 100 : 0;
+
+    // Get photographer payment accounts
     const photographerPayPalMerchantId = event.owner?.paypalMerchantId;
+    const photographerStripeAccountId = event.owner?.stripeAccountId;
 
-    // Only use marketplace mode if:
-    // 1. Gateway is PayPal (other gateways don't support it yet)
-    // 2. Photographer has completed PayPal onboarding
-    const useMarketplaceMode = gateway === PaymentGateway.PAYPAL &&
-                               event.owner?.paypalOnboardingCompleted &&
-                               photographerPayPalMerchantId;
+    // Determine if marketplace mode is available for each gateway
+    const paypalMarketplaceReady = event.owner?.paypalOnboardingCompleted && photographerPayPalMerchantId;
+    const stripeMarketplaceReady = event.owner?.stripeOnboardingCompleted &&
+      event.owner?.stripeChargesEnabled &&
+      photographerStripeAccountId;
 
-    if (!useMarketplaceMode && gateway === PaymentGateway.PAYPAL) {
-      this.logger.warn(`Photographer ${event.owner?.id} hasn't completed PayPal onboarding. Using standard mode.`);
+    // Use marketplace mode based on gateway and photographer readiness
+    let useMarketplaceMode = false;
+
+    if (gateway === PaymentGateway.PAYPAL && paypalMarketplaceReady) {
+      useMarketplaceMode = true;
+    } else if (gateway === PaymentGateway.STRIPE && stripeMarketplaceReady) {
+      useMarketplaceMode = true;
+    }
+
+    if (!useMarketplaceMode) {
+      if (gateway === PaymentGateway.PAYPAL) {
+        this.logger.warn(`Photographer ${event.owner?.id} hasn't completed PayPal onboarding. Using standard mode.`);
+      } else if (gateway === PaymentGateway.STRIPE) {
+        this.logger.warn(`Photographer ${event.owner?.id} hasn't completed Stripe onboarding. Using standard mode.`);
+      }
     }
 
     const paymentRequest: PaymentRequest = {
@@ -191,8 +213,9 @@ export class PaymentsService {
         unitAmount: item.priceCents,
         photoId: item.photoId,
       })),
-      // Marketplace fields (only for PayPal with onboarded photographers)
-      photographerPayPalMerchantId: useMarketplaceMode ? photographerPayPalMerchantId : undefined,
+      // Marketplace fields
+      photographerPayPalMerchantId: (useMarketplaceMode && gateway === PaymentGateway.PAYPAL) ? photographerPayPalMerchantId : undefined,
+      photographerStripeAccountId: (useMarketplaceMode && gateway === PaymentGateway.STRIPE) ? photographerStripeAccountId : undefined,
       platformFeeAmount: useMarketplaceMode ? platformFeeAmount : undefined,
       platformFeePercent: useMarketplaceMode ? platformFeePercent : undefined,
     };
@@ -200,7 +223,7 @@ export class PaymentsService {
     try {
       const paymentGateway = this.paymentGatewayFactory.createGateway(gateway);
       const paymentResponse = await paymentGateway.createPayment(paymentRequest);
-      
+
       // Actualizar orden con ID de pago de la pasarela
       await this.prisma.order.update({
         where: { id: order.id },
@@ -225,7 +248,7 @@ export class PaymentsService {
         where: { id: order.id },
         data: { status: 'CANCELLED' },
       });
-      
+
       throw error;
     }
   }
@@ -401,14 +424,14 @@ export class PaymentsService {
   }
 
   async confirmPaymentFromWebhook(
-    paymentId: string, 
-    gateway: PaymentGateway, 
+    paymentId: string,
+    gateway: PaymentGateway,
     webhookData?: any
   ): Promise<{ success: boolean; orderId?: string }> {
     try {
       // Buscar orden por payment ID - buscar tanto CREATED como ya procesadas
       let order = await this.prisma.order.findFirst({
-        where: { 
+        where: {
           stripeSessionId: paymentId, // Campo que usamos para todas las pasarelas
           status: 'CREATED',
         },
@@ -430,7 +453,7 @@ export class PaymentsService {
       // Si no encontramos con status CREATED, buscar sin filtro de status
       if (!order) {
         order = await this.prisma.order.findFirst({
-          where: { 
+          where: {
             stripeSessionId: paymentId,
           },
           include: {
@@ -521,7 +544,7 @@ export class PaymentsService {
   async getAvailableGateways() {
     const supportedGateways = this.paymentGatewayFactory.getSupportedGateways();
     const isDemoMode = this.configService.get('DEMO_PAYMENTS', 'false') === 'true';
-    
+
     return {
       gateways: supportedGateways.map(gateway => ({
         id: gateway,
@@ -535,7 +558,7 @@ export class PaymentsService {
   async handlePayPalReturn(token: string, payerID: string) {
     try {
       this.logger.log(`Processing PayPal return: token=${token}, payerID=${payerID}`);
-      
+
       const order = await this.prisma.order.findFirst({
         where: { stripeSessionId: token },
         select: { id: true, status: true },
@@ -551,18 +574,18 @@ export class PaymentsService {
       // SIEMPRE confirmar el pago cuando llegue la redirección
       // No dependemos del webhook para esto
       let finalStatus = order.status;
-      
+
       if (order.status === 'CREATED') {
         try {
           this.logger.log('Confirming payment with PayPal...');
           const paymentGateway = this.paymentGatewayFactory.createGateway(PaymentGateway.PAYPAL);
           const confirmation = await paymentGateway.confirmPayment(token, { payerID });
-          
+
           this.logger.log(`PayPal confirmation status: ${confirmation.status}`);
-          
+
           // Actualizar según confirmación de PayPal
           finalStatus = confirmation.status === PaymentStatus.APPROVED ? 'PAID' : 'CREATED';
-          
+
           await this.prisma.order.update({
             where: { id: order.id },
             data: { status: finalStatus },
@@ -604,7 +627,7 @@ export class PaymentsService {
       this.logger.error('Error handling PayPal return:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
-      
+
       return {
         success: false,
         error: errorMessage,
@@ -616,7 +639,7 @@ export class PaymentsService {
   async handlePayPalCancel(token: string) {
     try {
       this.logger.log(`Processing PayPal cancel: token=${token}`);
-      
+
       const order = await this.prisma.order.findFirst({
         where: { stripeSessionId: token },
         select: { id: true },
@@ -643,7 +666,7 @@ export class PaymentsService {
       this.logger.error('Error handling PayPal cancel:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
-      
+
       return {
         success: false,
         error: errorMessage,
@@ -655,10 +678,10 @@ export class PaymentsService {
   async verifyPayPalReturn(token: string, payerID?: string) {
     try {
       this.logger.log(`Verifying PayPal return: token=${token}, payerID=${payerID}`);
-      
+
       // Buscar orden por token PayPal (guardado en stripeSessionId)
       const order = await this.prisma.order.findFirst({
-        where: { 
+        where: {
           stripeSessionId: token,
           status: { not: 'CANCELLED' },
         },
@@ -698,7 +721,7 @@ export class PaymentsService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      
+
       throw new BadRequestException({
         code: 'VERIFICATION_ERROR',
         message: 'Error al verificar el retorno de PayPal',
@@ -727,7 +750,7 @@ export class PaymentsService {
     // Configure response headers for ZIP download
     const eventName = order.event?.name || 'Fotos';
     const zipFilename = `${eventName.replace(/[^a-zA-Z0-9]/g, '_')}_${orderId.slice(-8)}.zip`;
-    
+
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
     res.setHeader('Cache-Control', 'no-cache');
@@ -761,19 +784,19 @@ export class PaymentsService {
       for (let i = 0; i < photos.length; i++) {
         const item = photos[i];
         const photo = item.photo!;
-        
+
         try {
           this.logger.log(`Adding photo ${i + 1}/${photos.length} to ZIP: ${photo.id}`);
-          
+
           // Get photo buffer from storage
           const photoBuffer = await this.getPhotoBuffer(photo.cloudinaryId);
-          
+
           // Generate filename: photo_001.jpg, photo_002.jpg, etc.
           const filename = `photo_${(i + 1).toString().padStart(3, '0')}.jpg`;
-          
+
           // Add to archive
           archive.append(photoBuffer, { name: filename });
-          
+
         } catch (photoError) {
           this.logger.error(`Error adding photo ${photo.id} to ZIP:`, photoError);
           // Continue with other photos instead of failing completely
@@ -782,12 +805,12 @@ export class PaymentsService {
 
       // Finalize the archive
       await archive.finalize();
-      
+
       this.logger.log(`ZIP download completed for order ${orderId} with ${photos.length} photos`);
-      
+
     } catch (error) {
       this.logger.error(`Error creating ZIP for order ${orderId}:`, error);
-      
+
       // If headers not sent yet, send error response
       if (!res.headersSent) {
         res.status(500).json({
@@ -802,17 +825,17 @@ export class PaymentsService {
     try {
       // Get secure download URL from storage service (7 days expiry: 7 * 24 * 60 * 60 = 604,800 seconds)
       const downloadUrl = await this.storageService.generateSecureDownloadUrl(cloudinaryId, 604800);
-      
+
       // Fetch the photo
       const response = await fetch(downloadUrl);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const arrayBuffer = await response.arrayBuffer();
       return Buffer.from(arrayBuffer);
-      
+
     } catch (error) {
       this.logger.error(`Error downloading photo ${cloudinaryId}:`, error);
       throw error;

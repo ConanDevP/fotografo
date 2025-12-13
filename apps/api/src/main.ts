@@ -39,6 +39,9 @@ async function bootstrap() {
   app.use(helmet());
   app.use(compression());
 
+  // Raw body for Stripe webhooks (must be before json parser)
+  app.use('/v1/webhooks/stripe', bodyParser.raw({ type: 'application/json' }));
+
   // Increase payload limit for batch uploads and face search images (base64)
   app.use(bodyParser.json({ limit: '500mb' })); // Para batch uploads grandes
   app.use(bodyParser.urlencoded({ limit: '500mb', extended: true }));
@@ -60,7 +63,7 @@ async function bootstrap() {
     }),
   );
 
-  
+
 
   // Global filters
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -69,18 +72,18 @@ async function bootstrap() {
   app.setGlobalPrefix('v1');
 
   const port = configService.get('PORT', 8080);
-  
+
   // Configurar timeouts y keep-alive
   const server = await app.listen(port);
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
-  
+
   // NUEVO: Límite máximo de conexiones HTTP
   server.maxConnections = parseInt(configService.get('MAX_HTTP_CONNECTIONS', '200'));
-  
+
   // NUEVO: Timeout para requests largos
   server.timeout = parseInt(configService.get('HTTP_TIMEOUT', '120000')); // 2 minutos
-  
+
   // Manejar errores de conexión
   server.on('clientError', (err, socket) => {
     if (err.code === 'ECONNRESET' || !socket.writable) {
@@ -118,7 +121,7 @@ async function bootstrap() {
     }
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   });
-  
+
   console.log(`🚀 API corriendo en puerto ${port}`);
 }
 
