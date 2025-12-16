@@ -36,6 +36,11 @@ model User {
   paypalPermissionsGranted  Boolean          @default(false) @map("paypal_permissions_granted")
   paypalTrackingId          String?          @map("paypal_tracking_id")
   paypalOnboardedAt         DateTime?        @map("paypal_onboarded_at") @db.Timestamptz(6)
+  stripeAccountId           String?          @unique @map("stripe_account_id")
+  stripeOnboardingCompleted Boolean          @default(false) @map("stripe_onboarding_completed")
+  stripeChargesEnabled      Boolean          @default(false) @map("stripe_charges_enabled")
+  stripePayoutsEnabled      Boolean          @default(false) @map("stripe_payouts_enabled")
+  stripeOnboardedAt         DateTime?        @map("stripe_onboarded_at") @db.Timestamptz(6)
   auditLogs                 AuditLog[]
   BatchUploadJob            BatchUploadJob[]
   ownedEvents               Event[]          @relation("EventOwner")
