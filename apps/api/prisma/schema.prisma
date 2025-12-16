@@ -8,53 +8,39 @@ datasource db {
 }
 
 model User {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email           String   @unique
-  passwordHash    String?  @map("password_hash")
-  name            String?  @map("name")
-  phone           String?  @map("phone")
-  profileImageUrl String?  @map("profile_image_url")
-  address         String?  @map("address") // Para fotógrafos principalmente
-  role            UserRole
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Photographer profile fields
-  slug            String?  @unique
-  bio             String?
-  website         String?
-  instagram       String?
-  facebook        String?
-  specialties     String[]
-  experienceYears Int?     @map("experience_years")
-  location        String?
-  portfolioUrl    String?  @map("portfolio_url")
-  isFeatured      Boolean  @default(false) @map("is_featured")
-  isVerified      Boolean  @default(false) @map("is_verified")
-
-  // PayPal Platform (Marketplace) fields
-  paypalMerchantId          String?   @unique @map("paypal_merchant_id") // merchant_id from PayPal
-  paypalMerchantIdInPayPal  String?   @map("paypal_merchant_id_in_paypal") // merchantIdInPayPal
-  paypalEmail               String?   @map("paypal_email")
-  paypalOnboardingCompleted Boolean   @default(false) @map("paypal_onboarding_completed")
-  paypalPermissionsGranted  Boolean   @default(false) @map("paypal_permissions_granted")
-  paypalTrackingId          String?   @map("paypal_tracking_id") // For tracking onboarding
-  paypalOnboardedAt         DateTime? @map("paypal_onboarded_at") @db.Timestamptz
-
-  // Stripe Connect fields
-  stripeAccountId           String?   @unique @map("stripe_account_id") // acct_xxx from Stripe Connect
-  stripeAccountStatus       String?   @map("stripe_account_status") // pending, active, restricted
-  stripeOnboardingCompleted Boolean   @default(false) @map("stripe_onboarding_completed")
-  stripeChargesEnabled      Boolean   @default(false) @map("stripe_charges_enabled")
-  stripePayoutsEnabled      Boolean   @default(false) @map("stripe_payouts_enabled")
-  stripeOnboardedAt         DateTime? @map("stripe_onboarded_at") @db.Timestamptz
-
-  // Relations
-  ownedEvents        Event[]          @relation("EventOwner")
-  photographedPhotos Photo[]          @relation("PhotoPhotographer")
-  orders             Order[]
-  auditLogs          AuditLog[]
-  BatchUploadJob     BatchUploadJob[]
+  id                        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                     String           @unique
+  passwordHash              String?          @map("password_hash")
+  name                      String?          @map("name")
+  phone                     String?          @map("phone")
+  profileImageUrl           String?          @map("profile_image_url")
+  address                   String?          @map("address")
+  role                      UserRole
+  createdAt                 DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  slug                      String?          @unique
+  bio                       String?
+  website                   String?
+  instagram                 String?
+  facebook                  String?
+  specialties               String[]
+  experienceYears           Int?             @map("experience_years")
+  location                  String?
+  portfolioUrl              String?          @map("portfolio_url")
+  isFeatured                Boolean          @default(false) @map("is_featured")
+  isVerified                Boolean          @default(false) @map("is_verified")
+  paypalMerchantId          String?          @unique @map("paypal_merchant_id")
+  paypalMerchantIdInPayPal  String?          @map("paypal_merchant_id_in_paypal")
+  paypalEmail               String?          @map("paypal_email")
+  paypalOnboardingCompleted Boolean          @default(false) @map("paypal_onboarding_completed")
+  paypalPermissionsGranted  Boolean          @default(false) @map("paypal_permissions_granted")
+  paypalTrackingId          String?          @map("paypal_tracking_id")
+  paypalOnboardedAt         DateTime?        @map("paypal_onboarded_at") @db.Timestamptz(6)
+  auditLogs                 AuditLog[]
+  BatchUploadJob            BatchUploadJob[]
+  ownedEvents               Event[]          @relation("EventOwner")
+  orders                    Order[]
+  photographedPhotos        Photo[]          @relation("PhotoPhotographer")
 
   @@index([slug])
   @@index([role, isFeatured])
@@ -62,93 +48,85 @@ model User {
 }
 
 model Event {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name               String
-  slug               String    @unique
-  date               DateTime  @db.Date
-  location           String?
-  imageUrl           String?   @map("image_url")
-  ownerId            String?   @map("owner_id") @db.Uuid
-  bibRules           Json?     @map("bib_rules")
-  pricing            Json?     @map("pricing")
-  platformFeePercent Decimal?  @default(15.00) @map("platform_fee_percent") @db.Decimal(5, 2) // % commission for platform
-  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
-
-  // Free download configuration
-  isFreeDownload      Boolean   @default(false) @map("is_free_download")
-  freeDownloadUntil   DateTime? @map("free_download_until") @db.Timestamptz
-  requireEmailForFree Boolean   @default(true) @map("require_email_for_free")
-  freeDownloadLimit   Int?      @map("free_download_limit")
-  totalFreeDownloads  Int       @default(0) @map("total_free_downloads")
-
-  // Relations
-  owner               User?                @relation("EventOwner", fields: [ownerId], references: [id])
-  photos              Photo[]
-  photoBibs           PhotoBib[]
-  faceEmbeddings      FaceEmbedding[]
-  bibSubscriptions    BibSubscription[]
-  orders              Order[]
-  BatchUploadJob      BatchUploadJob[]
-  freeDownloads       FreeDownload[]
-  faceBibAssociations FaceBibAssociation[]
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String
+  slug                String               @unique
+  date                DateTime             @db.Date
+  location            String?
+  imageUrl            String?              @map("image_url")
+  ownerId             String?              @map("owner_id") @db.Uuid
+  bibRules            Json?                @map("bib_rules")
+  pricing             Json?                @map("pricing")
+  deletedAt           DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  platformFeePercent  Decimal?             @default(15.00) @map("platform_fee_percent") @db.Decimal(5, 2)
+  isFreeDownload      Boolean              @default(false) @map("is_free_download")
+  freeDownloadUntil   DateTime?            @map("free_download_until") @db.Timestamptz(6)
+  requireEmailForFree Boolean              @default(true) @map("require_email_for_free")
+  freeDownloadLimit   Int?                 @map("free_download_limit")
+  totalFreeDownloads  Int                  @default(0) @map("total_free_downloads")
   athleteSignatures   AthleteSignature[]
+  BatchUploadJob      BatchUploadJob[]
+  bibSubscriptions    BibSubscription[]
+  owner               User?                @relation("EventOwner", fields: [ownerId], references: [id])
+  faceBibAssociations FaceBibAssociation[]
+  faceEmbeddings      FaceEmbedding[]
+  freeDownloads       FreeDownload[]
   inferredBibs        InferredBib[]
+  orders              Order[]
+  photoBibs           PhotoBib[]
+  photos              Photo[]
 
   @@map("events")
 }
 
 model Photo {
-  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  eventId        String      @map("event_id") @db.Uuid
-  photographerId String?     @map("photographer_id") @db.Uuid
-  cloudinaryId   String      @map("cloudinary_id")
-  originalUrl    String      @map("original_url")
-  thumbUrl       String?     @map("thumb_url")
-  watermarkUrl   String?     @map("watermark_url")
-  width          Int?
-  height         Int?
-  takenAt        DateTime?   @map("taken_at") @db.Timestamptz
-  status         PhotoStatus @default(PENDING)
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId             String               @map("event_id") @db.Uuid
+  photographerId      String?              @map("photographer_id") @db.Uuid
+  cloudinaryId        String               @map("cloudinary_id")
+  originalUrl         String               @map("original_url")
+  thumbUrl            String?              @map("thumb_url")
+  watermarkUrl        String?              @map("watermark_url")
+  width               Int?
+  height              Int?
+  takenAt             DateTime?            @map("taken_at") @db.Timestamptz(6)
+  status              PhotoStatus          @default(PENDING)
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  batchJobId          String?              @map("batch_job_id") @db.Uuid
+  auditLogs           AuditLog[]
+  faceBibAssociations FaceBibAssociation[]
+  faces               FaceEmbedding[]
+  freeDownloads       FreeDownload[]
+  inferredBibs        InferredBib[]
+  orderItems          OrderItem[]
+  bibs                PhotoBib[]
+  batchJob            BatchUploadJob?      @relation(fields: [batchJobId], references: [id])
   event               Event                @relation(fields: [eventId], references: [id])
   photographer        User?                @relation("PhotoPhotographer", fields: [photographerId], references: [id])
-  batchJob            BatchUploadJob?      @relation(fields: [batchJobId], references: [id])
-  batchJobId          String?              @map("batch_job_id") @db.Uuid
-  bibs                PhotoBib[]
-  faces               FaceEmbedding[]
-  orderItems          OrderItem[]
-  auditLogs           AuditLog[]
-  freeDownloads       FreeDownload[]
-  faceBibAssociations FaceBibAssociation[]
-  inferredBibs        InferredBib[]
 
   @@index([eventId])
   @@map("photos")
 }
 
 model PhotoBib {
-  id                BigInt  @id @default(autoincrement())
-  photoId           String  @map("photo_id") @db.Uuid
-  eventId           String  @map("event_id") @db.Uuid
-  bib               String
-  confidence        Decimal @db.Decimal(4, 3)
-  bbox              Json?
-  source            String  @default("GEMINI")
-  promptTokens      Int?    @map("prompt_tokens")
-  candidatesTokens  Int?    @map("candidates_tokens")
-  totalTokens       Int?    @map("total_tokens")
-  geminiImageWidth  Int?    @map("gemini_image_width")
-  geminiImageHeight Int?    @map("gemini_image_height")
-
-  // Relations
-  photo               Photo                @relation(fields: [photoId], references: [id], onDelete: Cascade)
-  event               Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  id                  BigInt               @id @default(autoincrement())
+  photoId             String               @map("photo_id") @db.Uuid
+  eventId             String               @map("event_id") @db.Uuid
+  bib                 String
+  confidence          Decimal              @db.Decimal(4, 3)
+  bbox                Json?
+  source              String               @default("GEMINI")
+  promptTokens        Int?                 @map("prompt_tokens")
+  candidatesTokens    Int?                 @map("candidates_tokens")
+  totalTokens         Int?                 @map("total_tokens")
+  geminiImageWidth    Int?                 @map("gemini_image_width")
+  geminiImageHeight   Int?                 @map("gemini_image_height")
   faceBibAssociations FaceBibAssociation[]
+  event               Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photo               Photo                @relation(fields: [photoId], references: [id], onDelete: Cascade)
 
-  @@index([eventId, bib], name: "idx_bibs_event_bib")
+  @@index([eventId, bib], map: "idx_bibs_event_bib")
   @@map("photo_bibs")
 }
 
@@ -157,10 +135,8 @@ model BibSubscription {
   eventId   String   @map("event_id") @db.Uuid
   bib       String
   email     String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  event Event @relation(fields: [eventId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  event     Event    @relation(fields: [eventId], references: [id])
 
   @@map("bib_subscriptions")
 }
@@ -173,12 +149,10 @@ model Order {
   currency        String      @default("USD")
   status          OrderStatus
   stripeSessionId String?     @map("stripe_session_id")
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  user  User?       @relation(fields: [userId], references: [id])
-  event Event?      @relation(fields: [eventId], references: [id])
-  items OrderItem[]
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  items           OrderItem[]
+  event           Event?      @relation(fields: [eventId], references: [id])
+  user            User?       @relation(fields: [userId], references: [id])
 
   @@map("orders")
 }
@@ -189,10 +163,8 @@ model OrderItem {
   photoId    String?  @map("photo_id") @db.Uuid
   itemType   ItemType @map("item_type")
   priceCents Int      @map("price_cents")
-
-  // Relations
-  order Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  photo Photo? @relation(fields: [photoId], references: [id])
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  photo      Photo?   @relation(fields: [photoId], references: [id])
 
   @@map("order_items")
 }
@@ -203,36 +175,139 @@ model AuditLog {
   photoId   String?  @map("photo_id") @db.Uuid
   action    String
   data      Json?
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  user  User?  @relation(fields: [userId], references: [id])
-  photo Photo? @relation(fields: [photoId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  photo     Photo?   @relation(fields: [photoId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
 }
 
 model FaceEmbedding {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  photoId    String   @map("photo_id") @db.Uuid
-  eventId    String   @map("event_id") @db.Uuid
-  embedding  Float[]  @map("embedding")
-  confidence Decimal  @db.Decimal(4, 3)
-  bbox       Json?    @map("bounding_box")
-  landmarks  Json?    @map("landmarks")
-  age        Int?     @map("estimated_age")
-  gender     String?  @map("estimated_gender")
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  photo               Photo                @relation(fields: [photoId], references: [id], onDelete: Cascade)
-  event               Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photoId             String               @map("photo_id") @db.Uuid
+  eventId             String               @map("event_id") @db.Uuid
+  embedding           Float[]              @map("embedding")
+  confidence          Decimal              @db.Decimal(4, 3)
+  bbox                Json?                @map("bounding_box")
+  landmarks           Json?                @map("landmarks")
+  age                 Int?                 @map("estimated_age")
+  gender              String?              @map("estimated_gender")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   faceBibAssociations FaceBibAssociation[]
+  event               Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photo               Photo                @relation(fields: [photoId], references: [id], onDelete: Cascade)
   inferredBibs        InferredBib[]
 
-  @@index([eventId], name: "idx_face_embeddings_event")
-  @@index([photoId], name: "idx_face_embeddings_photo")
+  @@index([eventId], map: "idx_face_embeddings_event")
+  @@index([photoId], map: "idx_face_embeddings_photo")
   @@map("face_embeddings")
+}
+
+model BatchUploadJob {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status           BatchUploadStatus @default(PENDING)
+  totalFiles       Int
+  uploadedFiles    Int               @default(0)
+  processedFiles   Int               @default(0)
+  ownerId          String            @map("owner_id") @db.Uuid
+  eventId          String            @map("event_id") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  faceFiles        Int               @default(0) @map("face_files")
+  failedFaces      Int               @default(0) @map("failed_faces")
+  failedGemini     Int               @default(0) @map("failed_gemini")
+  failedWatermarks Int               @default(0) @map("failed_watermarks")
+  geminiFiles      Int               @default(0) @map("gemini_files")
+  watermarkFiles   Int               @default(0) @map("watermark_files")
+  event            Event             @relation(fields: [eventId], references: [id])
+  owner            User              @relation(fields: [ownerId], references: [id])
+  photos           Photo[]
+
+  @@map("batch_upload_jobs")
+}
+
+model FreeDownload {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId      String   @map("event_id") @db.Uuid
+  photoId      String   @map("photo_id") @db.Uuid
+  email        String?
+  name         String?
+  phone        String?
+  bibNumber    String?  @map("bib_number")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  referer      String?
+  country      String?
+  city         String?
+  downloadedAt DateTime @default(now()) @map("downloaded_at") @db.Timestamptz(6)
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photo        Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([photoId])
+  @@index([email])
+  @@index([downloadedAt])
+  @@map("free_downloads")
+}
+
+model FaceBibAssociation {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  faceEmbeddingId String        @map("face_embedding_id") @db.Uuid
+  photoBibId      BigInt        @map("photo_bib_id")
+  photoId         String        @map("photo_id") @db.Uuid
+  eventId         String        @map("event_id") @db.Uuid
+  bib             String
+  spatialScore    Decimal       @db.Decimal(4, 3)
+  method          String        @default("SPATIAL")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  event           Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  faceEmbedding   FaceEmbedding @relation(fields: [faceEmbeddingId], references: [id], onDelete: Cascade)
+  photoBib        PhotoBib      @relation(fields: [photoBibId], references: [id], onDelete: Cascade)
+  photo           Photo         @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@unique([faceEmbeddingId, photoBibId])
+  @@index([eventId, bib], map: "idx_face_bib_assoc_event_bib")
+  @@index([photoId], map: "idx_face_bib_assoc_photo")
+  @@map("face_bib_associations")
+}
+
+model AthleteSignature {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId       String   @map("event_id") @db.Uuid
+  bib           String
+  faceSignature Float[]  @map("face_signature")
+  sampleCount   Int      @default(1)
+  confidence    Decimal  @db.Decimal(4, 3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, bib])
+  @@index([eventId], map: "idx_athlete_signature_event")
+  @@map("athlete_signatures")
+}
+
+model InferredBib {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photoId         String        @map("photo_id") @db.Uuid
+  faceEmbeddingId String        @map("face_embedding_id") @db.Uuid
+  eventId         String        @map("event_id") @db.Uuid
+  bib             String
+  confidence      Decimal       @db.Decimal(4, 3)
+  faceDistance    Decimal       @db.Decimal(4, 3)
+  inferredFrom    String        @map("inferred_from")
+  verified        Boolean       @default(false)
+  rejected        Boolean       @default(false)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  event           Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  faceEmbedding   FaceEmbedding @relation(fields: [faceEmbeddingId], references: [id], onDelete: Cascade)
+  photo           Photo         @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@unique([faceEmbeddingId, bib])
+  @@index([photoId], map: "idx_inferred_bib_photo")
+  @@index([eventId, bib], map: "idx_inferred_bib_event_bib")
+  @@index([eventId, verified], map: "idx_inferred_bib_event_verified")
+  @@map("inferred_bibs")
 }
 
 enum UserRole {
@@ -265,136 +340,4 @@ enum BatchUploadStatus {
   PROCESSING
   COMPLETED
   FAILED
-}
-
-model BatchUploadJob {
-  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status         BatchUploadStatus @default(PENDING)
-  totalFiles     Int
-  uploadedFiles  Int               @default(0)
-  processedFiles Int               @default(0)
-
-  // Enhanced monitoring: Detailed pipeline tracking
-  watermarkFiles   Int @default(0) @map("watermark_files") // Photos with watermarks applied
-  geminiFiles      Int @default(0) @map("gemini_files") // Photos processed through Gemini OCR
-  faceFiles        Int @default(0) @map("face_files") // Photos processed through facial recognition
-  failedWatermarks Int @default(0) @map("failed_watermarks") // Photos that failed watermark step
-  failedGemini     Int @default(0) @map("failed_gemini") // Photos that failed Gemini OCR step
-  failedFaces      Int @default(0) @map("failed_faces") // Photos that failed facial recognition step
-
-  ownerId   String   @map("owner_id") @db.Uuid
-  eventId   String   @map("event_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Relations
-  owner  User    @relation(fields: [ownerId], references: [id])
-  event  Event   @relation(fields: [eventId], references: [id])
-  photos Photo[]
-
-  @@map("batch_upload_jobs")
-}
-
-model FreeDownload {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-
-  // Relations
-  eventId String @map("event_id") @db.Uuid
-  photoId String @map("photo_id") @db.Uuid
-
-  // User data (collected for analytics)
-  email     String?
-  name      String?
-  phone     String?
-  bibNumber String? @map("bib_number")
-
-  // Tracking
-  ipAddress String? @map("ip_address")
-  userAgent String? @map("user_agent")
-  referer   String?
-  country   String?
-  city      String?
-
-  // Metadata
-  downloadedAt DateTime @default(now()) @map("downloaded_at") @db.Timestamptz
-
-  // Relations
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  photo Photo @relation(fields: [photoId], references: [id], onDelete: Cascade)
-
-  @@index([eventId])
-  @@index([photoId])
-  @@index([email])
-  @@index([downloadedAt])
-  @@map("free_downloads")
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Face-Bib Linking System (NEW)
-// ═══════════════════════════════════════════════════════════════════
-
-model FaceBibAssociation {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  faceEmbeddingId String   @map("face_embedding_id") @db.Uuid
-  photoBibId      BigInt   @map("photo_bib_id")
-  photoId         String   @map("photo_id") @db.Uuid
-  eventId         String   @map("event_id") @db.Uuid
-  bib             String // Denormalized for fast queries
-  spatialScore    Decimal  @db.Decimal(4, 3)
-  method          String   @default("SPATIAL") // SPATIAL, MANUAL, INFERRED
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  faceEmbedding FaceEmbedding @relation(fields: [faceEmbeddingId], references: [id], onDelete: Cascade)
-  photoBib      PhotoBib      @relation(fields: [photoBibId], references: [id], onDelete: Cascade)
-  photo         Photo         @relation(fields: [photoId], references: [id], onDelete: Cascade)
-  event         Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@unique([faceEmbeddingId, photoBibId])
-  @@index([eventId, bib], name: "idx_face_bib_assoc_event_bib")
-  @@index([photoId], name: "idx_face_bib_assoc_photo")
-  @@map("face_bib_associations")
-}
-
-model AthleteSignature {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  eventId       String   @map("event_id") @db.Uuid
-  bib           String
-  faceSignature Float[]  @map("face_signature") // 512-dimensional average embedding
-  sampleCount   Int      @default(1) // Number of photos contributing to this signature
-  confidence    Decimal  @db.Decimal(4, 3)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Relations
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@unique([eventId, bib])
-  @@index([eventId], name: "idx_athlete_signature_event")
-  @@map("athlete_signatures")
-}
-
-model InferredBib {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  photoId         String   @map("photo_id") @db.Uuid
-  faceEmbeddingId String   @map("face_embedding_id") @db.Uuid
-  eventId         String   @map("event_id") @db.Uuid
-  bib             String
-  confidence      Decimal  @db.Decimal(4, 3)
-  faceDistance    Decimal  @db.Decimal(4, 3) // Distance to AthleteSignature
-  inferredFrom    String   @map("inferred_from") // ID of AthleteSignature used
-  verified        Boolean  @default(false) // Photographer confirmed
-  rejected        Boolean  @default(false) // Photographer rejected
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  // Relations
-  photo         Photo         @relation(fields: [photoId], references: [id], onDelete: Cascade)
-  faceEmbedding FaceEmbedding @relation(fields: [faceEmbeddingId], references: [id], onDelete: Cascade)
-  event         Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@unique([faceEmbeddingId, bib])
-  @@index([photoId], name: "idx_inferred_bib_photo")
-  @@index([eventId, bib], name: "idx_inferred_bib_event_bib")
-  @@index([eventId, verified], name: "idx_inferred_bib_event_verified")
-  @@map("inferred_bibs")
 }
