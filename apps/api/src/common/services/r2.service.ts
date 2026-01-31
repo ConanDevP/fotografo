@@ -99,6 +99,34 @@ export class R2Service {
     }
   }
 
+  async generateUploadUrl(
+    key: string,
+    contentType: string,
+    expiresIn = 3600
+  ): Promise<{ uploadUrl: string; key: string }> {
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        ContentType: contentType,
+        Metadata: {
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+
+      const uploadUrl = await getSignedUrl(this.s3Client, command, {
+        expiresIn,
+      });
+
+      this.logger.log(`Generated upload URL for key: ${key}, expires in ${expiresIn}s`);
+
+      return { uploadUrl, key };
+    } catch (error) {
+      this.logger.error(`Error generando URL de subida: ${getErrorMessage(error)}`);
+      throw error;
+    }
+  }
+
   async generateSecureDownloadUrl(key: string, expiresIn = 300): Promise<string> {
     try {
       // Extract filename from key for better download experience
