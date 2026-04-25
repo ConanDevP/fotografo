@@ -79,6 +79,8 @@ dist
 # Gatsby files
 .cache/
 public
+# Allow NestJS source modules that live inside a folder named "public"
+!apps/**/src/public/
 
 # Vuepress build output
 .vuepress/dist
