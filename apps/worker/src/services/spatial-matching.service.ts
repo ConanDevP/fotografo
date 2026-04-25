@@ -21,14 +21,24 @@ export class SpatialMatchingService {
   private readonly logger = new Logger(SpatialMatchingService.name);
 
   /**
-   * Match faces with bibs using SIMPLE horizontal proximity
-   * 
-   * Algorithm: Find the bib closest horizontally (same X position) to each face
-   * This works for running photos where people are in "lanes"
+   * Match faces with bibs using OPTIMAL horizontal proximity.
+   *
+   * Algorithm:
+   *   1. Generate ALL (face, bib) pairs and compute horizontal distance for each.
+   *   2. Sort pairs by distance ascending — best matches first.
+   *   3. Greedily assign from best pair downward, skipping already-used faces/bibs.
+   *
+   * This ensures the globally closest pairs are assigned first, preventing a
+   * far-away face from stealing a bib that belongs to a closer face.
+   *
+   * @param imageWidth  Original photo width in pixels. Used to compute a
+   *                    relative max-distance threshold (35% of image width,
+   *                    minimum 1 000 px). Pass 0 to fall back to 1 000 px fixed.
    */
   matchFacesWithBibs(
     faces: FaceData[],
-    bibs: BibData[]
+    bibs: BibData[],
+    imageWidth = 0,
   ): FaceBibMatch[] {
     const matches: FaceBibMatch[] = [];
     if (faces.length === 0 || bibs.length === 0) {
@@ -36,9 +46,19 @@ export class SpatialMatchingService {
       return matches;
     }
 
-    this.logger.log(`Matching ${faces.length} face(s) with ${bibs.length} bib(s) using SIMPLE horizontal proximity`);
+    // Relative threshold: 35% of image width, but never below 1 000 px.
+    // For a 4 000 px wide photo this gives 1 400 px, handling side-by-side runners.
+    const MAX_H_DIST =
+      imageWidth > 0
+        ? Math.max(1000, Math.round(imageWidth * 0.35))
+        : 1000;
 
-    // Calculate center X for each face and bib
+    this.logger.log(
+      `Matching ${faces.length} face(s) with ${bibs.length} bib(s) using OPTIMAL horizontal proximity ` +
+        `(max dist: ${MAX_H_DIST}px${imageWidth > 0 ? `, image width: ${imageWidth}px` : ''})`,
+    );
+
+    // Pre-compute centers
     const faceCenters = faces.map((f, i) => ({
       index: i,
       centerX: f.bbox[0] + f.bbox[2] / 2,
@@ -53,49 +73,84 @@ export class SpatialMatchingService {
       confidence: b.confidence,
     }));
 
-    // Log positions
-    faceCenters.forEach(f => this.logger.log(`   👤 Face ${f.index}: X=${f.centerX.toFixed(0)}, Y=${f.centerY.toFixed(0)}`));
-    bibCenters.forEach(b => this.logger.log(`   🔢 Bib "${b.bib}": X=${b.centerX.toFixed(0)}, Y=${b.centerY.toFixed(0)}`));
+    faceCenters.forEach((f) =>
+      this.logger.log(`   👤 Face ${f.index}: X=${f.centerX.toFixed(0)}, Y=${f.centerY.toFixed(0)}`),
+    );
+    bibCenters.forEach((b) =>
+      this.logger.log(`   🔢 Bib "${b.bib}": X=${b.centerX.toFixed(0)}, Y=${b.centerY.toFixed(0)}`),
+    );
 
-    // For each face, find closest bib by horizontal distance
-    const usedBibs = new Set<number>();
+    // ── Step 1: enumerate all (face, bib) candidate pairs ──
+    interface Candidate {
+      faceIndex: number;
+      bibIndex: number;
+      bibValue: string;
+      distance: number;
+      score: number;
+    }
+
+    const candidates: Candidate[] = [];
 
     for (const face of faceCenters) {
-      let bestBib: typeof bibCenters[0] | null = null;
-      let bestDistance = Infinity;
-
       for (const bib of bibCenters) {
-        if (usedBibs.has(bib.index)) continue;
-
-        // Simple horizontal distance
-        const horizontalDist = Math.abs(face.centerX - bib.centerX);
-
-        this.logger.debug(`   Face ${face.index} vs Bib "${bib.bib}": H-dist=${horizontalDist.toFixed(0)}px`);
-
-        if (horizontalDist < bestDistance) {
-          bestDistance = horizontalDist;
-          bestBib = bib;
+        const distance = Math.abs(face.centerX - bib.centerX);
+        this.logger.debug(
+          `   Face ${face.index} vs Bib "${bib.bib}": H-dist=${distance.toFixed(0)}px`,
+        );
+        if (distance <= MAX_H_DIST) {
+          candidates.push({
+            faceIndex: face.index,
+            bibIndex: bib.index,
+            bibValue: bib.bib,
+            distance,
+            score: Number(Math.max(0, 1 - distance / MAX_H_DIST).toFixed(3)),
+          });
         }
       }
+    }
 
-      // Accept match if horizontal distance is reasonable (within 1000px)
-      const MAX_HORIZONTAL_DISTANCE = 1000; // pixels
+    // ── Step 2: sort by distance ascending (best match first) ──
+    candidates.sort((a, b) => a.distance - b.distance);
 
-      if (bestBib && bestDistance <= MAX_HORIZONTAL_DISTANCE) {
-        usedBibs.add(bestBib.index);
-        const score = Math.max(0, 1 - (bestDistance / MAX_HORIZONTAL_DISTANCE));
+    // ── Step 3: greedy optimal assignment ──
+    const usedFaces = new Set<number>();
+    const usedBibs = new Set<number>();
 
-        matches.push({
-          faceIndex: face.index,
-          bibValue: bestBib.bib,
-          spatialScore: Number(score.toFixed(3)),
-        });
+    for (const c of candidates) {
+      if (usedFaces.has(c.faceIndex) || usedBibs.has(c.bibIndex)) continue;
 
-        this.logger.log(
-          `   ✅ Face ${face.index} matched with bib "${bestBib.bib}" (H-dist: ${bestDistance.toFixed(0)}px, score: ${score.toFixed(3)})`
-        );
-      } else {
-        this.logger.log(`   ❌ Face ${face.index}: no bib within ${MAX_HORIZONTAL_DISTANCE}px (best: ${bestDistance.toFixed(0)}px)`);
+      usedFaces.add(c.faceIndex);
+      usedBibs.add(c.bibIndex);
+
+      matches.push({
+        faceIndex: c.faceIndex,
+        bibValue: c.bibValue,
+        spatialScore: c.score,
+      });
+
+      this.logger.log(
+        `   ✅ Face ${c.faceIndex} matched with bib "${c.bibValue}" (H-dist: ${c.distance.toFixed(0)}px, score: ${c.score.toFixed(3)})`,
+      );
+    }
+
+    // Log unmatched faces
+    for (const face of faceCenters) {
+      if (!usedFaces.has(face.index)) {
+        // Find the closest bib (even if over threshold) for diagnostic logging
+        let closestDist = Infinity;
+        let closestBib = '';
+        for (const bib of bibCenters) {
+          const d = Math.abs(face.centerX - bib.centerX);
+          if (d < closestDist) {
+            closestDist = d;
+            closestBib = bib.bib;
+          }
+        }
+        const reason =
+          closestDist <= MAX_H_DIST
+            ? `bib "${closestBib}" already assigned to another face`
+            : `no bib within ${MAX_H_DIST}px (closest: bib "${closestBib}" at ${closestDist.toFixed(0)}px)`;
+        this.logger.log(`   ❌ Face ${face.index}: unmatched — ${reason}`);
       }
     }
 
@@ -103,80 +158,13 @@ export class SpatialMatchingService {
     return matches;
   }
 
-  /**
-   * Check if a face-bib match is valid based on spatial score
-   *
-   * @param faceBbox Face bounding box [x, y, width, height]
-   * @param bibBbox Bib bounding box [x, y, width, height]
-   * @returns Score from 0 to 1 (higher = better match)
-   */
-  private calculateSpatialScore(
-    faceBbox: [number, number, number, number],
-    bibBbox: [number, number, number, number]
-  ): { score: number; zoneId: string | null } {
-    const [faceX, faceY, faceW, faceH] = faceBbox;
-    const [bibX, bibY, bibW, bibH] = bibBbox;
-
-    // Calculate centers
-    const faceCenterX = faceX + faceW / 2;
-    const faceCenterY = faceY + faceH / 2;
-    const bibCenterX = bibX + bibW / 2;
-    const bibCenterY = bibY + bibH / 2;
-
-    // ════════════════════════════════════════════════
-    // 1. HORIZONTAL DISTANCE (normalized)
-    // ════════════════════════════════════════════════
-    const normalizedHorizontalDist = Math.abs(faceCenterX - bibCenterX) / Math.max(faceW, bibW);
-    const rejectionThreshold = FACE_BIB_LINKING.MAX_HORIZONTAL_REJECTION_RATIO;
-
-    if (normalizedHorizontalDist > rejectionThreshold) {
-      return { score: 0, zoneId: null }; // Too far horizontally
-    }
-
-    const horizontalScore = Math.exp(
-      -normalizedHorizontalDist / FACE_BIB_LINKING.HORIZONTAL_DECAY
-    );
-
-    // ════════════════════════════════════════════════
-    // 2. VERTICAL POSITION (body zone scoring)
-    // ════════════════════════════════════════════════
-    const deltaY = bibCenterY - faceCenterY;
-    const normalizedVerticalDist = deltaY / faceH; // express in "face heights"
-
-    if (Math.abs(normalizedVerticalDist) > FACE_BIB_LINKING.MAX_NORMALIZED_VERTICAL_DISTANCE) {
-      return { score: 0, zoneId: null };
-    }
-
-    const { score: verticalScore, zoneId } = this.calculateVerticalScore(normalizedVerticalDist);
-
-    if (verticalScore < FACE_BIB_LINKING.MIN_VERTICAL_ZONE_SCORE) {
-      return { score: 0, zoneId: null };
-    }
-
-    // ════════════════════════════════════════════════
-    // 3. CALCULATE COMBINED SCORE
-    // ════════════════════════════════════════════════
-
-    const finalScore =
-      horizontalScore * FACE_BIB_LINKING.HORIZONTAL_WEIGHT +
-      verticalScore * FACE_BIB_LINKING.VERTICAL_WEIGHT;
-
-    return { score: Number(finalScore.toFixed(3)), zoneId };
-  }
-
-  /**
-   * Check if a face-bib match is valid based on spatial score
-   */
   isValidMatch(spatialScore: number): boolean {
     return spatialScore >= FACE_BIB_LINKING.SPATIAL_SCORE_THRESHOLD;
   }
 
-  /**
-   * Get detailed debug info about a spatial match
-   */
   getMatchDebugInfo(
     faceBbox: [number, number, number, number],
-    bibBbox: [number, number, number, number]
+    bibBbox: [number, number, number, number],
   ): string {
     const [faceX, faceY, faceW, faceH] = faceBbox;
     const [bibX, bibY, bibW, bibH] = bibBbox;
@@ -188,52 +176,12 @@ export class SpatialMatchingService {
 
     const horizontalDist = Math.abs(faceCenterX - bibCenterX);
     const verticalDist = bibCenterY - faceCenterY;
-    const { score, zoneId } = this.calculateSpatialScore(faceBbox, bibBbox);
-    const normalizedVertical = (verticalDist) / faceH;
 
     return (
       `Face: [${faceX}, ${faceY}, ${faceW}, ${faceH}] | ` +
       `Bib: [${bibX}, ${bibY}, ${bibW}, ${bibH}] | ` +
       `H-dist: ${horizontalDist.toFixed(0)}px | ` +
-      `V-dist: ${verticalDist.toFixed(0)}px | ` +
-      `V-norm: ${normalizedVertical.toFixed(2)} faceH | ` +
-      `Zone: ${zoneId ?? 'N/A'} | ` +
-      `Score: ${score.toFixed(3)}`
+      `V-dist: ${verticalDist.toFixed(0)}px`
     );
-  }
-
-  private calculateVerticalScore(normalizedDeltaY: number): { score: number; zoneId: string | null } {
-    let bestScore = 0;
-    let bestZone: string | null = null;
-
-    for (const zone of FACE_BIB_LINKING.VERTICAL_ZONES) {
-      const gaussian =
-        zone.weight *
-        Math.exp(
-          -0.5 * Math.pow((normalizedDeltaY - zone.mean) / zone.stdDev, 2)
-        );
-
-      if (gaussian > bestScore) {
-        bestScore = gaussian;
-        bestZone = zone.id;
-      }
-    }
-
-    return { score: Math.min(1, bestScore), zoneId: bestZone };
-  }
-
-  private getZoneLabel(
-    faceBbox: [number, number, number, number],
-    bibBbox: [number, number, number, number]
-  ): string {
-    const [faceX, faceY, faceW, faceH] = faceBbox;
-    const [bibX, bibY, bibW, bibH] = bibBbox;
-
-    const faceCenterY = faceY + faceH / 2;
-    const bibCenterY = bibY + bibH / 2;
-    const normalizedVertical = (bibCenterY - faceCenterY) / faceH;
-    const { zoneId } = this.calculateVerticalScore(normalizedVertical);
-
-    return zoneId ?? 'UNKNOWN_ZONE';
   }
 }

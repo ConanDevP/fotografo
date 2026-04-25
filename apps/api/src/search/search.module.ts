@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { FaceSearchService } from './face-search.service';
+import { IdentityResolverService } from './identity-resolver.service';
 import { SearchController } from './search.controller';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
@@ -13,16 +14,17 @@ import { PythonFaceApiService } from '../../../worker/src/services/python-face-a
 @Module({
   controllers: [SearchController],
   providers: [
-    SearchService, 
+    SearchService,
     FaceSearchService,
-    PrismaService, 
-    QueueService, 
+    IdentityResolverService,
+    PrismaService,
+    QueueService,
     CloudinaryService,
     StorageService,
     R2Service,
     SharpTransformService,
     PythonFaceApiService,
   ],
-  exports: [SearchService, FaceSearchService],
+  exports: [SearchService, FaceSearchService, IdentityResolverService],
 })
 export class SearchModule {}
