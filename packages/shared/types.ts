@@ -143,13 +143,23 @@ export interface FaceSearchRequest {
 
 export interface FaceSearchResult {
   photoId: string;
-  similarity: number;
+  /** Cosine similarity (0–1). Present for FACE_DIRECT matches, undefined for bib-graph discoveries. */
+  similarity?: number;
   confidence: number;
   faceId: string;
   bbox: [number, number, number, number];
   thumbUrl?: string;
   watermarkUrl?: string;
   originalUrl?: string;
+  /**
+   * How this photo was discovered:
+   *   FACE_DIRECT       – face was directly visible and similar to the query
+   *   BIB_VIA_FACE      – found because the athlete's bib was confirmed in another photo
+   *   INFERRED_VIA_FACE – found via a high-confidence inferred bib association
+   */
+  discoveryType?: 'FACE_DIRECT' | 'BIB_VIA_FACE' | 'INFERRED_VIA_FACE';
+  /** Bibs detected/inferred in this specific photo */
+  detectedBibs?: string[];
 }
 
 export interface FaceSearchResponse {
@@ -157,6 +167,10 @@ export interface FaceSearchResponse {
   total: number;
   searchTime: number;
   userFaceDetected: boolean;
+  /** Bibs confirmed for this athlete across the event (via spatial/KNN matching) */
+  confirmedBibs?: string[];
+  /** Bibs inferred with high confidence but not yet auto-verified */
+  inferredBibs?: string[];
 }
 
 // API Response types

@@ -165,13 +165,15 @@ export class SearchController {
       userImageBase64: faceSearchDto.userImageBase64,
       threshold: faceSearchDto.threshold,
     });
-    
-    return { 
+
+    return {
       data: {
         matches: results.matches,
         userFaceDetected: results.userFaceDetected,
+        confirmedBibs: (results as any).confirmedBibs ?? [],
+        inferredBibs: (results as any).inferredBibs ?? [],
       },
-      meta: { 
+      meta: {
         total: results.total,
         searchTime: results.searchTime,
         optimized: true,
@@ -193,48 +195,68 @@ export class SearchController {
     @Param('eventId') eventId: string,
     @Body() body: { bib?: string; userImageBase64?: string; threshold?: number },
   ): Promise<ApiResponse> {
-    const results = {
-      bibResults: [] as any[],
-      faceResults: [] as any[],
-      combined: [] as any[],
+    const bibResults: any[] = [];
+    const faceResults: any[] = [];
+    let confirmedBibs: string[] = [];
+    let inferredBibs: string[] = [];
+
+    // Run bib search and face search in parallel when both are provided
+    await Promise.all([
+      body.bib
+        ? this.searchService.searchPhotosByBib(eventId, body.bib, 50).then((r) => {
+            bibResults.push(...r.items);
+          })
+        : Promise.resolve(),
+      body.userImageBase64
+        ? this.faceSearchService
+            .searchPhotosByFace(eventId, {
+              userImageBase64: body.userImageBase64,
+              threshold: body.threshold,
+            })
+            .then((r) => {
+              faceResults.push(...r.matches);
+              confirmedBibs = (r as any).confirmedBibs ?? [];
+              inferredBibs = (r as any).inferredBibs ?? [];
+            })
+        : Promise.resolve(),
+    ]);
+
+    // Merge and deduplicate — face portfolio results already include bib-only photos,
+    // but bib search may add photos the face didn't find (e.g. low-confidence face far
+    // from the camera). Priority: face-direct > bib > face-inferred.
+    const priorityOf = (r: any): number => {
+      if (r.discoveryType === 'FACE_DIRECT') return 4;
+      if (r.source === 'bib' && r.type === 'DETECTED') return 3;
+      if (r.discoveryType === 'BIB_VIA_FACE') return 3;
+      if (r.source === 'bib' && r.type === 'INFERRED') return 2;
+      if (r.discoveryType === 'INFERRED_VIA_FACE') return 1;
+      return 2;
     };
 
-    // Search by bib if provided
-    if (body.bib) {
-      const bibSearch = await this.searchService.searchPhotosByBib(eventId, body.bib, 50);
-      results.bibResults = bibSearch.items;
-    }
-
-    // Search by face if provided
-    if (body.userImageBase64) {
-      const faceSearch = await this.faceSearchService.searchPhotosByFace(eventId, {
-        userImageBase64: body.userImageBase64,
-        threshold: body.threshold,
-      });
-      results.faceResults = faceSearch.matches;
-    }
-
-    // Combine results and deduplicate
     const allResults = [
-      ...results.bibResults.map(r => ({ ...r, source: 'bib' })),
-      ...results.faceResults.map(r => ({ ...r, source: 'face' })),
+      ...bibResults.map((r) => ({ ...r, source: 'bib' })),
+      ...faceResults.map((r) => ({ ...r, source: 'face' })),
     ];
 
-    const uniqueResults = new Map();
-    allResults.forEach(result => {
+    const uniqueResults = new Map<string, any>();
+    for (const result of allResults) {
       const existing = uniqueResults.get(result.photoId);
-      if (!existing || (result.confidence || result.similarity) > (existing.confidence || existing.similarity)) {
+      if (!existing || priorityOf(result) > priorityOf(existing)) {
         uniqueResults.set(result.photoId, result);
       }
-    });
+    }
 
-    results.combined = Array.from(uniqueResults.values());
+    const combined = [...uniqueResults.values()].sort((a, b) => priorityOf(b) - priorityOf(a));
 
-    return { 
-      data: results,
-      meta: { 
-        total: results.combined.length,
+    return {
+      data: {
+        bibResults,
+        faceResults,
+        combined,
+        confirmedBibs,
+        inferredBibs,
       },
+      meta: { total: combined.length },
     };
   }
 }
