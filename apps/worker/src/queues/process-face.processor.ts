@@ -284,7 +284,8 @@ export class ProcessFaceProcessor extends WorkerHost {
                 bbox[3] * SCALE_FACTOR_Y
               ] as [number, number, number, number]
             };
-          })
+          }),
+          photoDimensions?.width ?? 0
         );
 
         this.logger.log(`   🎯 Spatial matching found ${matches.length} face-bib match(es)`);
