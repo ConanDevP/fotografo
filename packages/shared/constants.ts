@@ -15,6 +15,8 @@ export const JOBS = {
   PROCESS_FACE: 'process-face',
   SEND_BIB_EMAIL: 'send-bib-email',
   REPROCESS_PHOTO: 'reprocess-photo',
+
+  
 } as const;
 
 // Error codes
