@@ -46,6 +46,7 @@ export class AdminBatchJobsController {
     @Query('ownerId') ownerId?: string,
     @Query('eventId') eventId?: string,
     @Query('dateFrom') dateFrom?: string,
+    
     @Query('dateTo') dateTo?: string,
     @Req() req?: AuthenticatedRequest,
   ): Promise<ApiResponse> {
