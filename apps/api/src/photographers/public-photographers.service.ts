@@ -22,6 +22,7 @@ export class PublicPhotographersService {
     const where: any = {
       role: UserRole.PHOTOGRAPHER,
       slug: { not: null }, // Solo fotógrafos con perfil público configurado
+      ownedWorkspaces: { some: { isPublished: true, deletedAt: null } },
     };
 
     if (query.location) {
@@ -91,7 +92,9 @@ export class PublicPhotographersService {
           isVerified: true,
           _count: {
             select: {
-              ownedEvents: true
+              ownedEvents: {
+                where: { deletedAt: null, isPublished: true },
+              }
             }
           }
         },
@@ -126,13 +129,13 @@ export class PublicPhotographersService {
     const photographer = await this.prisma.user.findUnique({
       where: {
         slug,
-        role: UserRole.PHOTOGRAPHER
+        role: UserRole.PHOTOGRAPHER,
+        ownedWorkspaces: { some: { isPublished: true, deletedAt: null } },
       },
       select: {
         id: true,
         slug: true,
         name: true,
-        email: true,
         profileImageUrl: true,
         bio: true,
         website: true,
@@ -146,9 +149,15 @@ export class PublicPhotographersService {
         createdAt: true,
         _count: {
           select: {
-            ownedEvents: true,
-            photographedPhotos: {
-              where: { status: PhotoStatus.PROCESSED }
+              ownedEvents: {
+                where: { deletedAt: null, isPublished: true },
+              },
+              photographedPhotos: {
+              where: {
+                status: PhotoStatus.PROCESSED,
+                publicationStatus: 'APPROVED',
+                event: { deletedAt: null, isPublished: true },
+              }
             }
           }
         }
@@ -163,7 +172,6 @@ export class PublicPhotographersService {
       id: photographer.id,
       slug: photographer.slug!,
       name: photographer.name || 'Sin nombre',
-      email: photographer.email,
       profileImageUrl: photographer.profileImageUrl,
       bio: photographer.bio,
       website: photographer.website,
@@ -190,7 +198,8 @@ export class PublicPhotographersService {
     const photographer = await this.prisma.user.findUnique({
       where: {
         slug,
-        role: UserRole.PHOTOGRAPHER
+        role: UserRole.PHOTOGRAPHER,
+        ownedWorkspaces: { some: { isPublished: true, deletedAt: null } },
       },
       select: { id: true, name: true }
     });
@@ -205,13 +214,14 @@ export class PublicPhotographersService {
       this.prisma.event.findMany({
         where: {
           ownerId: photographer.id,
-          deletedAt: null
-        },
+          deletedAt: null,
+          isPublished: true,
+                  },
         include: {
           _count: {
             select: {
               photos: {
-                where: { status: PhotoStatus.PROCESSED }
+                where: { status: PhotoStatus.PROCESSED, publicationStatus: 'APPROVED' }
               }
             }
           }
@@ -223,8 +233,9 @@ export class PublicPhotographersService {
       this.prisma.event.count({
         where: {
           ownerId: photographer.id,
-          deletedAt: null
-        }
+          deletedAt: null,
+          isPublished: true,
+                  }
       })
     ]);
 

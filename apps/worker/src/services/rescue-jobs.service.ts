@@ -3,6 +3,7 @@ import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { QUEUES } from '@shared/constants';
+import { ImagesService } from './images.service';
 
 @Injectable()
 export class RescueJobsService implements OnModuleInit, OnModuleDestroy {
@@ -13,6 +14,7 @@ export class RescueJobsService implements OnModuleInit, OnModuleDestroy {
     private prisma: PrismaService,
     @InjectQueue(QUEUES.PROCESS_FACE) private faceQueue: Queue,
     @InjectQueue(QUEUES.INFER_BIBS) private inferQueue: Queue,
+    private imagesService: ImagesService,
   ) {}
 
   onModuleInit() {
@@ -42,7 +44,7 @@ export class RescueJobsService implements OnModuleInit, OnModuleDestroy {
           createdAt: { gte: since },
           faces: { none: {} },
         },
-        select: { id: true, eventId: true, originalUrl: true },
+        select: { id: true, eventId: true, cloudinaryId: true },
         take: 50,
       });
 
@@ -60,10 +62,17 @@ export class RescueJobsService implements OnModuleInit, OnModuleDestroy {
           // Ignore
         }
 
+        const imageUrl = await this.imagesService.getOptimizedImageForOCR(p.cloudinaryId);
         await this.faceQueue.add(
           'process-face',
-          { photoId: p.id, eventId: p.eventId, imageUrl: p.originalUrl },
-          { attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: 10, removeOnFail: 5 }
+          { photoId: p.id, eventId: p.eventId, imageUrl },
+          {
+            jobId: `face-${p.id}`,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 },
+            removeOnComplete: true,
+            removeOnFail: 5,
+          }
         );
         this.logger.log(`🛟 Rescue enqueued face processing for photo ${p.id}`);
       }
@@ -97,4 +106,3 @@ export class RescueJobsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
-

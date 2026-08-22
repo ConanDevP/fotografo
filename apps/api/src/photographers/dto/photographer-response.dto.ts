@@ -2,7 +2,7 @@ export interface PhotographerProfileResponse {
   id: string;
   slug: string;
   name: string;
-  email: string;
+  email?: string;
   profileImageUrl?: string;
   bio?: string;
   website?: string;

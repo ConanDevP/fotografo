@@ -102,17 +102,24 @@ export class BatchRecoveryService {
     for (const photo of batch.photos) {
       if (photo.cloudinaryId && photo.cloudinaryId !== 'temp') {
         try {
+          // Marcar como PENDING para reprocesamiento
+          await this.prisma.photo.update({
+            where: { id: photo.id },
+            data: {
+              status: 'PENDING',
+              processingCompletedAt: null,
+              watermarkFailedAt: null,
+            }
+          });
+          await this.prisma.batchUploadItem.updateMany({
+            where: { photoId: photo.id },
+            data: { status: 'PROCESSING', watermarkFailedAt: null, error: null },
+          });
           await this.queueService.addProcessPhotoJob({
             photoId: photo.id,
             eventId: photo.eventId,
             objectKey: photo.cloudinaryId,
           }, 10); // Máxima prioridad
-
-          // Marcar como PENDING para reprocesamiento
-          await this.prisma.photo.update({
-            where: { id: photo.id },
-            data: { status: 'PENDING' }
-          });
 
           recovered++;
           this.logger.log(`Foto ${photo.id} marcada para recovery`);

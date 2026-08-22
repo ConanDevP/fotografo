@@ -29,6 +29,8 @@ export interface PaymentRequest {
   photographerStripeAccountId?: string; // Stripe Connect account_id of photographer
   platformFeeAmount?: number; // Platform commission in cents
   platformFeePercent?: number; // Platform commission percentage
+  transferGroup?: string;
+  downloadToken?: string;
 }
 
 export interface PaymentItem {

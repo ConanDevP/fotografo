@@ -6,28 +6,27 @@ if (typeof globalThis.crypto === 'undefined') {
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+// JSON.stringify no sabe serializar BigInt y lanza TypeError. Prisma devuelve
+// BigInt en los identificadores de dorsal y en los contadores de bytes, así que
+// se emiten como texto: por encima de 2^53 un number perdería precisión.
+(BigInt.prototype as any).toJSON = function () {
+  return this.toString();
+};
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import * as compression from 'compression';
-import * as bodyParser from 'body-parser';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { WorkspacesService } from './workspaces/workspaces.service';
 
 async function bootstrap() {
-  // Silenciar ECONNRESET antes de crear la app
-  const originalConsoleError = console.error;
-  console.error = (...args) => {
-    const message = args.join(' ');
-    if (message.includes('ECONNRESET') || message.includes('read ECONNRESET')) {
-      return;
-    }
-    originalConsoleError.apply(console, args);
-  };
-
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log'],
+    rawBody: true,
   });
 
   // Enable graceful shutdown
@@ -35,21 +34,79 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
 
+  // Caddy is the only public hop in the production topology. This preserves
+  // per-client rate limits and privacy hashes instead of grouping every user
+  // under the proxy container address.
+  if (configService.get('NODE_ENV') === 'production') {
+    app.set('trust proxy', Number(configService.get('TRUST_PROXY_HOPS', 1)));
+  }
+
   // Security
   app.use(helmet());
   app.use(compression());
 
-  // Raw body for Stripe webhooks (must be before json parser)
-  app.use('/v1/webhooks/stripe', bodyParser.raw({ type: 'application/json' }));
-
-  // Increase payload limit for batch uploads and face search images (base64)
-  app.use(bodyParser.json({ limit: '500mb' })); // Para batch uploads grandes
-  app.use(bodyParser.urlencoded({ limit: '500mb', extended: true }));
+  // File uploads use multipart handlers. JSON should never accept hundreds of MB.
+  const jsonBodyLimit = configService.get('API_JSON_BODY_LIMIT', '10mb');
+  app.useBodyParser('json', { limit: jsonBodyLimit });
+  app.useBodyParser('urlencoded', { limit: jsonBodyLimit, extended: true });
 
   // CORS
+  const configuredOrigins = new Set(
+    (configService.get('CORS_ORIGINS') || 'http://localhost:3000')
+      .split(',')
+      .map((origin: string) => origin.trim().replace(/\/$/, ''))
+      .filter(Boolean),
+  );
+  const workspacesService = app.get(WorkspacesService);
+  const customOriginCache = new Map<string, { allowed: boolean; expiresAt: number }>();
   app.enableCors({
-    origin: configService.get('CORS_ORIGINS')?.split(',') || ['http://localhost:3000'],
+    origin: (origin, callback) => {
+      if (!origin || configuredOrigins.has(origin.replace(/\/$/, ''))) {
+        callback(null, true);
+        return;
+      }
+
+      let parsed: URL;
+      try {
+        parsed = new URL(origin);
+      } catch {
+        callback(null, false);
+        return;
+      }
+      const production = configService.get('NODE_ENV') === 'production';
+      if (
+        (production && parsed.protocol !== 'https:')
+        || parsed.username
+        || parsed.password
+        || parsed.port
+        || parsed.pathname !== '/'
+        || parsed.search
+        || parsed.hash
+      ) {
+        callback(null, false);
+        return;
+      }
+
+      const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+      const cached = customOriginCache.get(host);
+      if (cached && cached.expiresAt > Date.now()) {
+        callback(null, cached.allowed);
+        return;
+      }
+
+      workspacesService.authorizeTlsDomain(host)
+        .then(() => {
+          customOriginCache.set(host, { allowed: true, expiresAt: Date.now() + 5 * 60_000 });
+          callback(null, true);
+        })
+        .catch(() => {
+          customOriginCache.set(host, { allowed: false, expiresAt: Date.now() + 15_000 });
+          callback(null, false);
+        });
+    },
     credentials: true,
+    maxAge: 600,
+    exposedHeaders: ['Content-Disposition'],
   });
 
 
@@ -85,7 +142,7 @@ async function bootstrap() {
   server.timeout = parseInt(configService.get('HTTP_TIMEOUT', '120000')); // 2 minutos
 
   // Manejar errores de conexión
-  server.on('clientError', (err, socket) => {
+  server.on('clientError', (err: NodeJS.ErrnoException, socket) => {
     if (err.code === 'ECONNRESET' || !socket.writable) {
       // MEJORADO: Cerrar socket explícitamente
       if (socket && !socket.destroyed) {
@@ -98,7 +155,7 @@ async function bootstrap() {
 
   // NUEVO: Manejar conexiones que se cierran abruptamente
   server.on('connection', (socket) => {
-    socket.on('error', (err) => {
+    socket.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
         return; // Silenciar errores comunes de conexión
       }
@@ -120,6 +177,7 @@ async function bootstrap() {
       return;
     }
     console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    process.exit(1);
   });
 
   console.log(`🚀 API corriendo en puerto ${port}`);

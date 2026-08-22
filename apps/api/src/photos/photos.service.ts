@@ -1,16 +1,20 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
+import { BillingService } from '../billing/billing.service';
 import { StorageService } from '../common/services/storage.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
 
 @Injectable()
 export class PhotosService {
+  private readonly logger = new Logger(PhotosService.name);
+
   constructor(
     private prisma: PrismaService,
     private queueService: QueueService,
     private storageService: StorageService,
+    private billingService: BillingService,
   ) {}
 
   async findOne(id: string, userId: string, userRole: UserRole) {
@@ -18,7 +22,24 @@ export class PhotosService {
       where: { id },
       include: {
         event: {
-          select: { id: true, name: true, ownerId: true },
+          select: {
+            id: true,
+            name: true,
+            ownerId: true,
+            bibRules: true,
+            workspace: {
+              select: {
+                members: {
+                  where: { userId, status: 'ACTIVE', role: { in: ['OWNER', 'ADMIN', 'EDITOR'] } },
+                  select: { role: true },
+                },
+              },
+            },
+            contributors: {
+              where: { userId, status: 'ACCEPTED', role: { in: ['EDITOR', 'EVENT_MANAGER'] } },
+              select: { role: true },
+            },
+          },
         },
         photographer: {
           select: { id: true, email: true },
@@ -46,7 +67,9 @@ export class PhotosService {
     const hasPermission = 
       userRole === UserRole.ADMIN ||
       photo.photographerId === userId ||
-      photo.event.ownerId === userId;
+      photo.event.ownerId === userId ||
+      Boolean(photo.event.workspace?.members.length) ||
+      Boolean(photo.event.contributors.length);
 
     if (!hasPermission) {
       throw new ForbiddenException({
@@ -103,17 +126,36 @@ export class PhotosService {
       });
     }
 
-    // Add to processing queue
+    // Update status to PENDING
+    await this.prisma.photo.update({
+      where: { id: photoId },
+      data: {
+        status: 'PENDING',
+        processingCompletedAt: null,
+        ocrProcessedAt: null,
+        ocrFailedAt: null,
+        faceProcessedAt: null,
+        faceFailedAt: null,
+        watermarkFailedAt: null,
+      },
+    });
+    await this.prisma.batchUploadItem.updateMany({
+      where: { photoId },
+      data: {
+        status: 'PROCESSING',
+        ocrProcessedAt: null,
+        ocrFailedAt: null,
+        faceProcessedAt: null,
+        faceFailedAt: null,
+        watermarkFailedAt: null,
+        error: null,
+      },
+    });
+
     await this.queueService.addProcessPhotoJob({
       photoId: photo.id,
       eventId: photo.eventId,
       objectKey: photo.cloudinaryId,
-    });
-
-    // Update status to PENDING
-    await this.prisma.photo.update({
-      where: { id: photoId },
-      data: { status: 'PENDING' },
     });
 
     return { message: 'Procesamiento iniciado' };
@@ -128,12 +170,16 @@ export class PhotosService {
     bbox?: [number, number, number, number],
   ) {
     const photo = await this.findOne(photoId, userId, userRole);
+    const normalizedBib = bib.trim();
+    if (!this.matchesBibRules(normalizedBib, photo.event.bibRules)) {
+      throw new BadRequestException('El dorsal no cumple las reglas configuradas para el evento');
+    }
 
     // Create or update manual bib
     const existingBib = await this.prisma.photoBib.findFirst({
       where: {
         photoId,
-        bib,
+        bib: normalizedBib,
         source: 'MANUAL',
       },
     });
@@ -153,7 +199,7 @@ export class PhotosService {
         data: {
           photoId,
           eventId: photo.eventId,
-          bib,
+          bib: normalizedBib,
           confidence,
           bbox,
           source: 'MANUAL',
@@ -168,7 +214,7 @@ export class PhotosService {
         photoId,
         action: 'BIB_EDIT',
         data: {
-          bib,
+          bib: normalizedBib,
           confidence,
           bbox,
           previousValue: existingBib ? {
@@ -184,9 +230,14 @@ export class PhotosService {
 
   async removeBib(photoId: string, bibId: string, userId: string, userRole: UserRole) {
     const photo = await this.findOne(photoId, userId, userRole);
-    
+    let parsedBibId: bigint;
+    try {
+      parsedBibId = BigInt(bibId);
+    } catch {
+      throw new BadRequestException('Identificador de dorsal inválido');
+    }
     const bib = await this.prisma.photoBib.findUnique({
-      where: { id: BigInt(bibId) },
+      where: { id: parsedBibId },
     });
 
     if (!bib || bib.photoId !== photoId) {
@@ -197,7 +248,7 @@ export class PhotosService {
     }
 
     await this.prisma.photoBib.delete({
-      where: { id: BigInt(bibId) },
+      where: { id: parsedBibId },
     });
 
     // Log the removal
@@ -220,18 +271,29 @@ export class PhotosService {
   async delete(photoId: string, userId: string, userRole: UserRole) {
     const photo = await this.findOne(photoId, userId, userRole);
 
-    // Delete from Cloudinary
+    // Keep database state authoritative. If object cleanup fails, the private
+    // orphan can be retried later without leaving a visible broken photo row.
+    await this.prisma.photo.delete({ where: { id: photoId } });
+
+    // Devolver el cupo aunque el borrado en R2 falle: el objeto ya no es
+    // accesible y cobrar por él sería incorrecto.
+    await this.billingService.releaseStorage(
+      photo.photographerWorkspaceId,
+      (photo.originalBytes ?? 0) + (photo.derivedBytes ?? 0),
+    );
+
     try {
       await this.storageService.deletePhoto(photo.cloudinaryId);
-    } catch (error) {
-      // Log error but continue with database deletion
-      console.error('Error deleting from Cloudinary:', error);
+    } catch {
+      await this.prisma.auditLog.create({
+        data: {
+          userId,
+          action: 'PHOTO_STORAGE_CLEANUP_REQUIRED',
+          data: { deletedPhotoId: photoId, objectKey: photo.cloudinaryId },
+        },
+      }).catch(() => undefined);
+      this.logger.warn(`La foto ${photoId} se eliminó de la base, pero el objeto privado quedó pendiente de limpieza`);
     }
-
-    // Delete from database (cascade will handle related records)
-    await this.prisma.photo.delete({
-      where: { id: photoId },
-    });
 
     return { message: 'Foto eliminada' };
   }
@@ -246,5 +308,28 @@ export class PhotosService {
     );
 
     return { downloadUrl };
+  }
+
+  private matchesBibRules(bib: string, rawRules: unknown) {
+    if (!/^\d{1,20}$/.test(bib)) return false;
+    if (!rawRules || typeof rawRules !== 'object' || Array.isArray(rawRules)) return true;
+    const rules = rawRules as Record<string, any>;
+    if (rules.minLen && bib.length < rules.minLen) return false;
+    if (rules.maxLen && bib.length > rules.maxLen) return false;
+    if (Array.isArray(rules.whitelist) && !rules.whitelist.includes(bib)) return false;
+    if (Array.isArray(rules.range) && rules.range.length === 2) {
+      const numeric = Number(bib);
+      if (!Number.isSafeInteger(numeric) || numeric < rules.range[0] || numeric > rules.range[1]) return false;
+    }
+    if (rules.regex) {
+      const safeNumericPattern = /^(?:\^|\$|\\d|\[|\]|\{|\}|,|-|[0-9])+$/;
+      if (typeof rules.regex !== 'string' || !safeNumericPattern.test(rules.regex)) return false;
+      try {
+        if (!new RegExp(rules.regex).test(bib)) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
   }
 }

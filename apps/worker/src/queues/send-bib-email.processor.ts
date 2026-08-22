@@ -20,8 +20,44 @@ export class SendBibEmailProcessor extends WorkerHost {
 
   async process(job: Job<SendBibEmailJob>): Promise<void> {
     const { eventId, bib, email, photoIds } = job.data;
+
+    if (job.data.kind === 'EVENT_INVITATION') {
+      if (!job.data.eventName || !job.data.workspaceName || !job.data.acceptanceUrl) {
+        throw new Error('Invitación incompleta');
+      }
+      await this.mailService.sendEventInvitation({
+        email,
+        eventName: job.data.eventName,
+        workspaceName: job.data.workspaceName,
+        acceptanceUrl: job.data.acceptanceUrl,
+        organizerCommissionPercent: job.data.organizerCommissionPercent || 0,
+        rightsTerms: job.data.rightsTerms,
+      });
+      return;
+    }
+
+    if (job.data.kind === 'ORDER_CONFIRMATION') {
+      if (!job.data.orderId || !job.data.downloadToken) {
+        throw new Error('Confirmación de pedido incompleta');
+      }
+      const event = await this.prisma.event.findUnique({
+        where: { id: eventId },
+        select: { name: true },
+      });
+      if (!event) throw new Error(`Evento ${eventId} no encontrado`);
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const downloadUrl = new URL(`/download/${job.data.orderId}`, frontendUrl);
+      downloadUrl.hash = new URLSearchParams({ token: job.data.downloadToken }).toString();
+      await this.mailService.sendOrderConfirmation(
+        email,
+        job.data.orderId,
+        event.name,
+        downloadUrl.toString(),
+      );
+      return;
+    }
     
-    this.logger.log(`Enviando email a ${email} para dorsal ${bib} en evento ${eventId}`);
+    this.logger.log(`Procesando notificación del dorsal ${bib} en evento ${eventId}`);
 
     try {
       // Get event data
@@ -43,6 +79,10 @@ export class SendBibEmailProcessor extends WorkerHost {
           where: {
             id: { in: photoIds },
             eventId,
+            status: 'PROCESSED',
+            publicationStatus: 'APPROVED',
+            thumbUrl: { not: null },
+            watermarkUrl: { not: null },
           },
           select: {
             id: true,
@@ -59,6 +99,7 @@ export class SendBibEmailProcessor extends WorkerHost {
               some: { bib },
             },
             status: 'PROCESSED',
+            publicationStatus: 'APPROVED',
             thumbUrl: { not: null },
             watermarkUrl: { not: null },
           },
@@ -91,7 +132,7 @@ export class SendBibEmailProcessor extends WorkerHost {
         })),
       );
 
-      this.logger.log(`Email enviado exitosamente a ${email} con ${photos.length} fotos`);
+      this.logger.log(`Notificación enviada con ${photos.length} fotos`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
@@ -103,11 +144,11 @@ export class SendBibEmailProcessor extends WorkerHost {
 
   @OnWorkerEvent('completed')
   onCompleted(job: Job<SendBibEmailJob>) {
-    this.logger.log(`Email job ${job.id} completado para ${job.data.email}`);
+    this.logger.log(`Email job ${job.id} completado`);
   }
 
   @OnWorkerEvent('failed')
   onFailed(job: Job<SendBibEmailJob>, err: Error) {
-    this.logger.error(`Email job ${job.id} falló para ${job.data.email}: ${err.message}`);
+    this.logger.error(`Email job ${job.id} falló: ${err.message}`);
   }
 }

@@ -1,114 +1,166 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# Docker Compose - Desarrollo Local
-# ═══════════════════════════════════════════════════════════════════════════════
-#
-# NOTA: Para producción, usa Neon PostgreSQL en lugar de este contenedor.
-# Ver docs/NEON_MIGRATION.md para instrucciones de migración.
-#
-# Uso:
-#   docker-compose up -d          # Iniciar todos los servicios
-#   docker-compose up -d redis    # Solo Redis (si usas Neon para PostgreSQL)
-#
-# ═══════════════════════════════════════════════════════════════════════════════
-
-version: '3.8'
-
 services:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # PostgreSQL Local (Opcional - usa Neon en producción)
-  # ─────────────────────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    profiles:
-      - local-db  # Solo se inicia con: docker-compose --profile local-db up
     environment:
       POSTGRES_DB: fotografos_db
       POSTGRES_USER: fotografos_user
-      POSTGRES_PASSWORD: fotografos_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    expose:
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fotografos_user -d fotografos_db"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Redis (Siempre necesario para colas y caché)
-  # ─────────────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # API Service (Desarrollo local con Docker)
-  # ─────────────────────────────────────────────────────────────────────────────
-  # NOTA: Para producción, despliega en Railway/Render/Fly.io
+  face-api:
+    build:
+      context: "../../python v1"
+    restart: unless-stopped
+    environment:
+      FACE_API_KEY: ${FACE_API_KEY:?FACE_API_KEY is required}
+      MAX_IMAGE_MB: ${MAX_IMAGE_MB:-50}
+      MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-80000000}
+      ALLOWED_IMAGE_HOSTS_STR: ${ALLOWED_IMAGE_HOSTS_STR:-}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
   api:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.api
     restart: unless-stopped
-    profiles:
-      - full-stack  # Solo con: docker-compose --profile full-stack up
-    ports:
-      - "8080:8080"
-    environment:
-      - NODE_ENV=development
-      - PORT=8080
-      # Usa la variable de entorno del host (Neon) o fallback a local
-      - DATABASE_URL=${DATABASE_URL:-postgresql://fotografos_user:fotografos_pass@postgres:5432/fotografos_db}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+    environment: &backend_environment
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: redis://redis:6379
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:?JWT_PUBLIC_KEY is required}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-7d}
+      ORDER_ACCESS_SECRET: ${ORDER_ACCESS_SECRET:?ORDER_ACCESS_SECRET is required}
+      METRICS_HASH_SECRET: ${METRICS_HASH_SECRET:?METRICS_HASH_SECRET is required}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL is required}
+      API_URL: ${API_URL:?API_URL is required}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      PLATFORM_DOMAINS: ${PLATFORM_DOMAINS:-lucilamon.com,www.lucilamon.com}
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-r2}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-fotografos-images}
+      R2_PUBLIC_BUCKET_NAME: ${R2_PUBLIC_BUCKET_NAME:-fotografos-public}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL:-}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_CONNECT_COUNTRY: ${STRIPE_CONNECT_COUNTRY:-US}
+      DEMO_PAYMENTS: ${DEMO_PAYMENTS:-false}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      EMAIL_SERVICE: ${EMAIL_SERVICE:-sendgrid}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-noreply@lucilamon.com}
+      FACE_API_KEY: ${FACE_API_KEY:?FACE_API_KEY is required}
+      PYTHON_FACE_API_URL: http://face-api:8000
+      FACE_SEARCH_MAX_CANDIDATES: ${FACE_SEARCH_MAX_CANDIDATES:-200}
+    expose:
+      - "8080"
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - .:/app
-      - node_modules:/app/node_modules
-    command: npm run start:dev
+    command: ["sh", "-c", "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node dist/apps/api/main.js"]
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Worker Service (Procesamiento de fotos en background)
-  # ─────────────────────────────────────────────────────────────────────────────
   worker:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.worker
     restart: unless-stopped
-    profiles:
-      - full-stack  # Solo con: docker-compose --profile full-stack up
-    environment:
-      - NODE_ENV=development
-      # Usa la variable de entorno del host (Neon) o fallback a local
-      - DATABASE_URL=${DATABASE_URL:-postgresql://fotografos_user:fotografos_pass@postgres:5432/fotografos_db}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+    environment: *backend_environment
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
+      face-api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: "../../sports-photography-platform (1)"
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/v1}
+        NEXT_PUBLIC_APP_HOSTS: ${NEXT_PUBLIC_APP_HOSTS:-lucilamon.com,www.lucilamon.com}
+        NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET: ${NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET:-domains.lucilamon.com}
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/v1}
+      INTERNAL_API_URL: http://api:8080/v1
+      NEXT_PUBLIC_APP_HOSTS: ${NEXT_PUBLIC_APP_HOSTS:-lucilamon.com,www.lucilamon.com}
+      NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET: ${NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET:-domains.lucilamon.com}
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+      PLATFORM_DOMAINS: ${PLATFORM_DOMAINS:-lucilamon.com, www.lucilamon.com}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
     volumes:
-      - .:/app
-      - node_modules:/app/node_modules
-    command: npm run start:worker
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
 
 volumes:
   postgres_data:
-    driver: local
   redis_data:
-    driver: local
-  node_modules:
-    driver: local
+  caddy_data:
+  caddy_config:

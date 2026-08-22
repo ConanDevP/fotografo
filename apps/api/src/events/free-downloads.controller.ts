@@ -2,11 +2,31 @@ import { Controller, Post, Get, Param, Body, Req, Res, UseGuards, Logger } from 
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { FreeDownloadsService } from './free-downloads.service';
+import { Throttle } from '@nestjs/throttler';
+import { IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 
-interface FreeDownloadDto {
+class FreeDownloadDto {
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(254)
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
   phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
   bibNumber?: string;
 }
 
@@ -21,6 +41,7 @@ export class FreeDownloadsController {
    * POST /events/:eventId/photos/:photoId/download-free
    */
   @Post(':eventId/photos/:photoId/download-free')
+  @Throttle(10, 60)
   async downloadFreePhoto(
     @Param('eventId') eventId: string,
     @Param('photoId') photoId: string,
@@ -45,8 +66,8 @@ export class FreeDownloadsController {
    */
   @UseGuards(AuthGuard('jwt'))
   @Get(':eventId/free-downloads/analytics')
-  async getAnalytics(@Param('eventId') eventId: string) {
-    const analytics = await this.freeDownloadsService.getEventAnalytics(eventId);
+  async getAnalytics(@Param('eventId') eventId: string, @Req() req: any) {
+    const analytics = await this.freeDownloadsService.getEventAnalytics(eventId, req.user.id, req.user.role);
 
     return {
       data: analytics,
@@ -61,9 +82,10 @@ export class FreeDownloadsController {
   @Get(':eventId/free-downloads/export-emails')
   async exportEmails(
     @Param('eventId') eventId: string,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const csv = await this.freeDownloadsService.exportEmails(eventId);
+    const csv = await this.freeDownloadsService.exportEmails(eventId, req.user.id, req.user.role);
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="emails-evento-${eventId}.csv"`);

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
@@ -10,18 +10,22 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthTokens, UserProfile, UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
+import { WorkspacesService } from '../workspaces/workspaces.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
     private configService: ConfigService,
     private redisService: RedisService,
+    private workspacesService: WorkspacesService,
   ) {}
 
   async register(registerDto: RegisterDto): Promise<{ tokens: AuthTokens; user: UserProfile }> {
-    const { email, password, name, phone, address, role = UserRole.ATHLETE } = registerDto;
+    const { email, password, name, phone, address, slug, role = UserRole.ATHLETE } = registerDto;
 
     // Check if user exists
     const existingUser = await this.usersService.findByEmail(email);
@@ -45,6 +49,11 @@ export class AuthService {
       role,
     });
 
+    if (role === UserRole.PHOTOGRAPHER) {
+      // El slug pedido en el registro manda sobre el generado desde el nombre.
+      await this.ensureProfessionalWorkspace({ ...user, slug: slug ?? user.slug });
+    }
+
     // Generate tokens
     const tokens = await this.generateTokens(user.id);
 
@@ -63,6 +72,8 @@ export class AuthService {
       });
     }
 
+    await this.ensureProfessionalWorkspace(user);
+
     const tokens = await this.generateTokens(user.id);
     return {
       tokens,
@@ -70,11 +81,10 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshToken: string): Promise<{ accessToken: string }> {
-    const tokenData = await this.redisService.getRefreshToken(refreshToken);
+  async refresh(refreshToken: string): Promise<AuthTokens> {
+    const tokenData = await this.redisService.consumeRefreshToken(refreshToken);
     
     if (!tokenData || Date.now() > tokenData.expiresAt) {
-      await this.redisService.deleteRefreshToken(refreshToken);
       throw new UnauthorizedException({
         code: ERROR_CODES.TOKEN_EXPIRED,
         message: 'Token de refresh expirado',
@@ -83,20 +93,14 @@ export class AuthService {
 
     const user = await this.usersService.findById(tokenData.userId);
     if (!user) {
-      await this.redisService.deleteRefreshToken(refreshToken);
       throw new UnauthorizedException({
         code: ERROR_CODES.USER_NOT_FOUND,
         message: 'Usuario no encontrado',
       });
     }
 
-    const accessToken = this.jwtService.sign({ 
-      sub: user.id, 
-      email: user.email, 
-      role: user.role 
-    });
-
-    return { accessToken };
+    const tokens = await this.generateTokens(user.id);
+    return tokens;
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -104,7 +108,7 @@ export class AuthService {
   }
 
   async validateUser(email: string, password: string): Promise<any> {
-    const user = await this.usersService.findByEmail(email);
+    const user = await this.usersService.findByEmail(email.trim().toLowerCase());
     
     if (user && user.passwordHash && await argon2.verify(user.passwordHash, password)) {
       const { passwordHash, ...result } = user;
@@ -144,6 +148,10 @@ export class AuthService {
     }
   }
 
+  refreshTokenTtlMs(): number {
+    return this.parseExpiry(this.configService.get('JWT_REFRESH_EXPIRY', '7d'));
+  }
+
   private mapUserToProfile(user: any): UserProfile {
     return {
       id: user.id,
@@ -161,10 +169,10 @@ export class AuthService {
    * Método especial para crear usuarios administradores
    * Solo debe usarse en setup inicial o por otros admins
    */
-  async createAdmin(data: { email: string; password: string; name: string }) {
+  async createInitialAdmin(data: { email: string; password: string; name: string }) {
     const passwordHash = await argon2.hash(data.password);
 
-    const admin = await this.usersService.create({
+    const admin = await this.usersService.createFirstAdmin({
       email: data.email,
       passwordHash,
       name: data.name,
@@ -172,5 +180,20 @@ export class AuthService {
     });
 
     return admin;
+  }
+
+  private async ensureProfessionalWorkspace(user: {
+    id: string;
+    email: string;
+    name?: string | null;
+    slug?: string | null;
+    role: string;
+  }) {
+    if (user.role !== UserRole.PHOTOGRAPHER) return;
+    try {
+      await this.workspacesService.createDefaultForPhotographer(user);
+    } catch {
+      this.logger.error(`No se pudo asegurar el espacio inicial para ${user.id}`);
+    }
   }
 }

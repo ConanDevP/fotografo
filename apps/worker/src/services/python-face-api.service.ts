@@ -31,12 +31,14 @@ export class PythonFaceApiService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Face-API-Key': this.configService.get('FACE_API_KEY', ''),
         },
         body: JSON.stringify({
           image_url: imageUrl, // Send signed URL directly
           max_faces: maxFaces,
           min_confidence: minConfidence,
         }),
+        signal: AbortSignal.timeout(60_000),
       });
 
       if (!response.ok) {
@@ -48,8 +50,7 @@ export class PythonFaceApiService {
       const data: PythonFaceApiResponse = await response.json();
       
       if (!data.success) {
-        this.logger.warn(`Python Face API error: ${data.error}`);
-        return [];
+        throw new Error(`Python Face API error: ${data.error || 'respuesta inválida'}`);
       }
 
       this.logger.log(`Detected ${data.faces_detected} faces in image`);
@@ -70,7 +71,7 @@ export class PythonFaceApiService {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       // NO loggear el error completo porque puede incluir la imagen base64
       this.logger.error(`Error calling Python Face API: ${errorMessage.substring(0, 200)}`);
-      return [];
+      throw error;
     }
   }
 
@@ -96,8 +97,10 @@ export class PythonFaceApiService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Face-API-Key': this.configService.get('FACE_API_KEY', ''),
         },
         body: JSON.stringify(requestPayload),
+        signal: AbortSignal.timeout(60_000),
       });
 
       if (!response.ok) {
@@ -174,8 +177,11 @@ export class PythonFaceApiService {
     try {
       const response = await fetch(`${this.pythonApiUrl}/health`, {
         method: 'GET',
-        timeout: 5000, // 5 second timeout
-      } as RequestInit);
+        headers: {
+          'X-Face-API-Key': this.configService.get('FACE_API_KEY', ''),
+        },
+        signal: AbortSignal.timeout(5000),
+      });
 
       return response.ok;
     } catch (error) {
@@ -184,9 +190,4 @@ export class PythonFaceApiService {
     }
   }
 
-  // Synchronous version for backward compatibility
-  isReadySync(): boolean {
-    // For now, assume it's ready - in production you might want to cache the health status
-    return true;
-  }
 }

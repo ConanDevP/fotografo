@@ -6,7 +6,7 @@ import { UserRole } from '@shared/types';
 
 describe('PublicPhotographersService', () => {
   let service: PublicPhotographersService;
-  let prismaService: jest.Mocked<PrismaService>;
+  let prismaService: any;
 
   const mockPhotographer = {
     id: '123',

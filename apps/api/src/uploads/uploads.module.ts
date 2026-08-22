@@ -8,9 +8,12 @@ import { SharpTransformService } from '../common/services/sharp-transform.servic
 import { StorageService } from '../common/services/storage.service';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
-import { JobRecoveryService } from '../common/services/job-recovery.service';
+import { EventsModule } from '../events/events.module';
+import { RecoveryModule } from '../common/recovery.module';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
+  imports: [EventsModule, RecoveryModule, BillingModule],
   controllers: [UploadsController, ProgressStreamController],
   providers: [
     UploadsService, 
@@ -20,7 +23,6 @@ import { JobRecoveryService } from '../common/services/job-recovery.service';
     StorageService, 
     PrismaService, 
     QueueService,
-    JobRecoveryService,
   ],
   exports: [UploadsService],
 })

@@ -26,9 +26,20 @@ export class InferBibsProcessor extends WorkerHost {
   }
 
   async process(job: Job<InferBibsJob>): Promise<void> {
-    const { photoId, eventId } = job.data;
+    const { photoId, eventId, sweep } = job.data;
     const startTime = Date.now();
 
+    if (sweep || !photoId) {
+      await this.sweepEvent(eventId, job);
+      return;
+    }
+
+    await this.inferForPhoto(photoId, eventId);
+  }
+
+  /** Inferencia para una sola fotografía. La usan el flujo normal y el repaso. */
+  private async inferForPhoto(photoId: string, eventId: string): Promise<void> {
+    const startTime = Date.now();
     this.logger.log(`🔍 [INFERENCE-START] Photo ${photoId} in event ${eventId}`);
 
     try {
@@ -39,6 +50,7 @@ export class InferBibsProcessor extends WorkerHost {
         where: { photoId },
         select: {
           id: true,
+          photoId: true,
           embedding: true,
           faceBibAssociations: {
             where: { photoId },
@@ -68,12 +80,6 @@ export class InferBibsProcessor extends WorkerHost {
         this.logger.log(`   ✅ All faces already have associations - nothing to infer`);
         return;
       }
-
-      // ═══════════════════════════════════════════════════════
-      // Step 2: Invalidate KNN cache to ensure fresh data
-      // ═══════════════════════════════════════════════════════
-      this.faceKnnService.invalidate(eventId);
-      this.logger.log(`   🔄 KNN cache invalidated before inference`);
 
       // ═══════════════════════════════════════════════════════
       // Step 3: Attempt direct KNN matching using confirmed embeddings
@@ -127,6 +133,59 @@ export class InferBibsProcessor extends WorkerHost {
     }
   }
 
+  /**
+   * Repaso del evento entero: reintenta todas las caras que siguen sin dorsal.
+   *
+   * La inferencia por fotografía ocurre 45 s después de procesarla, cuando la
+   * fotografía que enseña rostro y dorsal juntos puede no haberse subido aún.
+   * Ese único intento es el motivo de que muchas caras se quedaran huérfanas
+   * para siempre. Aquí se vuelve a intentar con el evento ya completo.
+   */
+  private async sweepEvent(eventId: string, job: Job<InferBibsJob>): Promise<void> {
+    const startTime = Date.now();
+    this.logger.log(`🧹 [SWEEP-START] Repasando caras sin dorsal del evento ${eventId}`);
+
+    // Solo interesan las fotografías con caras huérfanas: las que ya tienen
+    // asociación no cambian nada y recorrerlas sería trabajo perdido.
+    const orphanPhotos = await this.prisma.faceEmbedding.findMany({
+      where: { eventId, faceBibAssociations: { none: {} } },
+      select: { photoId: true },
+      distinct: ['photoId'],
+    });
+
+    if (orphanPhotos.length === 0) {
+      this.logger.log(`🧹 [SWEEP-END] No quedan caras sin dorsal en ${eventId}`);
+      return;
+    }
+
+    this.logger.log(`🧹 ${orphanPhotos.length} fotografía(s) con caras sin dorsal`);
+
+    let resolved = 0;
+    for (let index = 0; index < orphanPhotos.length; index++) {
+      const { photoId } = orphanPhotos[index];
+      try {
+        const before = await this.prisma.faceBibAssociation.count({ where: { photoId } });
+        await this.inferForPhoto(photoId, eventId);
+        const after = await this.prisma.faceBibAssociation.count({ where: { photoId } });
+        if (after > before) resolved++;
+      } catch (error) {
+        // Una fotografía problemática no debe detener el repaso del evento.
+        this.logger.warn(
+          `🧹 Repaso falló para ${photoId}: ${error instanceof Error ? error.message : 'error desconocido'}`,
+        );
+      }
+      if (index % 25 === 0) {
+        await job.updateProgress(Math.round((index / orphanPhotos.length) * 100));
+      }
+    }
+
+    await job.updateProgress(100);
+    this.logger.log(
+      `🧹 [SWEEP-END] Evento ${eventId}: ${resolved}/${orphanPhotos.length} fotografías recuperaron dorsal ` +
+      `(${Date.now() - startTime}ms)`,
+    );
+  }
+
   @OnWorkerEvent('completed')
   onCompleted(job: Job<InferBibsJob>) {
     this.logger.log(
@@ -171,7 +230,8 @@ export class InferBibsProcessor extends WorkerHost {
       const matches = await this.faceKnnService.findMatches(
         eventId,
         face.embedding,
-        FACE_BIB_LINKING.KNN_MAX_RESULTS
+        FACE_BIB_LINKING.KNN_MAX_RESULTS,
+        photoId,
       );
 
       this.logger.log(`      📊 [KNN] Found ${matches.length} candidate(s) for face ${face.id}`);
@@ -534,6 +594,19 @@ export class InferBibsProcessor extends WorkerHost {
       }
     });
 
-    this.faceKnnService.invalidate(eventId);
+    // El índice se mantiene vivo añadiendo la asociación nueva, en lugar de
+    // tirarlo y releer el evento entero en la siguiente fotografía.
+    const embedding = await this.prisma.faceEmbedding.findUnique({
+      where: { id: faceEmbeddingId },
+      select: { embedding: true, photoId: true },
+    });
+    if (embedding) {
+      this.faceKnnService.addToIndex(eventId, {
+        faceEmbeddingId,
+        photoId: embedding.photoId,
+        bib,
+        embedding: embedding.embedding,
+      });
+    }
   }
 }

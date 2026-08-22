@@ -1,336 +1,341 @@
-import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
+import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 
 import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { OcrGeminiService } from '../services/ocr-gemini.service';
 import { ImagesService } from '../services/images.service';
-import { CloudinaryService } from '../../../api/src/common/services/cloudinary.service';
-import { ProcessPhotoJob, ProcessFaceJob, InferBibsJob } from '@shared/types';
-import { QUEUES } from '@shared/constants';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import { BatchProgressService } from '../services/batch-progress.service';
+import { InferBibsJob, ProcessFaceJob, ProcessPhotoJob, SendBibEmailJob } from '@shared/types';
+import { JOBS, QUEUES } from '@shared/constants';
 
 @Processor(QUEUES.PROCESS_PHOTO, {
-  concurrency: parseInt(process.env.WORKER_CONCURRENCY || '8')
+  concurrency: parseInt(process.env.WORKER_CONCURRENCY || '8'),
 })
 export class ProcessPhotoProcessor extends WorkerHost {
   private readonly logger = new Logger(ProcessPhotoProcessor.name);
 
   constructor(
-    private prisma: PrismaService,
-    private ocrService: OcrGeminiService,
-    private imagesService: ImagesService,
-    private cloudinaryService: CloudinaryService,
-    @InjectQueue(QUEUES.PROCESS_FACE) private faceQueue: Queue<ProcessFaceJob>,
-    @InjectQueue(QUEUES.INFER_BIBS) private inferQueue: Queue<InferBibsJob>,
+    private readonly prisma: PrismaService,
+    private readonly ocrService: OcrGeminiService,
+    private readonly imagesService: ImagesService,
+    private readonly batchProgress: BatchProgressService,
+    @InjectQueue(QUEUES.PROCESS_FACE) private readonly faceQueue: Queue<ProcessFaceJob>,
+    @InjectQueue(QUEUES.INFER_BIBS) private readonly inferQueue: Queue<InferBibsJob>,
+    @InjectQueue(QUEUES.SEND_BIB_EMAIL) private readonly emailQueue: Queue<SendBibEmailJob>,
   ) {
     super();
   }
 
   async process(job: Job<ProcessPhotoJob>): Promise<void> {
     const { photoId, eventId, objectKey } = job.data;
-    const startTime = Date.now();
-    const enqueuedAt = job.timestamp;
-    const delayFromEnqueue = startTime - enqueuedAt;
-    
-    this.logger.log(`🚀 [Job ${job.id}] WORKER INICIANDO procesamiento de foto ${photoId} - Delay desde enqueue: ${delayFromEnqueue}ms`);
+    const startedAt = Date.now();
+    const isFinalAttempt = job.attemptsMade + 1 >= Number(job.opts.attempts || 1);
+
+    this.logger.log(
+      `[Job ${job.id}] Procesando foto ${photoId}; intento ${job.attemptsMade + 1}/${job.opts.attempts || 1}`,
+    );
 
     try {
-      // Get photo and event data
-      const [photo, event] = await Promise.all([
+      let [photo, event] = await Promise.all([
         this.prisma.photo.findUnique({ where: { id: photoId } }),
-        this.prisma.event.findUnique({ where: { id: eventId } }),
+        this.prisma.event.findUnique({
+          where: { id: eventId },
+          include: { workspace: { select: { name: true, slug: true } } },
+        }),
       ]);
 
-      if (!photo || !event) {
-        throw new Error('Foto o evento no encontrado');
+      if (!photo || !event) throw new Error('Foto o evento no encontrado');
+
+      if (photo.processingCompletedAt && photo.status === 'PROCESSED') {
+        if (!photo.faceProcessedAt && !photo.faceFailedAt) {
+          const imageUrl = await this.imagesService.getOptimizedImageForOCR(objectKey);
+          await this.enqueueFaceProcessing(photoId, eventId, imageUrl);
+        }
+        await this.batchProgress.reconcileForPhoto(photoId);
+        await job.updateProgress(100);
+        return;
       }
 
-      // Step 1: Generate image derivatives (thumbnail, watermark)
-      job.updateProgress(25);
-      let watermarkSuccess = false;
-      try {
-        const derivatives = await this.imagesService.generateDerivatives(
-          objectKey, 
-          eventId, 
-          photoId
-        );
+      await job.updateProgress(20);
+      if (!photo.derivativesProcessedAt || !photo.thumbUrl || !photo.watermarkUrl) {
+        try {
+          const derivatives = await this.imagesService.generateDerivatives(
+            objectKey,
+            eventId,
+            photoId,
+            event.workspace ? `${event.workspace.name} · LucilaMon` : 'lucilamon.com',
+          );
+          const processedAt = new Date();
+          photo = await this.prisma.photo.update({
+            where: { id: photoId },
+            data: {
+              thumbUrl: derivatives.thumbUrl,
+              watermarkUrl: derivatives.watermarkUrl,
+              watermarkThumbUrl: derivatives.watermarkThumbUrl,
+              derivativesProcessedAt: processedAt,
+              watermarkFailedAt: null,
+              derivedBytes: derivatives.derivedBytes,
+            },
+          });
 
-        // Update photo with derivative URLs
-        await this.prisma.photo.update({
-          where: { id: photoId },
-          data: {
-            thumbUrl: derivatives.thumbUrl,
-            watermarkUrl: derivatives.watermarkUrl,
-          },
+          // Las derivadas también ocupan R2. Este bloque solo se ejecuta cuando
+          // aún no había derivadas, así que un reintento no cuenta dos veces.
+          if (photo.photographerWorkspaceId && derivatives.derivedBytes) {
+            await this.prisma.workspace
+              .update({
+                where: { id: photo.photographerWorkspaceId },
+                data: { storageBytesUsed: { increment: BigInt(derivatives.derivedBytes) } },
+              })
+              .catch(error =>
+                this.logger.warn(
+                  `No se pudo contabilizar el consumo de derivadas de ${photoId}: ${
+                    error instanceof Error ? error.message : 'error desconocido'
+                  }`,
+                ),
+              );
+          }
+          await this.prisma.batchUploadItem.updateMany({
+            where: { photoId },
+            data: { derivativesProcessedAt: processedAt, watermarkFailedAt: null, error: null },
+          });
+        } catch (error) {
+          if (isFinalAttempt) {
+            const failedAt = new Date();
+            await Promise.all([
+              this.prisma.photo.updateMany({
+                where: { id: photoId },
+                data: { watermarkFailedAt: failedAt },
+              }),
+              this.prisma.batchUploadItem.updateMany({
+                where: { photoId },
+                data: { watermarkFailedAt: failedAt },
+              }),
+            ]);
+          }
+          throw error;
+        }
+      } else {
+        await this.prisma.batchUploadItem.updateMany({
+          where: { photoId, derivativesProcessedAt: null },
+          data: { derivativesProcessedAt: photo.derivativesProcessedAt, watermarkFailedAt: null },
         });
-        
-        watermarkSuccess = true;
-        this.logger.debug(`[Job ${job.id}] Watermark generada exitosamente para foto ${photoId}`);
-      } catch (error) {
-        this.logger.error(`[Job ${job.id}] Error generando watermark para foto ${photoId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Continue processing, but mark watermark as failed
       }
 
-      // Step 2: Get optimized image for OCR
-      job.updateProgress(40);
+      await job.updateProgress(40);
       const ocrImageUrl = await this.imagesService.getOptimizedImageForOCR(objectKey);
 
-      // Step 3: Perform OCR with Gemini
-      job.updateProgress(60);
-      let geminiSuccess = false;
-      let ocrResult: any;
-      try {
-        ocrResult = await this.ocrService.detectBibs(
-          ocrImageUrl,
-          event.bibRules as any,
-          'flash' // Use flash model by default
-        );
-        geminiSuccess = true;
-        this.logger.debug(`[Job ${job.id}] Gemini OCR procesado exitosamente para foto ${photoId}, ${ocrResult.bibs?.length || 0} dorsales detectados`);
-      } catch (error) {
-        this.logger.error(`[Job ${job.id}] Error en Gemini OCR para foto ${photoId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        ocrResult = { bibs: [] }; // Set empty result to continue processing
-      }
+      if (!photo.ocrProcessedAt && !photo.ocrFailedAt) {
+        try {
+          let ocrResult = await this.ocrService.detectBibs(
+            ocrImageUrl,
+            event.bibRules as any,
+            'flash',
+          );
 
-      // Step 4: Save detected bibs to database
-      job.updateProgress(70);
-      if (ocrResult.bibs && ocrResult.bibs.length > 0) {
-        await this.prisma.photoBib.createMany({
-          data: ocrResult.bibs.map(bib => ({
-            photoId,
-            eventId,
-            bib: bib.value,
-            confidence: bib.confidence,
-            bbox: bib.bbox,
-            source: 'GEMINI',
-            promptTokens: ocrResult.usage?.promptTokens,
-            candidatesTokens: ocrResult.usage?.candidatesTokens,
-            totalTokens: ocrResult.usage?.totalTokens,
-            geminiImageWidth: ocrResult.imageDimensions?.width,
-            geminiImageHeight: ocrResult.imageDimensions?.height,
-          })),
-          skipDuplicates: true,
-        });
-
-        this.logger.log(`Guardados ${ocrResult.bibs.length} dorsales para foto ${photoId}`);
-
-        // Step 5: Organize photos by bibs in Cloudinary folders (DISABLED for now)
-        job.updateProgress(80);
-        // TODO: Fix copyToFolder method in CloudinaryService
-        // await this.organizePhotoByBibs(objectKey, eventId, photoId, ocrResult.bibs.map(b => b.value));
-        this.logger.log(`Skipping bib organization for now - photos are already accessible via search`);
-
-        // Step 6: Check for subscriptions and send notifications
-        const uniqueBibs: string[] = [...new Set(ocrResult.bibs.map((b: { value: string }) => b.value) as string[])];
-        const subscriptions = await this.prisma.bibSubscription.findMany({
-          where: {
-            eventId,
-            bib: { in: uniqueBibs },
-          },
-        });
-
-        // Enqueue email notifications for subscribers
-        for (const subscription of subscriptions) {
-          // Note: In a real implementation, you'd inject QueueService or emit events
-          // For now, we'll skip the email queue to avoid circular dependencies
-          this.logger.log(`Dorsal ${subscription.bib} tiene suscripción para ${subscription.email}`);
-        }
-      }
-
-      // Step 7: Process facial recognition (parallel to OCR)
-      job.updateProgress(85);
-      let faceProcessingEnqueued = false;
-      try {
-        await this.enqueueFaceProcessing(photoId, eventId, ocrImageUrl);
-        faceProcessingEnqueued = true;
-        this.logger.log(`[Job ${job.id}] Face processing enqueued for photo ${photoId}`);
-      } catch (error) {
-        // Don't fail the entire job if face processing fails
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.warn(`[Job ${job.id}] Failed to enqueue face processing for photo ${photoId}: ${errorMessage}`);
-      }
-
-      // Guard: encolar inferencias con un pequeño delay para asegurar ejecución aunque el face job se retrase
-      try {
-        await this.inferQueue.add(
-          'infer-bibs',
-          { photoId, eventId },
-          {
-            jobId: `infer-guard-${photoId}`,
-            delay: 45_000, // 45s después, normalmente el face ya habrá guardado embeddings
-            attempts: 2,
-            backoff: { type: 'exponential', delay: 10_000 },
-            removeOnComplete: 10,
-            removeOnFail: 5,
+          // Escalado a un modelo mayor cuando el rápido no lee ningún dorsal.
+          // Solo se paga en las fotografías que lo necesitan, y evita que una
+          // foto se quede sin dorsal para siempre esperando un reproceso manual.
+          if (!ocrResult.bibs?.length) {
+            this.logger.log(`[Job ${job.id}] Sin dorsales con flash; reintentando con pro`);
+            try {
+              const escalated = await this.ocrService.detectBibs(
+                ocrImageUrl,
+                event.bibRules as any,
+                'pro',
+              );
+              if (escalated.bibs?.length) {
+                ocrResult = escalated;
+                this.logger.log(`[Job ${job.id}] pro encontró ${escalated.bibs.length} dorsal(es)`);
+              }
+            } catch (escalationError) {
+              // El escalado es una mejora, no un requisito: si falla, la foto
+              // sigue su curso con el resultado de flash.
+              this.logger.warn(
+                `[Job ${job.id}] Escalado a pro falló: ${escalationError instanceof Error ? escalationError.message : 'error desconocido'}`,
+              );
+            }
           }
-        );
-        this.logger.log(`[Job ${job.id}] Guard infer-bibs enqueued (delayed) for photo ${photoId}`);
-      } catch (e) {
-        this.logger.warn(`[Job ${job.id}] Failed to enqueue guard infer-bibs for photo ${photoId}`);
-      }
 
-      // Step 8: Mark photo as processed
-      job.updateProgress(100);
-      await this.prisma.photo.update({
-        where: { id: photoId },
-        data: { status: 'PROCESSED' },
-      });
+          if (ocrResult.bibs?.length) {
+            await this.prisma.photoBib.createMany({
+              data: ocrResult.bibs.map(bib => ({
+                photoId,
+                eventId,
+                bib: bib.value,
+                confidence: bib.confidence,
+                bbox: bib.bbox,
+                source: 'GEMINI',
+                promptTokens: ocrResult.usage?.promptTokens,
+                candidatesTokens: ocrResult.usage?.candidatesTokens,
+                totalTokens: ocrResult.usage?.totalTokens,
+                geminiImageWidth: ocrResult.imageDimensions?.width,
+                geminiImageHeight: ocrResult.imageDimensions?.height,
+              })),
+              skipDuplicates: true,
+            });
+          }
 
-      // Update processedFiles count and pipeline tracking in BatchUploadJob
-      const updatedPhoto = await this.prisma.photo.findUnique({
-        where: { id: photoId },
-        select: { batchJobId: true }, // Only fetch batchJobId
-      });
-
-      if (updatedPhoto?.batchJobId) {
-        // Prepare pipeline increment data
-        const incrementData: any = { 
-          processedFiles: { increment: 1 },
-          updatedAt: new Date() // Actualizar timestamp para recovery
-        };
-
-        // Track successful pipeline steps
-        if (watermarkSuccess) {
-          incrementData.watermarkFiles = { increment: 1 };
-        } else {
-          incrementData.failedWatermarks = { increment: 1 };
-        }
-
-        if (geminiSuccess) {
-          incrementData.geminiFiles = { increment: 1 };
-        } else {
-          incrementData.failedGemini = { increment: 1 };
-        }
-
-        // Note: Face processing success will be tracked in the face processor
-        // For now, we just track that it was enqueued
-        if (!faceProcessingEnqueued) {
-          incrementData.failedFaces = { increment: 1 };
-        }
-
-        const batchJob = await this.prisma.batchUploadJob.update({
-          where: { id: updatedPhoto.batchJobId },
-          data: incrementData,
-        });
-
-        this.logger.debug(`[Job ${job.id}] BatchJob ${batchJob.id} pipeline updated: W:${watermarkSuccess ? '+1' : 'fail'}, G:${geminiSuccess ? '+1' : 'fail'}, F:${faceProcessingEnqueued ? 'enq' : 'fail'}`);
-
-        // Check if all files in the batch job are processed
-        if (batchJob.processedFiles >= batchJob.totalFiles) {
-          await this.prisma.batchUploadJob.update({
-            where: { id: batchJob.id },
-            data: { status: 'COMPLETED' },
+          const processedAt = new Date();
+          photo = await this.prisma.photo.update({
+            where: { id: photoId },
+            data: { ocrProcessedAt: processedAt, ocrFailedAt: null },
           });
-          this.logger.log(`[Job ${job.id}] Batch job ${batchJob.id} completado (${batchJob.processedFiles}/${batchJob.totalFiles})`);
-        } else {
-          this.logger.debug(`[Job ${job.id}] Batch job ${batchJob.id} progreso: ${batchJob.processedFiles}/${batchJob.totalFiles}`);
+          await this.prisma.batchUploadItem.updateMany({
+            where: { photoId },
+            data: { ocrProcessedAt: processedAt, ocrFailedAt: null },
+          });
+        } catch (error) {
+          if (!isFinalAttempt) throw error;
+
+          const failedAt = new Date();
+          photo = await this.prisma.photo.update({
+            where: { id: photoId },
+            data: { ocrFailedAt: failedAt },
+          });
+          await this.prisma.batchUploadItem.updateMany({
+            where: { photoId },
+            data: { ocrFailedAt: failedAt },
+          });
+          this.logger.warn(`OCR agotó sus reintentos para ${photoId}; la foto seguirá disponible`);
         }
       }
 
-      const processingTime = Date.now() - startTime;
-      this.logger.log(`[Job ${job.id}] Foto ${photoId} procesada exitosamente en ${processingTime}ms`);
+      await job.updateProgress(70);
+      await this.enqueueBibNotifications(photoId, eventId);
 
+      let faceQueuedOrFinished = Boolean(photo.faceProcessedAt || photo.faceFailedAt);
+      if (!faceQueuedOrFinished) {
+        try {
+          await this.enqueueFaceProcessing(photoId, eventId, ocrImageUrl);
+          faceQueuedOrFinished = true;
+        } catch (error) {
+          if (!isFinalAttempt) throw error;
+          const failedAt = new Date();
+          photo = await this.prisma.photo.update({
+            where: { id: photoId },
+            data: { faceFailedAt: failedAt },
+          });
+          await this.prisma.batchUploadItem.updateMany({
+            where: { photoId },
+            data: { faceFailedAt: failedAt },
+          });
+          this.logger.warn(`No se pudo encolar reconocimiento facial para ${photoId}`);
+        }
+      }
+
+      await this.enqueueInferenceGuard(photoId, eventId);
+
+      await job.updateProgress(95);
+      const completedAt = new Date();
+      const completedPhoto = await this.prisma.photo.update({
+        where: { id: photoId },
+        data: { status: 'PROCESSED', processingCompletedAt: completedAt },
+        select: { faceProcessedAt: true, faceFailedAt: true },
+      });
+      await this.prisma.batchUploadItem.updateMany({
+        where: { photoId },
+        data: {
+          status: completedPhoto.faceProcessedAt || completedPhoto.faceFailedAt ? 'COMPLETED' : 'PROCESSING',
+          error: null,
+        },
+      });
+
+      await this.batchProgress.reconcileForPhoto(photoId);
+      await job.updateProgress(100);
+      this.logger.log(`[Job ${job.id}] Foto ${photoId} procesada en ${Date.now() - startedAt}ms`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      const errorStack = error instanceof Error ? error.stack : undefined;
-      const processingTime = Date.now() - startTime;
-      
-      this.logger.error(`[Job ${job.id}] Error procesando foto ${photoId} después de ${processingTime}ms: ${errorMessage}`, errorStack);
+      this.logger.error(`[Job ${job.id}] Falló foto ${photoId}: ${errorMessage}`);
 
-      // Mark photo as failed
-      await this.prisma.photo.update({
-        where: { id: photoId },
-        data: { status: 'FAILED' },
-      }).catch(() => {
-        // Ignore DB errors during error handling
-      });
-
+      if (isFinalAttempt) {
+        await Promise.all([
+          this.prisma.photo.updateMany({
+            where: { id: photoId },
+            data: { status: 'FAILED' },
+          }),
+          this.prisma.batchUploadItem.updateMany({
+            where: { photoId },
+            data: { status: 'FAILED', error: errorMessage.slice(0, 1000) },
+          }),
+        ]).catch(() => undefined);
+      }
+      await this.batchProgress.reconcileForPhoto(photoId).catch(() => undefined);
       throw error;
     }
   }
 
-  private async organizePhotoByBibs(
-    sourceCloudinaryId: string,
-    eventId: string,
-    photoId: string,
-    bibs: string[],
-  ): Promise<void> {
-    try {
-      // For each detected bib, create organized copies
-      for (const bib of bibs) {
-        await Promise.all([
-          this.cloudinaryService.copyToFolder(
-            sourceCloudinaryId,
-            `events/${eventId}/original/dorsal-${bib}`,
-            `${photoId}-original`,
-            'original'
-          ),
-          this.cloudinaryService.copyToFolder(
-            sourceCloudinaryId,
-            `events/${eventId}/thumb/dorsal-${bib}`,
-            `${photoId}-thumb`,
-            'thumb'
-          ),
-          this.cloudinaryService.copyToFolder(
-            sourceCloudinaryId,
-            `events/${eventId}/wm/dorsal-${bib}`,
-            `${photoId}-watermark`,
-            'watermark'
-          ),
-        ]);
-      }
+  private async enqueueBibNotifications(photoId: string, eventId: string): Promise<void> {
+    const bibs = await this.prisma.photoBib.findMany({
+      where: { photoId },
+      select: { bib: true },
+    });
+    const uniqueBibs = [...new Set(bibs.map(item => item.bib))];
+    if (!uniqueBibs.length) return;
 
-      this.logger.log(`Foto ${photoId} organizada en ${bibs.length} carpetas de dorsales`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      const errorStack = error instanceof Error ? error.stack : undefined;
-      this.logger.error(`Error organizando foto por dorsales: ${errorMessage}`, errorStack);
-      // Don't throw - this shouldn't fail the entire job
+    const subscriptions = await this.prisma.bibSubscription.findMany({
+      where: { eventId, bib: { in: uniqueBibs } },
+    });
+    for (const subscription of subscriptions) {
+      await this.emailQueue.add(
+        JOBS.SEND_BIB_EMAIL,
+        {
+          kind: 'BIB_NOTIFICATION',
+          eventId,
+          bib: subscription.bib,
+          email: subscription.email,
+          photoIds: [photoId],
+        },
+        {
+          jobId: `bib-${subscription.id}-${photoId}`,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: 1000,
+          removeOnFail: 500,
+        },
+      );
     }
   }
 
   private async enqueueFaceProcessing(photoId: string, eventId: string, imageUrl: string): Promise<void> {
-    try {
-      // Remove existing job if it exists to allow retries
-      try {
-        const existingJob = await this.faceQueue.getJob(`face-${photoId}`);
-        if (existingJob) {
-          const state = await existingJob.getState();
-          // Only remove if stuck (waiting/delayed but not active)
-          if (state === 'waiting' || state === 'delayed') {
-            await existingJob.remove();
-            this.logger.log(`Removed stuck face job for photo ${photoId} (state: ${state})`);
-          }
-        }
-      } catch (e) {
-        // Job doesn't exist, continue
-      }
-
-      await this.faceQueue.add(
-        'process-face',
-        {
-          photoId,
-          eventId,
-          imageUrl,
-        } as ProcessFaceJob,
-        {
-          // REMOVED jobId to allow automatic ID generation and retries
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000,
-          },
-          removeOnComplete: 10,
-          removeOnFail: 5,
-        }
-      );
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Failed to enqueue face processing: ${errorMessage}`);
-      throw error;
+    const jobId = `face-${photoId}`;
+    const existingJob = await this.faceQueue.getJob(jobId);
+    if (existingJob) {
+      const state = await existingJob.getState();
+      if (state !== 'failed') return;
+      await existingJob.remove();
     }
+
+    await this.faceQueue.add(
+      JOBS.PROCESS_FACE,
+      { photoId, eventId, imageUrl },
+      {
+        jobId,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: 50,
+      },
+    );
+  }
+
+  private async enqueueInferenceGuard(photoId: string, eventId: string): Promise<void> {
+    await this.inferQueue.add(
+      JOBS.INFER_BIBS,
+      { photoId, eventId },
+      {
+        jobId: `infer-guard-${photoId}`,
+        delay: 45_000,
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 10_000 },
+        removeOnComplete: 100,
+        removeOnFail: 50,
+      },
+    ).catch(error => {
+      this.logger.warn(
+        `No se pudo encolar inferencia para ${photoId}: ${error instanceof Error ? error.message : 'error desconocido'}`,
+      );
+    });
   }
 
   @OnWorkerEvent('completed')
@@ -341,10 +346,5 @@ export class ProcessPhotoProcessor extends WorkerHost {
   @OnWorkerEvent('failed')
   onFailed(job: Job<ProcessPhotoJob>, err: Error) {
     this.logger.error(`Job ${job.id} falló para foto ${job.data.photoId}: ${err.message}`);
-  }
-
-  @OnWorkerEvent('progress')
-  onProgress(job: Job<ProcessPhotoJob>, progress: number) {
-    this.logger.debug(`Job ${job.id} progreso: ${progress}%`);
   }
 }

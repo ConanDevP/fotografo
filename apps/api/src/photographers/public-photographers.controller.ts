@@ -9,15 +9,11 @@ import {
 
 import { PublicPhotographersService } from './public-photographers.service';
 import { PhotographerQueryDto } from './dto/photographer-query.dto';
-import { PrismaService } from '../common/services/prisma.service';
-import { ApiResponse, UserRole } from '@shared/types';
+import { ApiResponse } from '@shared/types';
 
 @Controller('public/photographers')
 export class PublicPhotographersController {
-  constructor(
-    private readonly publicPhotographersService: PublicPhotographersService,
-    private readonly prisma: PrismaService
-  ) {}
+  constructor(private readonly publicPhotographersService: PublicPhotographersService) {}
 
   @Get()
   async findPhotographers(
@@ -62,43 +58,6 @@ export class PublicPhotographersController {
       meta: {
         pagination: result.pagination,
         photographer: result.photographer
-      }
-    };
-  }
-
-  @Get('debug')
-  async debug() {
-    const allUsers = await this.prisma.user.findMany({
-      where: { role: UserRole.PHOTOGRAPHER },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        slug: true,
-        role: true,
-        createdAt: true
-      }
-    });
-
-    const withSlug = await this.prisma.user.findMany({
-      where: { 
-        role: UserRole.PHOTOGRAPHER,
-        slug: { not: null }
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        slug: true
-      }
-    });
-
-    return {
-      data: {
-        totalPhotographers: allUsers.length,
-        photographersWithSlugCount: withSlug.length,
-        allPhotographers: allUsers,
-        photographersWithSlug: withSlug
       }
     };
   }

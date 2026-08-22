@@ -29,6 +29,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       if (params.model === 'Event') {
         // Para operaciones de lectura, excluir eventos eliminados
         if (['findFirst', 'findUnique', 'findMany', 'count'].includes(params.action)) {
+          // `count()` y `findMany()` se pueden invocar sin argumentos, en cuyo
+          // caso `params.args` llega undefined y no se puede indexar.
+          if (!params.args) {
+            params.args = {};
+          }
           if (!params.args.where) {
             params.args.where = {};
           }

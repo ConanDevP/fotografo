@@ -1,4 +1,6 @@
 import { Module, MiddlewareConsumer } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 
@@ -13,15 +15,22 @@ import { AdminModule } from './admin/admin.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { PhotographersModule } from './photographers/photographers.module';
 import { PublicModule } from './public/public.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
+import { SponsorsModule } from './sponsors/sponsors.module';
+import { MetricsModule } from './metrics/metrics.module';
+import { BillingModule } from './billing/billing.module';
 import { ConnectionErrorMiddleware } from './common/middleware/connection-error.middleware';
+import { HealthController } from './common/health.controller';
+import { validateEnvironment } from './common/config/validate-environment';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnvironment,
     }),
     ThrottlerModule.forRoot({
-      ttl: 60000,
+      ttl: 60,
       limit: 100,
     }),
     AuthModule,
@@ -35,7 +44,18 @@ import { ConnectionErrorMiddleware } from './common/middleware/connection-error.
     WebhooksModule,
     PhotographersModule,
     PublicModule,
+    WorkspacesModule,
+    SponsorsModule,
+    MetricsModule,
+    BillingModule,
   ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: UserThrottlerGuard,
+    },
+  ],
+  controllers: [HealthController],
 })
 export class AppModule {
   configure(consumer: MiddlewareConsumer) {

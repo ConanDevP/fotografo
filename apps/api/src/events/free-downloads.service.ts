@@ -2,6 +2,11 @@ import { Injectable, Logger, BadRequestException, ForbiddenException } from '@ne
 import { PrismaService } from '../common/services/prisma.service';
 import { StorageService } from '../common/services/storage.service';
 import { Request } from 'express';
+import { createHash, createHmac } from 'crypto';
+import { ConfigService } from '@nestjs/config';
+import { EventsService } from './events.service';
+import { UserRole } from '@shared/types';
+import { Prisma } from '@prisma/client';
 
 interface FreeDownloadRequest {
   email?: string;
@@ -17,6 +22,8 @@ export class FreeDownloadsService {
   constructor(
     private prisma: PrismaService,
     private storageService: StorageService,
+    private eventsService: EventsService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -27,16 +34,42 @@ export class FreeDownloadsService {
     photoId: string,
     userData: FreeDownloadRequest,
     req: Request,
-  ): Promise<{ downloadUrl: string; expiresIn: number }> {
+  ): Promise<{
+    downloadUrl: string;
+    expiresIn: number;
+    variant: 'CLEAN' | 'SPONSORED';
+    sponsors: Array<{ id: string; name: string; logoUrl: string }>;
+  }> {
+    const normalizedEmail = userData.email?.trim().toLowerCase() || undefined;
+    const privacySecret = this.configService.get('METRICS_HASH_SECRET') || this.configService.get('ORDER_ACCESS_SECRET') || 'lucilamon-local-downloads';
+    const clientIpHash = createHmac('sha256', privacySecret).update(req.ip || 'unknown').digest('hex');
     // 1. Get event and verify it's free
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+      where: {
+        id: eventId,
+        deletedAt: null,
+        isPublished: true,
+        commerceMode: 'FREE',
+      },
       select: {
         id: true,
         isFreeDownload: true,
         freeDownloadUntil: true,
         requireEmailForFree: true,
         freeDownloadLimit: true,
+        commerceMode: true,
+        sponsorOverlayEnabled: true,
+        workspaceId: true,
+        eventSponsors: {
+          where: {
+            status: 'ACTIVE',
+            sponsor: { isActive: true },
+            OR: [{ startsAt: null }, { startsAt: { lte: new Date() } }],
+            AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: new Date() } }] }],
+          },
+          orderBy: { priority: 'desc' },
+          include: { sponsor: true },
+        },
       },
     });
 
@@ -44,7 +77,8 @@ export class FreeDownloadsService {
       throw new BadRequestException('Evento no encontrado');
     }
 
-    if (!event.isFreeDownload) {
+    const supportsFreeDownloads = event.isFreeDownload || event.commerceMode === 'FREE';
+    if (!supportsFreeDownloads) {
       throw new ForbiddenException('Este evento no permite descargas gratuitas');
     }
 
@@ -54,28 +88,8 @@ export class FreeDownloadsService {
     }
 
     // 3. Verify email if required
-    if (event.requireEmailForFree && !userData.email) {
+    if (event.requireEmailForFree && !normalizedEmail) {
       throw new BadRequestException('Email requerido para descargar');
-    }
-
-    // 4. Check download limit (by email or IP)
-    if (event.freeDownloadLimit) {
-      const identifier = userData.email || req.ip;
-      const downloadCount = await this.prisma.freeDownload.count({
-        where: {
-          eventId,
-          OR: [
-            { email: userData.email || undefined },
-            { ipAddress: req.ip },
-          ],
-        },
-      });
-
-      if (downloadCount >= event.freeDownloadLimit) {
-        throw new BadRequestException(
-          `Has alcanzado el límite de ${event.freeDownloadLimit} descargas gratuitas para este evento`
-        );
-      }
     }
 
     // 5. Get photo
@@ -85,6 +99,9 @@ export class FreeDownloadsService {
         id: true,
         originalUrl: true,
         eventId: true,
+        cloudinaryId: true,
+        status: true,
+        publicationStatus: true,
       },
     });
 
@@ -96,51 +113,137 @@ export class FreeDownloadsService {
       throw new BadRequestException('La foto no pertenece a este evento');
     }
 
-    // 6. Track download in analytics
+    if (photo.status !== 'PROCESSED' || photo.publicationStatus !== 'APPROVED') {
+      throw new ForbiddenException('La fotografía todavía no está disponible para descarga');
+    }
+
     const referer = req.headers['referer'] || req.headers['referrer'];
-    await this.prisma.freeDownload.create({
-      data: {
-        eventId,
-        photoId,
-        email: userData.email || null,
-        name: userData.name || null,
-        phone: userData.phone || null,
-        bibNumber: userData.bibNumber || null,
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'] || null,
-        referer: Array.isArray(referer) ? referer[0] : referer || null,
-        // Note: For geolocation, you'd need to install geoip-lite or similar
-        // country: geoip.lookup(req.ip)?.country,
-        // city: geoip.lookup(req.ip)?.city,
-      },
+
+    const activeSponsors = event.sponsorOverlayEnabled
+      ? event.eventSponsors.filter(item => item.requiredOnFreeDownloads)
+      : [];
+    let assetKey = photo.cloudinaryId;
+    let variant: 'CLEAN' | 'SPONSORED' = 'CLEAN';
+
+    if (activeSponsors.length > 0) {
+      variant = 'SPONSORED';
+      const signature = createHash('sha256')
+        .update(activeSponsors.map(item => `${item.id}:${item.priority}:${item.sponsor.logoUrl}:${JSON.stringify(item.placement || {})}`).join('|'))
+        .digest('hex')
+        .slice(0, 20);
+      let asset = await this.prisma.downloadAsset.findUnique({
+        where: { photoId_variant_sponsorSignature: { photoId, variant: 'SPONSORED', sponsorSignature: signature } },
+      });
+      if (!asset) {
+        const generated = await this.storageService.generateSponsoredAsset(
+          photo.cloudinaryId,
+          eventId,
+          photoId,
+          signature,
+          activeSponsors.map(item => ({ logoUrl: item.sponsor.logoUrl, placement: item.placement })),
+        );
+        try {
+          asset = await this.prisma.downloadAsset.create({
+            data: {
+              eventId,
+              photoId,
+              variant: 'SPONSORED',
+              sponsorSignature: signature,
+              storageKey: generated.storageKey,
+              url: generated.url,
+            },
+          });
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'P2002') throw error;
+          asset = await this.prisma.downloadAsset.findUnique({
+            where: { photoId_variant_sponsorSignature: { photoId, variant: 'SPONSORED', sponsorSignature: signature } },
+          });
+          if (!asset) throw error;
+        }
+      }
+      assetKey = asset.storageKey;
+    }
+
+    const downloadUrl = await this.storageService.generateSecureDownloadUrl(assetKey, 900);
+
+    // Reserve the allowance only after the downloadable asset exists. Advisory
+    // locks keep concurrent requests for the same email/IP from bypassing limits.
+    await this.prisma.$transaction(async tx => {
+      if (event.freeDownloadLimit) {
+        const lockKeys = [
+          `${eventId}:ip:${clientIpHash}`,
+          ...(normalizedEmail ? [`${eventId}:email:${normalizedEmail}`] : []),
+        ].sort();
+        for (const lockKey of lockKeys) {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+        }
+        const downloadCount = await tx.freeDownload.count({
+          where: {
+            eventId,
+            OR: normalizedEmail
+              ? [{ email: normalizedEmail }, { ipAddress: clientIpHash }]
+              : [{ ipAddress: clientIpHash }],
+          },
+        });
+        if (downloadCount >= event.freeDownloadLimit) {
+          throw new BadRequestException(`Has alcanzado el límite de ${event.freeDownloadLimit} descargas gratuitas para este evento`);
+        }
+      }
+
+      await tx.freeDownload.create({
+        data: {
+          eventId,
+          photoId,
+          email: normalizedEmail || null,
+          name: userData.name?.trim() || null,
+          phone: userData.phone?.trim() || null,
+          bibNumber: userData.bibNumber?.trim() || null,
+          ipAddress: clientIpHash,
+          userAgent: req.headers['user-agent'] || null,
+          referer: Array.isArray(referer) ? referer[0] : referer || null,
+        },
+      });
+      await tx.event.update({
+        where: { id: eventId },
+        data: { totalFreeDownloads: { increment: 1 } },
+      });
     });
 
-    // 7. Increment event counter
-    await this.prisma.event.update({
-      where: { id: eventId },
-      data: { totalFreeDownloads: { increment: 1 } },
+    this.logger.log(`Free download tracked: Event ${eventId}, Photo ${photoId}`);
+
+    await this.prisma.metricEvent.createMany({
+      data: [
+        {
+          type: 'FREE_DOWNLOAD',
+          workspaceId: event.workspaceId,
+          eventId,
+          photoId,
+          source: Array.isArray(referer) ? referer[0] : referer || undefined,
+          metadata: { variant },
+        },
+        ...(variant === 'SPONSORED' ? [{
+          type: 'SPONSOR_DOWNLOAD_EXPOSURE' as const,
+          workspaceId: event.workspaceId,
+          eventId,
+          photoId,
+          metadata: { sponsorIds: activeSponsors.map(item => item.sponsorId) },
+        }] : []),
+      ],
     });
-
-    this.logger.log(`Free download tracked: Event ${eventId}, Photo ${photoId}, Email: ${userData.email || 'N/A'}`);
-
-    // 8. Generate presigned URL from R2 for download
-    // Extract the R2 key from the originalUrl
-    const urlObj = new URL(photo.originalUrl);
-    const key = urlObj.pathname.startsWith('/') ? urlObj.pathname.substring(1) : urlObj.pathname;
-
-    // Use StorageService to generate a secure download URL (15 minutes expiry)
-    const downloadUrl = await this.storageService.generateSecureDownloadUrl(key, 900);
 
     return {
       downloadUrl,
       expiresIn: 900,
+      variant,
+      sponsors: activeSponsors.map(item => ({ id: item.sponsor.id, name: item.sponsor.name, logoUrl: item.sponsor.logoUrl })),
     };
   }
 
   /**
    * Get analytics for an event's free downloads
    */
-  async getEventAnalytics(eventId: string) {
+  async getEventAnalytics(eventId: string, userId: string, userRole: UserRole) {
+    await this.eventsService.assertCanManageAudienceData(eventId, userId, userRole);
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
       select: {
@@ -153,84 +256,66 @@ export class FreeDownloadsService {
       throw new BadRequestException('Evento no encontrado');
     }
 
-    // Get all downloads for this event
-    const downloads = await this.prisma.freeDownload.findMany({
-      where: { eventId },
-      select: {
-        id: true,
-        photoId: true,
-        email: true,
-        name: true,
-        downloadedAt: true,
-        country: true,
-        city: true,
-        photo: {
-          select: {
-            thumbUrl: true,
-          },
-        },
-      },
-      orderBy: { downloadedAt: 'desc' },
-    });
+    const [statsRows, topPhotoRows, dayRows, countryRows, recentDownloads] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ total: bigint; uniqueUsers: bigint; emailsCollected: bigint }>>(Prisma.sql`
+        SELECT
+          COUNT(*)::bigint AS "total",
+          COUNT(DISTINCT "email") FILTER (WHERE "email" IS NOT NULL)::bigint AS "uniqueUsers",
+          COUNT("email")::bigint AS "emailsCollected"
+        FROM "free_downloads"
+        WHERE "event_id" = ${eventId}::uuid
+      `),
+      this.prisma.$queryRaw<Array<{ photoId: string; downloads: bigint; thumbUrl: string | null }>>(Prisma.sql`
+        SELECT fd."photo_id"::text AS "photoId", COUNT(*)::bigint AS "downloads", MAX(p."thumb_url") AS "thumbUrl"
+        FROM "free_downloads" fd
+        JOIN "photos" p ON p."id" = fd."photo_id"
+        WHERE fd."event_id" = ${eventId}::uuid
+        GROUP BY fd."photo_id"
+        ORDER BY COUNT(*) DESC, fd."photo_id"
+        LIMIT 10
+      `),
+      this.prisma.$queryRaw<Array<{ date: string; count: bigint }>>(Prisma.sql`
+        SELECT TO_CHAR("downloaded_at" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "date", COUNT(*)::bigint AS "count"
+        FROM "free_downloads"
+        WHERE "event_id" = ${eventId}::uuid
+        GROUP BY 1
+        ORDER BY 1
+      `),
+      this.prisma.$queryRaw<Array<{ country: string; count: bigint }>>(Prisma.sql`
+        SELECT "country", COUNT(*)::bigint AS "count"
+        FROM "free_downloads"
+        WHERE "event_id" = ${eventId}::uuid AND "country" IS NOT NULL
+        GROUP BY "country"
+        ORDER BY COUNT(*) DESC, "country"
+        LIMIT 10
+      `),
+      this.prisma.freeDownload.findMany({
+        where: { eventId },
+        select: { id: true, email: true, name: true, downloadedAt: true, country: true, city: true },
+        orderBy: { downloadedAt: 'desc' },
+        take: 20,
+      }),
+    ]);
 
-    // Calculate unique users (by email)
-    const uniqueEmails = new Set(downloads.filter(d => d.email).map(d => d.email));
-    const uniqueUsers = uniqueEmails.size;
-
-    // Top photos
-    const photoDownloads = downloads.reduce((acc, d) => {
-      acc[d.photoId] = (acc[d.photoId] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const topPhotos = Object.entries(photoDownloads)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .map(([photoId, count]) => {
-        const download = downloads.find(d => d.photoId === photoId);
-        return {
-          photoId,
-          downloads: count,
-          thumbUrl: download?.photo.thumbUrl,
-          percentage: ((count / downloads.length) * 100).toFixed(1),
-        };
-      });
-
-    // Downloads by day
-    const downloadsByDay = downloads.reduce((acc, d) => {
-      const date = d.downloadedAt.toISOString().split('T')[0];
-      acc[date] = (acc[date] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const downloadsByDayArray = Object.entries(downloadsByDay)
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Top countries
-    const countryDownloads = downloads.reduce((acc, d) => {
-      if (d.country) {
-        acc[d.country] = (acc[d.country] || 0) + 1;
-      }
-      return acc;
-    }, {} as Record<string, number>);
-
-    const topCountries = Object.entries(countryDownloads)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .map(([country, count]) => ({ country, count }));
-
-    // Emails collected
-    const emailsCollected = downloads.filter(d => d.email).length;
+    const stats = statsRows[0] || { total: 0n, uniqueUsers: 0n, emailsCollected: 0n };
+    const totalDownloads = Number(stats.total);
+    const topPhotos = topPhotoRows.map(row => ({
+      photoId: row.photoId,
+      downloads: Number(row.downloads),
+      thumbUrl: row.thumbUrl,
+      percentage: totalDownloads > 0 ? ((Number(row.downloads) / totalDownloads) * 100).toFixed(1) : '0.0',
+    }));
+    const downloadsByDayArray = dayRows.map(row => ({ date: row.date, count: Number(row.count) }));
+    const topCountries = countryRows.map(row => ({ country: row.country, count: Number(row.count) }));
 
     return {
-      totalDownloads: event.totalFreeDownloads,
-      uniqueUsers,
+      totalDownloads,
+      uniqueUsers: Number(stats.uniqueUsers),
       topPhotos,
       downloadsByDay: downloadsByDayArray,
       topCountries,
-      emailsCollected,
-      recentDownloads: downloads.slice(0, 20).map(d => ({
+      emailsCollected: Number(stats.emailsCollected),
+      recentDownloads: recentDownloads.map(d => ({
         id: d.id,
         email: d.email,
         name: d.name,
@@ -243,7 +328,12 @@ export class FreeDownloadsService {
   /**
    * Export emails from free downloads
    */
-  async exportEmails(eventId: string): Promise<string> {
+  async exportEmails(eventId: string, userId: string, userRole: UserRole): Promise<string> {
+    await this.eventsService.assertCanManageAudienceData(eventId, userId, userRole);
+    const exportCount = await this.prisma.freeDownload.count({ where: { eventId, email: { not: null } } });
+    if (exportCount > 100_000) {
+      throw new BadRequestException('La exportación supera 100,000 registros; reduce el período antes de exportar');
+    }
     const downloads = await this.prisma.freeDownload.findMany({
       where: {
         eventId,
@@ -269,9 +359,13 @@ export class FreeDownloadsService {
       d.downloadedAt.toISOString(),
     ]);
 
+    const csvCell = (value: string | null) => {
+      const escapedFormula = value && /^[=+\-@]/.test(value) ? `'${value}` : value || '';
+      return `"${escapedFormula.replace(/"/g, '""')}"`;
+    };
     const csv = [
       headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
+      ...rows.map(row => row.map(cell => csvCell(cell)).join(',')),
     ].join('\n');
 
     return csv;

@@ -1,0 +1,20 @@
+FROM node:20-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY nest-cli.json tsconfig.json ./
+COPY apps ./apps
+COPY packages ./packages
+RUN npx prisma generate --schema apps/api/prisma/schema.prisma && npx nest build worker
+
+FROM node:20-bookworm-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libcairo2 libpango-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 && rm -rf /var/lib/apt/lists/*
+COPY --chown=node:node package.json package-lock.json ./
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/apps/api/prisma ./apps/api/prisma
+COPY --from=build --chown=node:node /app/apps/api/src/assets ./apps/api/src/assets
+USER node
+CMD ["node", "dist/apps/worker/main.js"]

@@ -1,7 +1,8 @@
-import { IsString, IsNumber, IsOptional, IsArray, Min, Max } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsString, IsNumber, IsOptional, IsArray, Matches, Min, Max } from 'class-validator';
 
 export class AddBibDto {
   @IsString({ message: 'El dorsal debe ser texto' })
+  @Matches(/^\d{1,20}$/, { message: 'El dorsal debe contener entre 1 y 20 dígitos' })
   bib: string;
 
   @IsOptional()
@@ -12,5 +13,8 @@ export class AddBibDto {
 
   @IsOptional()
   @IsArray({ message: 'El bbox debe ser un array' })
+  @ArrayMinSize(4)
+  @ArrayMaxSize(4)
+  @IsNumber({}, { each: true })
   bbox?: [number, number, number, number];
 }

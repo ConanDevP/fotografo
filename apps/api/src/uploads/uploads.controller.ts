@@ -21,6 +21,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UploadPhotoDto } from './dto/upload-photo.dto';
 import { InitiateBatchUploadDto } from './dto/initiate-batch-upload.dto';
+import { CompleteBatchDto, PresignBatchDto } from './dto/presign-batch.dto';
 import { UserRole, ApiResponse } from '@shared/types';
 import { FILE_CONSTRAINTS } from '@shared/constants';
 
@@ -33,8 +34,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Controller('uploads')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+@UseGuards(AuthGuard('jwt'))
 export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
 
@@ -46,17 +46,57 @@ export class UploadsController {
     const job = await this.uploadsService.initiateBatchUpload(
       initiateDto,
       req.user.id,
+      req.user.role,
     );
     return { data: { jobId: job.id } };
   }
 
+  /**
+   * Firma URLs para que el navegador suba directo a R2. El archivo no pasa por
+   * la memoria del servidor, que era el techo de escalado del camino anterior.
+   */
+  @Post('batch/:jobId/presign')
+  @Throttle(120, 60)
+  async presignBatch(
+    @Param('jobId') jobId: string,
+    @Body() dto: PresignBatchDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return {
+      data: await this.uploadsService.presignBatchFiles(jobId, dto.files, req.user.id, req.user.role),
+    };
+  }
+
+  /** Confirma lo que de verdad quedó en R2 y lo encola para procesar. */
+  @Post('batch/:jobId/complete')
+  @Throttle(120, 60)
+  async completeBatch(
+    @Param('jobId') jobId: string,
+    @Body() dto: CompleteBatchDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return {
+      data: await this.uploadsService.completeBatchFiles(jobId, dto.clientFileIds, req.user.id),
+    };
+  }
+
+  /**
+   * Camino anterior: el archivo viaja por el servidor. Se mantiene mientras la
+   * subida directa se asienta en producción; debería retirarse después.
+   */
   @Post('batch/append/:jobId')
+  // Una carrera son miles de fotografías: a 5 por petición, un límite bajo aquí
+  // convierte una subida normal en horas. 240/min deja techo de sobra para
+  // varios chunks en paralelo y sigue acotando el abuso. El gasto real lo
+  // limitan el cupo de almacenamiento y el ancho de banda, no este contador.
+  @Throttle(240, 60)
   @UseInterceptors(
-    FilesInterceptor('files', 100, { // Limite por chunk: 100 archivos
+    FilesInterceptor('files', 5, {
       limits: {
-        fileSize: FILE_CONSTRAINTS.MAX_SIZE, // 20MB por archivo
-        files: 100, // Máximo 100 archivos
-        fieldSize: 500 * 1024 * 1024, // 500MB total por request
+        fileSize: FILE_CONSTRAINTS.MAX_SIZE,
+        files: 5,
+        fieldSize: 64 * 1024,
+        fields: 20,
       },
       fileFilter: (req, file, cb) => {
         if (FILE_CONSTRAINTS.ALLOWED_TYPES.includes(file.mimetype)) {
@@ -70,30 +110,31 @@ export class UploadsController {
   async appendToBatchUpload(
     @Param('jobId') jobId: string,
     @UploadedFiles() files: Express.Multer.File[],
+    @Body('clientFileIds') rawClientFileIds: string | string[] | undefined,
     @Req() req: AuthenticatedRequest,
   ): Promise<ApiResponse> {
-    console.log(`🚀 CONTROLLER appendToBatchUpload - JobId: ${jobId}, Files: ${files?.length || 0}, User: ${req.user?.id}`);
-    
     if (!files || files.length === 0) {
-      console.log(`❌ No files provided in request`);
       throw new BadRequestException('No se proporcionaron archivos en el chunk');
     }
-    
-    console.log(`📁 Files received: ${files.map(f => f.originalname).join(', ')}`);
-    
-    try {
-      const result = await this.uploadsService.appendToBatchUpload(
-        jobId,
-        files,
-        req.user.id,
-        req.user.role,
-      );
-      console.log(`✅ CONTROLLER upload successful: ${result.successful?.length || 0} files processed`);
-      return { data: result };
-    } catch (error) {
-      console.error(`❌ CONTROLLER upload error:`, error);
-      throw error;
+
+    const clientFileIds = rawClientFileIds === undefined
+      ? undefined
+      : Array.isArray(rawClientFileIds)
+        ? rawClientFileIds
+        : [rawClientFileIds];
+
+    if (clientFileIds && clientFileIds.length !== files.length) {
+      throw new BadRequestException('Cada archivo debe incluir un clientFileId estable');
     }
+
+    const result = await this.uploadsService.appendToBatchUpload(
+      jobId,
+      files,
+      req.user.id,
+      req.user.role,
+      clientFileIds,
+    );
+    return { data: result };
   }
 
   @Get('batch/status/:jobId')
@@ -154,6 +195,7 @@ export class UploadsController {
   }
 
   @Get('system/stats')
+  @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN) // Solo admins pueden ver stats del sistema
   async getSystemStats(): Promise<ApiResponse> {
     const stats = await this.uploadsService.getSystemStats();
@@ -161,6 +203,7 @@ export class UploadsController {
   }
 
   @Post('system/force-process')
+  @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN) // Solo admins pueden forzar procesamiento
   async forceProcessStuckPhotos(): Promise<ApiResponse> {
     const result = await this.uploadsService.forceProcessStuckPhotos();
@@ -201,40 +244,4 @@ export class UploadsController {
     return { data: result };
   }
 
-  /*
-  @Post('photos/batch')
-  @Throttle(2, 60) // Reducir a 2 requests por minuto para batches grandes
-  @UseInterceptors(
-    FilesInterceptor('files', 5000, { // Aumentar límite a 5000 archivos
-      limits: {
-        fileSize: FILE_CONSTRAINTS.MAX_SIZE,
-      },
-      fileFilter: (req, file, cb) => {
-        if (FILE_CONSTRAINTS.ALLOWED_TYPES.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(new BadRequestException('Tipo de archivo no válido'), false);
-        }
-      },
-    }),
-  )
-  async uploadPhotoBatch(
-    @UploadedFiles() files: Express.Multer.File[],
-    @Body() uploadPhotoDto: UploadPhotoDto,
-    @Req() req: AuthenticatedRequest,
-  ): Promise<ApiResponse> {
-    if (!files || files.length === 0) {
-      throw new BadRequestException('No se proporcionaron archivos');
-    }
-
-    const result = await this.uploadsService.uploadPhotoBatch(
-      files,
-      uploadPhotoDto.eventId,
-      req.user.id,
-      req.user.role,
-    );
-
-    return { data: result };
-  }
-  */
 }

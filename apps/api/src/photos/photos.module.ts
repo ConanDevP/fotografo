@@ -7,8 +7,10 @@ import { R2Service } from '../common/services/r2.service';
 import { SharpTransformService } from '../common/services/sharp-transform.service';
 import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
+  imports: [BillingModule],
   controllers: [PhotosController],
   providers: [PhotosService, PrismaService, CloudinaryService, R2Service, SharpTransformService, StorageService, QueueService],
   exports: [PhotosService],

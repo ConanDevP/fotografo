@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Headers, Logger, HttpCode, HttpStatus } from '@nestjs/common';
+import { BadRequestException, Controller, Post, Headers, Logger, HttpCode, HttpStatus, RawBody } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service';
 
 @Controller('webhooks')
@@ -10,29 +10,29 @@ export class WebhooksController {
   @Post('stripe')
   @HttpCode(HttpStatus.OK)
   async handleStripeWebhook(
-    @Body() body: Buffer,
+    @RawBody() body: Buffer | undefined,
     @Headers('stripe-signature') signature: string,
   ) {
     try {
       if (!body || body.length === 0) {
         this.logger.error('Stripe webhook: No body available');
-        return { received: true, error: 'No body' };
+        throw new BadRequestException('Stripe webhook sin cuerpo');
       }
 
       if (!signature) {
         this.logger.error('Stripe webhook: No signature header');
-        return { received: true, error: 'No signature' };
+        throw new BadRequestException('Stripe webhook sin firma');
       }
 
       this.logger.log('Received Stripe webhook');
 
       const result = await this.webhooksService.handleStripeWebhook(body, signature);
-
+      if (!result.success) throw new BadRequestException('El webhook no pudo verificarse o procesarse');
       return { received: true, processed: result.success };
     } catch (error) {
       this.logger.error('Error processing Stripe webhook', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return { received: true, error: errorMessage };
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('No se pudo procesar el webhook de Stripe');
     }
   }
 
@@ -63,22 +63,4 @@ export class WebhooksController {
     }
   }
   */
-
-  @Post('mercadopago')
-  @HttpCode(HttpStatus.OK)
-  async handleMercadoPagoWebhook(
-    @Body() body: any,
-    @Headers() headers: any,
-  ) {
-    try {
-      this.logger.log('Received MercadoPago webhook', { type: body?.type });
-
-      // TODO: Implementar cuando se agregue MercadoPago
-      return { received: true, processed: false };
-    } catch (error) {
-      this.logger.error('Error processing MercadoPago webhook', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return { received: true, error: errorMessage };
-    }
-  }
 }

@@ -23,6 +23,49 @@ export enum ItemType {
   PACKAGE = 'PACKAGE',
 }
 
+export enum WorkspaceRole {
+  OWNER = 'OWNER',
+  ADMIN = 'ADMIN',
+  EDITOR = 'EDITOR',
+  PHOTOGRAPHER = 'PHOTOGRAPHER',
+  ANALYST = 'ANALYST',
+  SUPPORT = 'SUPPORT',
+}
+
+export enum EventCommerceMode {
+  /// Paga el atleta; la plataforma retiene comisión por venta.
+  PAID = 'PAID',
+  /// El atleta no paga; el coste lo asume el fotógrafo por fotografía subida.
+  FREE = 'FREE',
+}
+
+export enum MetricType {
+  WORKSPACE_VIEW = 'WORKSPACE_VIEW',
+  EVENT_VIEW = 'EVENT_VIEW',
+  PHOTO_VIEW = 'PHOTO_VIEW',
+  BIB_SEARCH = 'BIB_SEARCH',
+  FACE_SEARCH = 'FACE_SEARCH',
+  SEARCH_NO_RESULTS = 'SEARCH_NO_RESULTS',
+  ADD_TO_CART = 'ADD_TO_CART',
+  CHECKOUT_STARTED = 'CHECKOUT_STARTED',
+  PURCHASE_COMPLETED = 'PURCHASE_COMPLETED',
+  FREE_DOWNLOAD = 'FREE_DOWNLOAD',
+  PAID_DOWNLOAD = 'PAID_DOWNLOAD',
+  SPONSOR_CLICK = 'SPONSOR_CLICK',
+  SPONSOR_DOWNLOAD_EXPOSURE = 'SPONSOR_DOWNLOAD_EXPOSURE',
+}
+
+export interface WorkspaceBrandTheme {
+  template: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  fontFamily: string;
+  heroTitle?: string;
+  heroSubtitle?: string;
+  showPastEvents: boolean;
+}
+
 // Interfaces
 export interface BibRules {
   minLen?: number;
@@ -93,6 +136,14 @@ export interface SendBibEmailJob {
   bib: string;
   email: string;
   photoIds?: string[];
+  kind?: 'BIB_NOTIFICATION' | 'ORDER_CONFIRMATION' | 'EVENT_INVITATION';
+  eventName?: string;
+  workspaceName?: string;
+  acceptanceUrl?: string;
+  organizerCommissionPercent?: number;
+  rightsTerms?: string;
+  orderId?: string;
+  downloadToken?: string;
 }
 
 export interface ReprocessPhotoJob {
@@ -108,8 +159,17 @@ export interface ProcessFaceJob {
 
 // NEW: Infer Bibs Job
 export interface InferBibsJob {
-  photoId: string;
+  /// Ausente en un barrido: entonces se recorren todas las caras del evento que
+  /// siguen sin dorsal, sin importar en qué fotografía estén.
+  photoId?: string;
   eventId: string;
+  /**
+   * Repaso de evento completo. La inferencia por fotografía se lanza 45 s
+   * después de procesarla, y para entonces la foto que enseña rostro y dorsal
+   * juntos puede no haberse subido todavía. Sin este repaso, esas caras se
+   * quedan sin número para siempre.
+   */
+  sweep?: boolean;
 }
 
 // Face Recognition Types

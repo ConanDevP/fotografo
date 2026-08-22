@@ -96,10 +96,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       throw new Error(`Job incompleto: ${JSON.stringify(job)}`);
     }
     
+    const jobId = `photo-${job.photoId}`;
+    const existingJob = await this.processPhotoQueue.getJob(jobId);
+    if (existingJob) {
+      const state = await existingJob.getState();
+      if (state !== 'failed') return existingJob;
+      await existingJob.remove();
+    }
+
     return this.processPhotoQueue.add(JOBS.PROCESS_PHOTO, job, {
+      jobId,
       priority,
       delay: 0, // CRÍTICO: Sin delay para procesamiento inmediato durante uploads masivos
-      removeOnComplete: 100,
+      removeOnComplete: true,
       removeOnFail: 50,
       attempts: 2, // Retry automático si falla
       backoff: {
@@ -109,9 +118,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async addSendEmailJob(job: SendBibEmailJob, delay = 0) {
+  async addSendEmailJob(job: SendBibEmailJob, delay = 0, jobId?: string) {
     return this.sendEmailQueue.add(JOBS.SEND_BIB_EMAIL, job, {
       delay,
+      jobId,
     });
   }
 

@@ -67,7 +67,7 @@ export class AthleteSignatureService {
           await this.prisma.athleteSignature.update({
             where: { id: existing.id },
             data: {
-              faceSignature: newEmbedding,
+              faceSignature: this.toUnitVector(newEmbedding),
               sampleCount: 1,
               confidence: FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START,
               updatedAt: new Date()
@@ -80,10 +80,16 @@ export class AthleteSignatureService {
           return;
         }
 
-        // Exponential Moving Average (EMA)
-        // new_signature = (1 - alpha) * old_signature + alpha * new_embedding
-        const updatedSignature = currentSignature.map((val, idx) =>
-          val * (1 - alpha) + newEmbedding[idx] * alpha
+        // Media móvil exponencial sobre vectores normalizados.
+        //
+        // InsightFace devuelve el embedding sin normalizar, y su norma varía
+        // mucho según el tamaño y la calidad de la cara. Promediando en crudo,
+        // los primeros planos dominaban la firma y las caras lejanas del mismo
+        // atleta apenas contaban. Normalizando, cada muestra pesa igual.
+        const previous = this.toUnitVector(currentSignature);
+        const incoming = this.toUnitVector(newEmbedding);
+        const updatedSignature = previous.map((val, idx) =>
+          val * (1 - alpha) + incoming[idx] * alpha
         );
 
         // Increase confidence with more samples (cap at 0.99)
@@ -116,7 +122,7 @@ export class AthleteSignatureService {
           data: {
             eventId,
             bib,
-            faceSignature: newEmbedding,
+            faceSignature: this.toUnitVector(newEmbedding),
             sampleCount: 1,
             confidence: FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START
           }
@@ -135,6 +141,19 @@ export class AthleteSignatureService {
       );
       // Don't throw - signature updates shouldn't fail the main job
     }
+  }
+
+  /**
+   * Lleva un embedding a norma 1. La comparación por coseno es invariante a la
+   * escala, pero promediar no lo es: sin esto, la magnitud decide qué muestras
+   * pesan más en la firma.
+   */
+  private toUnitVector(values: number[]): number[] {
+    let norm = 0;
+    for (const value of values) norm += value * value;
+    if (!Number.isFinite(norm) || norm === 0) return values;
+    const inv = 1 / Math.sqrt(norm);
+    return values.map(value => value * inv);
   }
 
   /**
@@ -270,12 +289,12 @@ export class AthleteSignatureService {
       create: {
         eventId,
         bib,
-        faceSignature: newEmbedding,
+        faceSignature: this.toUnitVector(newEmbedding),
         sampleCount: 1,
         confidence: FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START
       },
       update: {
-        faceSignature: newEmbedding,
+        faceSignature: this.toUnitVector(newEmbedding),
         sampleCount: 1,
         confidence: FACE_BIB_LINKING.SIGNATURE_CONFIDENCE_START,
         updatedAt: new Date()

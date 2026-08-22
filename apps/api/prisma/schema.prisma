@@ -8,110 +8,240 @@ datasource db {
 }
 
 model User {
-  id                        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email                     String           @unique
-  passwordHash              String?          @map("password_hash")
-  name                      String?          @map("name")
-  phone                     String?          @map("phone")
-  profileImageUrl           String?          @map("profile_image_url")
-  address                   String?          @map("address")
+  id                        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                     String             @unique
+  passwordHash              String?            @map("password_hash")
+  name                      String?            @map("name")
+  phone                     String?            @map("phone")
+  profileImageUrl           String?            @map("profile_image_url")
+  address                   String?            @map("address")
   role                      UserRole
-  createdAt                 DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
-  slug                      String?          @unique
+  createdAt                 DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  slug                      String?            @unique
   bio                       String?
   website                   String?
   instagram                 String?
   facebook                  String?
   specialties               String[]
-  experienceYears           Int?             @map("experience_years")
+  experienceYears           Int?               @map("experience_years")
   location                  String?
-  portfolioUrl              String?          @map("portfolio_url")
-  isFeatured                Boolean          @default(false) @map("is_featured")
-  isVerified                Boolean          @default(false) @map("is_verified")
-  paypalMerchantId          String?          @unique @map("paypal_merchant_id")
-  paypalMerchantIdInPayPal  String?          @map("paypal_merchant_id_in_paypal")
-  paypalEmail               String?          @map("paypal_email")
-  paypalOnboardingCompleted Boolean          @default(false) @map("paypal_onboarding_completed")
-  paypalPermissionsGranted  Boolean          @default(false) @map("paypal_permissions_granted")
-  paypalTrackingId          String?          @map("paypal_tracking_id")
-  paypalOnboardedAt         DateTime?        @map("paypal_onboarded_at") @db.Timestamptz(6)
-  stripeAccountId           String?          @unique @map("stripe_account_id")
-  stripeAccountStatus       String?          @map("stripe_account_status")
-  stripeOnboardingCompleted Boolean          @default(false) @map("stripe_onboarding_completed")
-  stripeChargesEnabled      Boolean          @default(false) @map("stripe_charges_enabled")
-  stripePayoutsEnabled      Boolean          @default(false) @map("stripe_payouts_enabled")
-  stripeOnboardedAt         DateTime?        @map("stripe_onboarded_at") @db.Timestamptz(6)
+  portfolioUrl              String?            @map("portfolio_url")
+  isFeatured                Boolean            @default(false) @map("is_featured")
+  isVerified                Boolean            @default(false) @map("is_verified")
+  paypalMerchantId          String?            @unique @map("paypal_merchant_id")
+  paypalMerchantIdInPayPal  String?            @map("paypal_merchant_id_in_paypal")
+  paypalEmail               String?            @map("paypal_email")
+  paypalOnboardingCompleted Boolean            @default(false) @map("paypal_onboarding_completed")
+  paypalPermissionsGranted  Boolean            @default(false) @map("paypal_permissions_granted")
+  paypalTrackingId          String?            @map("paypal_tracking_id")
+  paypalOnboardedAt         DateTime?          @map("paypal_onboarded_at") @db.Timestamptz(6)
+  stripeAccountId           String?            @unique @map("stripe_account_id")
+  stripeAccountStatus       String?            @map("stripe_account_status")
+  stripeOnboardingCompleted Boolean            @default(false) @map("stripe_onboarding_completed")
+  stripeChargesEnabled      Boolean            @default(false) @map("stripe_charges_enabled")
+  stripePayoutsEnabled      Boolean            @default(false) @map("stripe_payouts_enabled")
+  stripeOnboardedAt         DateTime?          @map("stripe_onboarded_at") @db.Timestamptz(6)
   auditLogs                 AuditLog[]
   BatchUploadJob            BatchUploadJob[]
-  ownedEvents               Event[]          @relation("EventOwner")
+  ownedEvents               Event[]            @relation("EventOwner")
   orders                    Order[]
-  photographedPhotos        Photo[]          @relation("PhotoPhotographer")
+  photographedPhotos        Photo[]            @relation("PhotoPhotographer")
+  ownedWorkspaces           Workspace[]        @relation("WorkspaceOwner")
+  workspaceMemberships      WorkspaceMember[]
+  eventContributions        EventContributor[] @relation("ContributorUser")
+  sentEventInvitations      EventContributor[] @relation("ContributorInviter")
+  beneficiaryLedgerEntries  LedgerEntry[]      @relation("LedgerBeneficiary")
+  metricEvents              MetricEvent[]
 
   @@index([slug])
   @@index([role, isFeatured])
   @@map("users")
 }
 
-model Event {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                String
-  slug                String               @unique
-  date                DateTime             @db.Date
-  location            String?
-  imageUrl            String?              @map("image_url")
-  ownerId             String?              @map("owner_id") @db.Uuid
-  bibRules            Json?                @map("bib_rules")
-  pricing             Json?                @map("pricing")
-  deletedAt           DateTime?            @map("deleted_at") @db.Timestamptz(6)
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  platformFeePercent  Decimal?             @default(15.00) @map("platform_fee_percent") @db.Decimal(5, 2)
-  isFreeDownload      Boolean              @default(false) @map("is_free_download")
-  freeDownloadUntil   DateTime?            @map("free_download_until") @db.Timestamptz(6)
-  requireEmailForFree Boolean              @default(true) @map("require_email_for_free")
-  freeDownloadLimit   Int?                 @map("free_download_limit")
-  totalFreeDownloads  Int                  @default(0) @map("total_free_downloads")
-  athleteSignatures   AthleteSignature[]
-  BatchUploadJob      BatchUploadJob[]
-  bibSubscriptions    BibSubscription[]
-  owner               User?                @relation("EventOwner", fields: [ownerId], references: [id])
-  faceBibAssociations FaceBibAssociation[]
-  faceEmbeddings      FaceEmbedding[]
-  freeDownloads       FreeDownload[]
-  inferredBibs        InferredBib[]
-  orders              Order[]
-  photoBibs           PhotoBib[]
-  photos              Photo[]
+model Workspace {
+  id                            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                          String
+  slug                          String             @unique
+  description                   String?
+  logoUrl                       String?            @map("logo_url")
+  coverUrl                      String?            @map("cover_url")
+  contactEmail                  String?            @map("contact_email")
+  website                       String?
+  instagram                     String?
+  facebook                      String?
+  customDomain                  String?            @unique @map("custom_domain")
+  customDomainVerificationToken String?            @map("custom_domain_verification_token")
+  customDomainVerifiedAt        DateTime?          @map("custom_domain_verified_at") @db.Timestamptz(6)
+  isPublished                   Boolean            @default(false) @map("is_published")
+  ownerId                       String             @map("owner_id") @db.Uuid
+  storageBytesUsed              BigInt             @default(0) @map("storage_bytes_used")
+  /// Consumo del modo compartir acumulado desde la última factura, en céntimos.
+  /// Solo recoge las fotografías añadidas a eventos YA publicados; lo anterior
+  /// a la publicación se cobra de una vez al publicar.
+  pendingShareChargeCents       Decimal            @default(0) @map("pending_share_charge_cents") @db.Decimal(12, 4)
+  /// Método de pago del espacio. Se pide al publicar el primer evento gratuito,
+  /// no al registrarse: es cuando nace la obligación de pago.
+  stripeCustomerId              String?            @unique @map("stripe_customer_id")
+  defaultPaymentMethodId        String?            @map("default_payment_method_id")
+  createdAt                     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                     DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt                     DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  owner                         User               @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  brandTheme                    BrandTheme?
+  subscription                  Subscription?
+  members                       WorkspaceMember[]
+  events                        Event[]
+  photographerPhotos            Photo[]            @relation("PhotoPhotographerWorkspace")
+  eventContributions            EventContributor[] @relation("ContributorWorkspace")
+  sponsors                      Sponsor[]
+  ledgerEntries                 LedgerEntry[]
+  metricEvents                  MetricEvent[]
+  orderItems                    OrderItem[]
 
+  @@index([ownerId])
+  @@index([isPublished])
+  @@map("workspaces")
+}
+
+model BrandTheme {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String    @unique @map("workspace_id") @db.Uuid
+  template       String    @default("editorial")
+  primaryColor   String    @default("#111111") @map("primary_color")
+  secondaryColor String    @default("#F5F1E8") @map("secondary_color")
+  accentColor    String    @default("#C6FF00") @map("accent_color")
+  fontFamily     String    @default("Inter") @map("font_family")
+  heroTitle      String?   @map("hero_title")
+  heroSubtitle   String?   @map("hero_subtitle")
+  showPastEvents Boolean   @default(true) @map("show_past_events")
+  settings       Json?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("brand_themes")
+}
+
+model WorkspaceMember {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String           @map("workspace_id") @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  role        WorkspaceRole
+  status      MembershipStatus @default(ACTIVE)
+  joinedAt    DateTime         @default(now()) @map("joined_at") @db.Timestamptz(6)
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId, status])
+  @@map("workspace_members")
+}
+
+model Event {
+  id                         String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                       String
+  slug                       String               @unique
+  date                       DateTime             @db.Date
+  location                   String?
+  imageUrl                   String?              @map("image_url")
+  ownerId                    String?              @map("owner_id") @db.Uuid
+  workspaceId                String?              @map("workspace_id") @db.Uuid
+  bibRules                   Json?                @map("bib_rules")
+  pricing                    Json?                @map("pricing")
+  deletedAt                  DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  createdAt                  DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  platformFeePercent         Decimal?             @default(15.00) @map("platform_fee_percent") @db.Decimal(5, 2)
+  isFreeDownload             Boolean              @default(false) @map("is_free_download")
+  freeDownloadUntil          DateTime?            @map("free_download_until") @db.Timestamptz(6)
+  requireEmailForFree        Boolean              @default(true) @map("require_email_for_free")
+  freeDownloadLimit          Int?                 @map("free_download_limit")
+  totalFreeDownloads         Int                  @default(0) @map("total_free_downloads")
+  commerceMode               EventCommerceMode    @default(PAID) @map("commerce_mode")
+  organizerCommissionPercent Decimal              @default(0) @map("organizer_commission_percent") @db.Decimal(5, 2)
+  sponsorOverlayEnabled      Boolean              @default(false) @map("sponsor_overlay_enabled")
+  requiresPhotoApproval      Boolean              @default(false) @map("requires_photo_approval")
+  isPublished                Boolean              @default(false) @map("is_published")
+  publishedAt                DateTime?            @map("published_at") @db.Timestamptz(6)
+  /// Cobro del modo compartir liquidado al publicar. Se guarda para no volver a
+  /// cobrar si el evento se despublica y se vuelve a publicar.
+  shareChargeCents           Int?                 @map("share_charge_cents")
+  shareChargePhotos          Int?                 @map("share_charge_photos")
+  shareChargedAt             DateTime?            @map("share_charged_at") @db.Timestamptz(6)
+  shareChargeIntentId        String?              @map("share_charge_intent_id")
+  athleteSignatures          AthleteSignature[]
+  BatchUploadJob             BatchUploadJob[]
+  bibSubscriptions           BibSubscription[]
+  owner                      User?                @relation("EventOwner", fields: [ownerId], references: [id])
+  workspace                  Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  contributors               EventContributor[]
+  eventSponsors              EventSponsor[]
+  metricEvents               MetricEvent[]
+  ledgerEntries              LedgerEntry[]
+  downloadAssets             DownloadAsset[]
+  faceBibAssociations        FaceBibAssociation[]
+  faceEmbeddings             FaceEmbedding[]
+  freeDownloads              FreeDownload[]
+  inferredBibs               InferredBib[]
+  orders                     Order[]
+  photoBibs                  PhotoBib[]
+  photos                     Photo[]
+
+  @@index([workspaceId, isPublished])
   @@map("events")
 }
 
 model Photo {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  eventId             String               @map("event_id") @db.Uuid
-  photographerId      String?              @map("photographer_id") @db.Uuid
-  cloudinaryId        String               @map("cloudinary_id")
-  originalUrl         String               @map("original_url")
-  thumbUrl            String?              @map("thumb_url")
-  watermarkUrl        String?              @map("watermark_url")
-  width               Int?
-  height              Int?
-  takenAt             DateTime?            @map("taken_at") @db.Timestamptz(6)
-  status              PhotoStatus          @default(PENDING)
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  batchJobId          String?              @map("batch_job_id") @db.Uuid
-  auditLogs           AuditLog[]
-  faceBibAssociations FaceBibAssociation[]
-  faces               FaceEmbedding[]
-  freeDownloads       FreeDownload[]
-  inferredBibs        InferredBib[]
-  orderItems          OrderItem[]
-  bibs                PhotoBib[]
-  batchJob            BatchUploadJob?      @relation(fields: [batchJobId], references: [id])
-  event               Event                @relation(fields: [eventId], references: [id])
-  photographer        User?                @relation("PhotoPhotographer", fields: [photographerId], references: [id])
+  id                      String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId                 String                 @map("event_id") @db.Uuid
+  photographerId          String?                @map("photographer_id") @db.Uuid
+  photographerWorkspaceId String?                @map("photographer_workspace_id") @db.Uuid
+  contentHash             String?                @map("content_hash")
+  cloudinaryId            String                 @map("cloudinary_id")
+  originalUrl             String                 @map("original_url")
+  thumbUrl                String?                @map("thumb_url")
+  watermarkUrl            String?                @map("watermark_url")
+  /// Miniatura CON marca de agua, para las cuadrículas públicas. `thumbUrl` es
+  /// la versión limpia y no puede exponerse; sin esta, la galería tenía que
+  /// cargar la marca de agua completa (1,6 MB) por cada celda.
+  watermarkThumbUrl       String?                @map("watermark_thumb_url")
+  width                   Int?
+  height                  Int?
+  takenAt                 DateTime?              @map("taken_at") @db.Timestamptz(6)
+  status                  PhotoStatus            @default(PENDING)
+  derivativesProcessedAt  DateTime?              @map("derivatives_processed_at") @db.Timestamptz(6)
+  ocrProcessedAt          DateTime?              @map("ocr_processed_at") @db.Timestamptz(6)
+  faceProcessedAt         DateTime?              @map("face_processed_at") @db.Timestamptz(6)
+  processingCompletedAt   DateTime?              @map("processing_completed_at") @db.Timestamptz(6)
+  watermarkFailedAt       DateTime?              @map("watermark_failed_at") @db.Timestamptz(6)
+  ocrFailedAt             DateTime?              @map("ocr_failed_at") @db.Timestamptz(6)
+  faceFailedAt            DateTime?              @map("face_failed_at") @db.Timestamptz(6)
+  publicationStatus       PhotoPublicationStatus @default(APPROVED) @map("publication_status")
+  originalBytes           Int?                   @map("original_bytes")
+  derivedBytes            Int?                   @map("derived_bytes")
+  reviewNote              String?                @map("review_note")
+  reviewedAt              DateTime?              @map("reviewed_at") @db.Timestamptz(6)
+  reviewedById            String?                @map("reviewed_by_id") @db.Uuid
+  createdAt               DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  batchJobId              String?                @map("batch_job_id") @db.Uuid
+  auditLogs               AuditLog[]
+  faceBibAssociations     FaceBibAssociation[]
+  faces                   FaceEmbedding[]
+  freeDownloads           FreeDownload[]
+  inferredBibs            InferredBib[]
+  orderItems              OrderItem[]
+  bibs                    PhotoBib[]
+  batchJob                BatchUploadJob?        @relation(fields: [batchJobId], references: [id])
+  batchItems              BatchUploadItem[]
+  event                   Event                  @relation(fields: [eventId], references: [id])
+  photographer            User?                  @relation("PhotoPhotographer", fields: [photographerId], references: [id])
+  photographerWorkspace   Workspace?             @relation("PhotoPhotographerWorkspace", fields: [photographerWorkspaceId], references: [id], onDelete: SetNull)
+  metricEvents            MetricEvent[]
+  downloadAssets          DownloadAsset[]
 
+  @@unique([eventId, photographerId, contentHash])
   @@index([eventId])
+  @@index([photographerWorkspaceId])
   @@map("photos")
 }
 
@@ -132,6 +262,7 @@ model PhotoBib {
   event               Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
   photo               Photo                @relation(fields: [photoId], references: [id], onDelete: Cascade)
 
+  @@unique([photoId, bib, source])
   @@index([eventId, bib], map: "idx_bibs_event_bib")
   @@map("photo_bibs")
 }
@@ -144,34 +275,195 @@ model BibSubscription {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   event     Event    @relation(fields: [eventId], references: [id])
 
+  @@unique([eventId, bib, email])
   @@map("bib_subscriptions")
 }
 
 model Order {
-  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId          String?     @map("user_id") @db.Uuid
-  eventId         String?     @map("event_id") @db.Uuid
-  amountCents     Int         @map("amount_cents")
-  currency        String      @default("USD")
-  status          OrderStatus
-  stripeSessionId String?     @map("stripe_session_id")
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  items           OrderItem[]
-  event           Event?      @relation(fields: [eventId], references: [id])
-  user            User?       @relation(fields: [userId], references: [id])
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String?               @map("user_id") @db.Uuid
+  eventId              String?               @map("event_id") @db.Uuid
+  amountCents          Int                   @map("amount_cents")
+  currency             String                @default("USD")
+  status               OrderStatus
+  stripeSessionId      String?               @map("stripe_session_id")
+  paymentGateway       String?               @map("payment_gateway")
+  paymentId            String?               @unique @map("payment_id")
+  guestEmail           String?               @map("guest_email")
+  accessTokenHash      String?               @map("access_token_hash")
+  accessTokenExpiresAt DateTime?             @map("access_token_expires_at") @db.Timestamptz(6)
+  idempotencyKey       String?               @unique @map("idempotency_key")
+  paidAt               DateTime?             @map("paid_at") @db.Timestamptz(6)
+  refundedAt           DateTime?             @map("refunded_at") @db.Timestamptz(6)
+  stripeTransferGroup  String?               @map("stripe_transfer_group")
+  settlementStatus     OrderSettlementStatus @default(PENDING) @map("settlement_status")
+  settlementError      String?               @map("settlement_error")
+  settledAt            DateTime?             @map("settled_at") @db.Timestamptz(6)
+  stripeRefundId       String?               @unique @map("stripe_refund_id")
+  refundRequestedAt    DateTime?             @map("refund_requested_at") @db.Timestamptz(6)
+  refundError          String?               @map("refund_error")
+  /// Contracargo abierto por el banco del comprador.
+  stripeDisputeId      String?               @unique @map("stripe_dispute_id")
+  disputedAt           DateTime?             @map("disputed_at") @db.Timestamptz(6)
+  disputeOutcome       String?               @map("dispute_outcome")
+  /// Momento en que el comprador aceptó que son archivos digitales sin
+  /// devolución tras la descarga. Es la evidencia que más pesa en una disputa.
+  refundPolicyAcceptedAt DateTime?           @map("refund_policy_accepted_at") @db.Timestamptz(6)
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  items                OrderItem[]
+  event                Event?                @relation(fields: [eventId], references: [id])
+  user                 User?                 @relation(fields: [userId], references: [id])
+  ledgerEntries        LedgerEntry[]
+  metricEvents         MetricEvent[]
 
+  @@index([settlementStatus])
   @@map("orders")
 }
 
-model OrderItem {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId    String   @map("order_id") @db.Uuid
-  photoId    String?  @map("photo_id") @db.Uuid
-  itemType   ItemType @map("item_type")
-  priceCents Int      @map("price_cents")
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  photo      Photo?   @relation(fields: [photoId], references: [id])
+model EventContributor {
+  id                         String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId                    String               @map("event_id") @db.Uuid
+  userId                     String?              @map("user_id") @db.Uuid
+  photographerWorkspaceId    String?              @map("photographer_workspace_id") @db.Uuid
+  invitedEmail               String               @map("invited_email")
+  role                       EventContributorRole @default(PHOTOGRAPHER)
+  status                     ContributorStatus    @default(INVITED)
+  organizerCommissionPercent Decimal              @default(0) @map("organizer_commission_percent") @db.Decimal(5, 2)
+  rightsTerms                String?              @map("rights_terms")
+  rightsAcceptedAt           DateTime?            @map("rights_accepted_at") @db.Timestamptz(6)
+  tokenHash                  String               @unique @map("token_hash")
+  invitedById                String               @map("invited_by_id") @db.Uuid
+  createdAt                  DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  event                      Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user                       User?                @relation("ContributorUser", fields: [userId], references: [id], onDelete: SetNull)
+  photographerWorkspace      Workspace?           @relation("ContributorWorkspace", fields: [photographerWorkspaceId], references: [id], onDelete: SetNull)
+  invitedBy                  User                 @relation("ContributorInviter", fields: [invitedById], references: [id])
 
+  @@unique([eventId, userId])
+  @@unique([eventId, photographerWorkspaceId])
+  @@unique([eventId, invitedEmail])
+  @@index([invitedEmail, status])
+  @@map("event_contributors")
+}
+
+model Sponsor {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String         @map("workspace_id") @db.Uuid
+  name        String
+  logoUrl     String         @map("logo_url")
+  websiteUrl  String?        @map("website_url")
+  isActive    Boolean        @default(true) @map("is_active")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  events      EventSponsor[]
+
+  @@index([workspaceId, isActive])
+  @@map("sponsors")
+}
+
+model EventSponsor {
+  id                      String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId                 String        @map("event_id") @db.Uuid
+  sponsorId               String        @map("sponsor_id") @db.Uuid
+  status                  SponsorStatus @default(ACTIVE)
+  priority                Int           @default(0)
+  requiredOnFreeDownloads Boolean       @default(true) @map("required_on_free_downloads")
+  placement               Json?
+  startsAt                DateTime?     @map("starts_at") @db.Timestamptz(6)
+  endsAt                  DateTime?     @map("ends_at") @db.Timestamptz(6)
+  createdAt               DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  event                   Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sponsor                 Sponsor       @relation(fields: [sponsorId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, sponsorId])
+  @@index([eventId, status, priority])
+  @@map("event_sponsors")
+}
+
+model DownloadAsset {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId          String          @map("event_id") @db.Uuid
+  photoId          String          @map("photo_id") @db.Uuid
+  variant          DownloadVariant
+  storageKey       String          @map("storage_key")
+  url              String
+  sponsorSignature String          @default("none") @map("sponsor_signature")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  event            Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photo            Photo           @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  @@unique([photoId, variant, sponsorSignature])
+  @@index([eventId, variant])
+  @@map("download_assets")
+}
+
+model MetricEvent {
+  id          BigInt     @id @default(autoincrement())
+  dedupeKey   String?    @unique @map("dedupe_key")
+  workspaceId String?    @map("workspace_id") @db.Uuid
+  eventId     String?    @map("event_id") @db.Uuid
+  photoId     String?    @map("photo_id") @db.Uuid
+  orderId     String?    @map("order_id") @db.Uuid
+  userId      String?    @map("user_id") @db.Uuid
+  sessionId   String?    @map("session_id")
+  visitorHash String?    @map("visitor_hash")
+  type        MetricType
+  source      String?
+  metadata    Json?
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  event       Event?     @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  photo       Photo?     @relation(fields: [photoId], references: [id], onDelete: SetNull)
+  order       Order?     @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([eventId, type, createdAt])
+  @@map("metric_events")
+}
+
+model LedgerEntry {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dedupeKey          String            @unique @map("dedupe_key")
+  orderId            String            @map("order_id") @db.Uuid
+  eventId            String?           @map("event_id") @db.Uuid
+  workspaceId        String?           @map("workspace_id") @db.Uuid
+  beneficiaryUserId  String?           @map("beneficiary_user_id") @db.Uuid
+  type               LedgerEntryType
+  status             LedgerEntryStatus @default(PENDING)
+  amountCents        Int               @map("amount_cents")
+  currency           String            @default("USD")
+  metadata           Json?
+  externalTransferId String?           @unique @map("external_transfer_id")
+  externalReversalId String?           @unique @map("external_reversal_id")
+  paidOutAt          DateTime?         @map("paid_out_at") @db.Timestamptz(6)
+  failureReason      String?           @map("failure_reason")
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  order              Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  event              Event?            @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  workspace          Workspace?        @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  beneficiaryUser    User?             @relation("LedgerBeneficiary", fields: [beneficiaryUserId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, type])
+  @@index([workspaceId, status])
+  @@map("ledger_entries")
+}
+
+model OrderItem {
+  id                     String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId                String     @map("order_id") @db.Uuid
+  photoId                String?    @map("photo_id") @db.Uuid
+  beneficiaryWorkspaceId String?    @map("beneficiary_workspace_id") @db.Uuid
+  itemType               ItemType   @map("item_type")
+  priceCents             Int        @map("price_cents")
+  order                  Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  photo                  Photo?     @relation(fields: [photoId], references: [id])
+  beneficiaryWorkspace   Workspace? @relation(fields: [beneficiaryWorkspaceId], references: [id], onDelete: SetNull)
+
+  @@index([beneficiaryWorkspaceId])
   @@map("order_items")
 }
 
@@ -189,19 +481,23 @@ model AuditLog {
 }
 
 model FaceEmbedding {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  photoId             String               @map("photo_id") @db.Uuid
-  eventId             String               @map("event_id") @db.Uuid
-  embedding           Float[]              @map("embedding")
-  confidence          Decimal              @db.Decimal(4, 3)
-  bbox                Json?                @map("bounding_box")
-  landmarks           Json?                @map("landmarks")
-  age                 Int?                 @map("estimated_age")
-  gender              String?              @map("estimated_gender")
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                  String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photoId             String                      @map("photo_id") @db.Uuid
+  eventId             String                      @map("event_id") @db.Uuid
+  embedding           Float[]                     @map("embedding")
+  /// Mismo vector en formato pgvector, con índice HNSW para la búsqueda por
+  /// selfie. Prisma no sabe manejar el tipo, así que se escribe y consulta con
+  /// SQL directo; `embedding` sigue siendo la fuente para el índice en memoria.
+  embeddingVec        Unsupported("vector(512)")? @map("embedding_vec")
+  confidence          Decimal                     @db.Decimal(4, 3)
+  bbox                Json?                       @map("bounding_box")
+  landmarks           Json?                       @map("landmarks")
+  age                 Int?                        @map("estimated_age")
+  gender              String?                     @map("estimated_gender")
+  createdAt           DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
   faceBibAssociations FaceBibAssociation[]
-  event               Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  photo               Photo                @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  event               Event                       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  photo               Photo                       @relation(fields: [photoId], references: [id], onDelete: Cascade)
   inferredBibs        InferredBib[]
 
   @@index([eventId], map: "idx_face_embeddings_event")
@@ -228,8 +524,35 @@ model BatchUploadJob {
   event            Event             @relation(fields: [eventId], references: [id])
   owner            User              @relation(fields: [ownerId], references: [id])
   photos           Photo[]
+  items            BatchUploadItem[]
 
   @@map("batch_upload_jobs")
+}
+
+model BatchUploadItem {
+  id                     String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchJobId             String                @map("batch_job_id") @db.Uuid
+  clientFileId           String                @map("client_file_id")
+  photoId                String?               @map("photo_id") @db.Uuid
+  fileName               String                @map("file_name")
+  contentHash            String?               @map("content_hash")
+  status                 BatchUploadItemStatus @default(RECEIVED)
+  error                  String?
+  derivativesProcessedAt DateTime?             @map("derivatives_processed_at") @db.Timestamptz(6)
+  ocrProcessedAt         DateTime?             @map("ocr_processed_at") @db.Timestamptz(6)
+  faceProcessedAt        DateTime?             @map("face_processed_at") @db.Timestamptz(6)
+  watermarkFailedAt      DateTime?             @map("watermark_failed_at") @db.Timestamptz(6)
+  ocrFailedAt            DateTime?             @map("ocr_failed_at") @db.Timestamptz(6)
+  faceFailedAt           DateTime?             @map("face_failed_at") @db.Timestamptz(6)
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  batchJob               BatchUploadJob        @relation(fields: [batchJobId], references: [id], onDelete: Cascade)
+  photo                  Photo?                @relation(fields: [photoId], references: [id], onDelete: SetNull)
+
+  @@unique([batchJobId, clientFileId])
+  @@index([photoId])
+  @@index([batchJobId, status])
+  @@map("batch_upload_items")
 }
 
 model FreeDownload {
@@ -333,6 +656,9 @@ enum OrderStatus {
   PAID
   CANCELLED
   REFUNDED
+  /// El banco del comprador retuvo el importe. No es lo mismo que reembolsado:
+  /// aquí la decisión no fue nuestra y el dinero puede volver si se gana.
+  DISPUTED
 }
 
 enum ItemType {
@@ -346,4 +672,192 @@ enum BatchUploadStatus {
   PROCESSING
   COMPLETED
   FAILED
+}
+
+enum BatchUploadItemStatus {
+  RECEIVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  DUPLICATE
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  EDITOR
+  PHOTOGRAPHER
+  ANALYST
+  SUPPORT
+}
+
+enum MembershipStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum EventCommerceMode {
+  /// Paga el atleta. La plataforma retiene comisión sobre cada venta.
+  PAID
+  /// El atleta descarga sin pagar; el coste lo asume el fotógrafo por
+  /// fotografía subida. Los patrocinadores se activan aparte, con
+  /// `sponsorOverlayEnabled`.
+  FREE
+}
+
+enum PhotoPublicationStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum EventContributorRole {
+  PHOTOGRAPHER
+  EDITOR
+  EVENT_MANAGER
+}
+
+enum ContributorStatus {
+  INVITED
+  ACCEPTED
+  DECLINED
+  REVOKED
+}
+
+enum SponsorStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum DownloadVariant {
+  PREVIEW
+  SPONSORED
+  CLEAN
+  SOCIAL
+}
+
+enum MetricType {
+  WORKSPACE_VIEW
+  EVENT_VIEW
+  PHOTO_VIEW
+  BIB_SEARCH
+  FACE_SEARCH
+  SEARCH_NO_RESULTS
+  ADD_TO_CART
+  CHECKOUT_STARTED
+  PURCHASE_COMPLETED
+  FREE_DOWNLOAD
+  PAID_DOWNLOAD
+  SPONSOR_CLICK
+  SPONSOR_DOWNLOAD_EXPOSURE
+}
+
+enum LedgerEntryType {
+  GROSS_SALE
+  PROCESSOR_FEE
+  PLATFORM_FEE
+  ORGANIZER_COMMISSION
+  PHOTOGRAPHER_EARNING
+  REFUND
+  /// Importe retenido por un contracargo.
+  DISPUTE
+  /// Comisión que cobra la pasarela por gestionar la disputa. No se recupera
+  /// aunque el caso se gane, así que se anota aparte del importe.
+  DISPUTE_FEE
+}
+
+enum LedgerEntryStatus {
+  PENDING
+  AVAILABLE
+  PAID_OUT
+  REVERSED
+}
+
+enum OrderSettlementStatus {
+  PENDING
+  PROCESSING
+  PARTIAL
+  SETTLED
+  FAILED
+  NOT_REQUIRED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Facturación: planes, suscripción y consumo de almacenamiento
+//
+// El modelo tiene un solo medidor (bytes almacenados) y una sola comisión
+// (porcentaje sobre cada foto vendida). Un espacio que vende paga comisión; un
+// espacio que regala fotos paga el plan que cubra su almacenamiento. La cuota
+// por evento solo aplica a eventos regalados con patrocinadores, donde sí entra
+// dinero de marca.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug                   String         @unique
+  name                   String
+  audience               PlanAudience   @default(ANY)
+  description            String?
+  priceCents             Int            @default(0) @map("price_cents")
+  currency               String         @default("USD")
+  /// Comisión que retiene la plataforma por cada fotografía vendida.
+  commissionPercent      Decimal        @map("commission_percent") @db.Decimal(5, 2)
+  /// Almacenamiento incluido en el plan.
+  includedStorageBytes   BigInt         @map("included_storage_bytes")
+  /// Ampliación opcional: tamaño y precio de cada bloque adicional.
+  extraStorageBlockBytes BigInt?        @map("extra_storage_block_bytes")
+  extraStorageBlockCents Int?           @map("extra_storage_block_cents")
+  /// Modo compartir: céntimos por fotografía subida a un evento de descarga
+  /// gratuita. Admite decimales porque las tarifas bajan de un céntimo por foto.
+  sharePhotoCents        Decimal        @default(0) @map("share_photo_cents") @db.Decimal(8, 4)
+  /// Cuota por publicar un evento de descarga gratuita con patrocinadores.
+  sponsoredEventFeeCents Int            @default(0) @map("sponsored_event_fee_cents")
+  maxAdmins              Int?           @map("max_admins")
+  allowsCustomDomain     Boolean        @default(false) @map("allows_custom_domain")
+  allowsSponsors         Boolean        @default(false) @map("allows_sponsors")
+  allowsAdvancedMetrics  Boolean        @default(false) @map("allows_advanced_metrics")
+  isActive               Boolean        @default(true) @map("is_active")
+  isDefault              Boolean        @default(false) @map("is_default")
+  sortOrder              Int            @default(0) @map("sort_order")
+  stripePriceId          String?        @unique @map("stripe_price_id")
+  createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  subscriptions          Subscription[]
+
+  @@index([audience, isActive, sortOrder])
+  @@map("plans")
+}
+
+model Subscription {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String             @unique @map("workspace_id") @db.Uuid
+  planId               String             @map("plan_id") @db.Uuid
+  status               SubscriptionStatus @default(ACTIVE)
+  /// Bloques de almacenamiento adicionales contratados sobre el plan.
+  extraStorageBlocks   Int                @default(0) @map("extra_storage_blocks")
+  currentPeriodEnd     DateTime?          @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  stripeCustomerId     String?            @map("stripe_customer_id")
+  stripeSubscriptionId String?            @unique @map("stripe_subscription_id")
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan                 Plan               @relation(fields: [planId], references: [id])
+
+  @@index([planId, status])
+  @@map("subscriptions")
+}
+
+enum PlanAudience {
+  PHOTOGRAPHER
+  ORGANIZER
+  ANY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
 }

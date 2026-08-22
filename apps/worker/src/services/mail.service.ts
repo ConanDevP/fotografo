@@ -23,10 +23,14 @@ export class MailService {
 
   private setupTransporter() {
     const sendgridApiKey = this.configService.get('SENDGRID_API_KEY');
-    
-    // Si no hay credenciales de email, usar un transportador de prueba
-    if (!sendgridApiKey) {
-      this.logger.warn('No email credentials found. Using test transporter.');
+    const service = this.configService.get('EMAIL_SERVICE', 'sendgrid');
+    const smtpHost = this.configService.get('SMTP_HOST');
+
+    if ((service === 'sendgrid' && !sendgridApiKey) || (service !== 'sendgrid' && !smtpHost)) {
+      if (this.configService.get('NODE_ENV') === 'production') {
+        throw new Error('Configura SENDGRID_API_KEY o un transporte SMTP para enviar emails');
+      }
+      this.logger.warn('No email credentials found. Using local test transporter.');
       this.transporter = nodemailer.createTransport({
         streamTransport: true,
         newline: 'unix',
@@ -35,8 +39,6 @@ export class MailService {
       return;
     }
 
-    const service = this.configService.get('EMAIL_SERVICE', 'sendgrid');
-    
     if (service === 'sendgrid') {
       this.transporter = nodemailer.createTransport({
         service: 'SendGrid',
@@ -76,7 +78,7 @@ export class MailService {
         html,
       });
 
-      this.logger.log(`Email enviado a ${email} para dorsal ${bib}`);
+      this.logger.log(`Email enviado para dorsal ${bib}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -89,12 +91,12 @@ export class MailService {
     email: string,
     orderId: string,
     eventName: string,
-    photos: Array<{ photoId: string; originalUrl: string }>,
+    downloadUrl: string,
   ): Promise<void> {
     try {
       const subject = `✅ Fotos compradas - ${eventName}`;
       
-      const html = this.generateOrderConfirmationTemplate(orderId, eventName, photos);
+      const html = this.generateOrderConfirmationTemplate(orderId, eventName, downloadUrl);
 
       await this.sendEmail({
         to: email,
@@ -102,7 +104,7 @@ export class MailService {
         html,
       });
 
-      this.logger.log(`Email de confirmación enviado a ${email} para pedido ${orderId}`);
+      this.logger.log(`Email de confirmación enviado para pedido ${orderId}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -111,13 +113,42 @@ export class MailService {
     }
   }
 
+  async sendEventInvitation(input: {
+    email: string;
+    eventName: string;
+    workspaceName: string;
+    acceptanceUrl: string;
+    organizerCommissionPercent: number;
+    rightsTerms?: string;
+  }): Promise<void> {
+    const eventName = this.escapeHtml(input.eventName);
+    const workspaceName = this.escapeHtml(input.workspaceName);
+    const acceptanceUrl = this.escapeHtml(input.acceptanceUrl);
+    const rightsTerms = this.escapeHtml(input.rightsTerms || 'Conservas la autoría y autorizas la publicación y venta de las fotos que aportes.');
+    await this.sendEmail({
+      to: input.email,
+      subject: `${input.workspaceName} te invita a fotografiar ${input.eventName}`,
+      html: `<!doctype html><html><body style="font-family:Arial,sans-serif;background:#f4f1ea;padding:32px;color:#171717"><div style="max-width:600px;margin:auto;background:#fff;border-radius:20px;padding:36px"><p style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#666">Invitación de ${workspaceName}</p><h1 style="font-size:34px;line-height:1.05">Participa en ${eventName}</h1><p>Tu espacio de fotógrafo conservará la atribución de cada imagen. El organizador recibirá <strong>${input.organizerCommissionPercent}%</strong> de tus ventas después de la comisión de plataforma.</p><div style="background:#f5f5f5;border-radius:12px;padding:16px;margin:24px 0"><strong>Condiciones</strong><p style="margin-bottom:0">${rightsTerms}</p></div><a href="${acceptanceUrl}" style="display:inline-block;background:#171717;color:#fff;padding:14px 24px;border-radius:999px;text-decoration:none;font-weight:bold">Revisar y aceptar invitación</a><p style="font-size:12px;color:#777;margin-top:30px">Si no esperabas esta invitación, puedes ignorar este correo.</p></div></body></html>`,
+    });
+  }
+
   private async sendEmail(options: EmailOptions): Promise<void> {
     const mailOptions = {
-      from: this.configService.get('EMAIL_FROM', 'noreply@fotografos.com'),
+      from: this.configService.get('EMAIL_FROM', 'noreply@lucilamon.com'),
       ...options,
     };
 
     await this.transporter.sendMail(mailOptions);
+  }
+
+  private escapeHtml(value: string): string {
+    return value.replace(/[&<>'"]/g, character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;',
+    })[character] || character);
   }
 
   private generateBibNotificationTemplate(
@@ -126,12 +157,14 @@ export class MailService {
     photos: Array<{ photoId: string; thumbUrl: string; watermarkUrl: string }>,
   ): string {
     const baseUrl = this.configService.get('FRONTEND_URL', 'https://tu-dominio.com');
+    const safeBib = this.escapeHtml(bib);
+    const safeEventName = this.escapeHtml(eventName);
     
     const photosHtml = photos
       .map(photo => `
         <div style="margin: 10px; display: inline-block;">
-          <a href="${baseUrl}/photos/${photo.photoId}" style="text-decoration: none;">
-            <img src="${photo.thumbUrl}" alt="Foto ${photo.photoId}" 
+          <a href="${this.escapeHtml(baseUrl)}/search" style="text-decoration: none;">
+            <img src="${this.escapeHtml(photo.thumbUrl)}" alt="Foto ${this.escapeHtml(photo.photoId)}"
                  style="width: 200px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
           </a>
         </div>
@@ -148,13 +181,13 @@ export class MailService {
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="text-align: center; margin-bottom: 30px;">
     <h1 style="color: #2c3e50;">📸 ¡Nuevas fotos disponibles!</h1>
-    <p style="font-size: 18px; color: #7f8c8d;">Dorsal ${bib} - ${eventName}</p>
+    <p style="font-size: 18px; color: #7f8c8d;">Dorsal ${safeBib} - ${safeEventName}</p>
   </div>
   
   <div style="margin-bottom: 30px;">
     <p>¡Hola!</p>
-    <p>Tenemos buenas noticias: hemos encontrado nuevas fotos tuyas del evento <strong>${eventName}</strong>.</p>
-    <p>Estas son las fotos de tu dorsal <strong>${bib}</strong>:</p>
+    <p>Tenemos buenas noticias: hemos encontrado nuevas fotos tuyas del evento <strong>${safeEventName}</strong>.</p>
+    <p>Estas son las fotos de tu dorsal <strong>${safeBib}</strong>:</p>
   </div>
 
   <div style="text-align: center; margin: 30px 0;">
@@ -162,7 +195,7 @@ export class MailService {
   </div>
 
   <div style="text-align: center; margin: 30px 0;">
-    <a href="${baseUrl}/events/${eventName}/search?bib=${bib}" 
+    <a href="${this.escapeHtml(baseUrl)}/search"
        style="display: inline-block; background: #3498db; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
       Ver todas mis fotos
     </a>
@@ -170,7 +203,7 @@ export class MailService {
 
   <div style="border-top: 1px solid #ecf0f1; padding-top: 20px; margin-top: 40px; font-size: 12px; color: #95a5a6; text-align: center;">
     <p>Este email fue enviado automáticamente. Si no quieres recibir más notificaciones, puedes darte de baja.</p>
-    <p>© 2025 Fotografos Platform</p>
+    <p>© ${new Date().getFullYear()} LucilaMon</p>
   </div>
 </body>
 </html>
@@ -180,20 +213,11 @@ export class MailService {
   private generateOrderConfirmationTemplate(
     orderId: string,
     eventName: string,
-    photos: Array<{ photoId: string; originalUrl: string }>,
+    downloadUrl: string,
   ): string {
-    const baseUrl = this.configService.get('FRONTEND_URL', 'https://tu-dominio.com');
-    
-    const downloadLinks = photos
-      .map(photo => `
-        <div style="margin: 10px 0; padding: 15px; background: #f8f9fa; border-radius: 5px;">
-          <a href="${baseUrl}/photos/${photo.photoId}/download" 
-             style="color: #3498db; text-decoration: none; font-weight: bold;">
-            📷 Descargar foto ${photo.photoId}
-          </a>
-        </div>
-      `)
-      .join('');
+    const safeDownloadUrl = this.escapeHtml(downloadUrl);
+    const safeOrderId = this.escapeHtml(orderId);
+    const safeEventName = this.escapeHtml(eventName);
 
     return `
 <!DOCTYPE html>
@@ -205,37 +229,37 @@ export class MailService {
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
   <div style="text-align: center; margin-bottom: 30px;">
     <h1 style="color: #27ae60;">✅ ¡Compra confirmada!</h1>
-    <p style="font-size: 18px; color: #7f8c8d;">Pedido #${orderId}</p>
+    <p style="font-size: 18px; color: #7f8c8d;">Pedido #${safeOrderId}</p>
   </div>
   
   <div style="margin-bottom: 30px;">
     <p>¡Gracias por tu compra!</p>
-    <p>Tu pedido del evento <strong>${eventName}</strong> ha sido procesado correctamente.</p>
-    <p>Puedes descargar tus fotos en alta resolución usando los siguientes enlaces:</p>
+    <p>Tu pedido del evento <strong>${safeEventName}</strong> ha sido procesado correctamente.</p>
+    <p>Puedes descargar tus fotos en alta resolución desde tu enlace privado:</p>
   </div>
 
-  <div style="margin: 30px 0;">
-    ${downloadLinks}
+  <div style="margin: 30px 0; text-align: center;">
+    <a href="${safeDownloadUrl}" style="display:inline-block;background:#171717;color:#fff;padding:15px 28px;border-radius:999px;text-decoration:none;font-weight:bold">Descargar mis fotos</a>
   </div>
 
   <div style="background: #e8f4f8; padding: 15px; border-radius: 5px; margin: 20px 0;">
     <h3 style="margin: 0 0 10px 0; color: #2c3e50;">📋 Información importante:</h3>
     <ul style="margin: 0; padding-left: 20px;">
-      <li>Los enlaces de descarga expiran en 48 horas</li>
+      <li>El acceso privado de este correo expira en 30 días</li>
       <li>Las fotos son de alta resolución sin marca de agua</li>
       <li>Guarda el comprobante de esta compra</li>
     </ul>
   </div>
 
   <div style="text-align: center; margin: 30px 0;">
-    <a href="${baseUrl}/orders/${orderId}" 
+    <a href="${safeDownloadUrl}"
        style="display: inline-block; background: #3498db; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
       Ver detalles del pedido
     </a>
   </div>
 
   <div style="border-top: 1px solid #ecf0f1; padding-top: 20px; margin-top: 40px; font-size: 12px; color: #95a5a6; text-align: center;">
-    <p>© 2025 Fotografos Platform</p>
+    <p>© ${new Date().getFullYear()} LucilaMon</p>
   </div>
 </body>
 </html>

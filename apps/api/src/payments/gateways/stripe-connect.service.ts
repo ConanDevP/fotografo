@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Stripe from 'stripe';
 import { PrismaService } from '../../common/services/prisma.service';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 export interface ConnectAccountStatus {
     accountId: string;
@@ -63,7 +64,7 @@ export class StripeConnectService {
             // Create new Express account
             const account = await this.stripe.accounts.create({
                 type: 'express',
-                country: 'US', // Default, will be updated during onboarding
+                country: this.configService.get('STRIPE_CONNECT_COUNTRY', 'US'),
                 email: email,
                 capabilities: {
                     card_payments: { requested: true },
@@ -72,7 +73,7 @@ export class StripeConnectService {
                 business_type: 'individual',
                 metadata: {
                     userId: userId,
-                    platform: 'fotocorredor',
+                    platform: 'lucilamon',
                 },
             });
 
@@ -111,11 +112,12 @@ export class StripeConnectService {
         try {
             // URLs point to backend first to update status, then redirect to frontend
             const apiUrl = this.configService.get('API_URL', 'http://localhost:8080');
+            const state = this.createOnboardingState(userId);
 
             const accountLink = await this.stripe.accountLinks.create({
                 account: accountId,
-                refresh_url: `${apiUrl}/v1/photographers/stripe/refresh?userId=${userId}`,
-                return_url: `${apiUrl}/v1/photographers/stripe/callback?userId=${userId}`,
+                refresh_url: `${apiUrl}/v1/photographers/stripe/refresh?state=${encodeURIComponent(state)}`,
+                return_url: `${apiUrl}/v1/photographers/stripe/callback?state=${encodeURIComponent(state)}`,
                 type: 'account_onboarding',
             });
 
@@ -181,7 +183,6 @@ export class StripeConnectService {
                     stripeOnboardedAt: isOnboarded ? new Date() : undefined,
                 },
             });
-
             this.logger.log(`Account status refreshed for user ${userId}: charges=${status.chargesEnabled}, payouts=${status.payoutsEnabled}`);
 
             return status;
@@ -205,8 +206,8 @@ export class StripeConnectService {
 
             const isOnboarded = account.charges_enabled && account.payouts_enabled && account.details_submitted;
 
-            await this.prisma.user.update({
-                where: { id: userId },
+            const updated = await this.prisma.user.updateMany({
+                where: { id: userId, stripeAccountId: account.id },
                 data: {
                     stripeAccountStatus: isOnboarded ? 'active' : account.details_submitted ? 'restricted' : 'pending',
                     stripeOnboardingCompleted: isOnboarded,
@@ -215,6 +216,10 @@ export class StripeConnectService {
                     stripeOnboardedAt: isOnboarded ? new Date() : undefined,
                 },
             });
+            if (updated.count !== 1) {
+                this.logger.warn(`Account ${account.id} no coincide con el usuario indicado en metadata`);
+                return;
+            }
 
             this.logger.log(`Account ${account.id} updated via webhook: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}`);
         } catch (error) {
@@ -278,5 +283,41 @@ export class StripeConnectService {
         }
 
         return null;
+    }
+
+    verifyOnboardingState(state: string): string {
+        const [payload, signature] = state.split('.');
+        if (!payload || !signature) throw new BadRequestException('Estado de onboarding inválido');
+        const expected = createHmac('sha256', this.onboardingStateSecret()).update(payload).digest('base64url');
+        const suppliedBuffer = Buffer.from(signature);
+        const expectedBuffer = Buffer.from(expected);
+        if (suppliedBuffer.length !== expectedBuffer.length || !timingSafeEqual(suppliedBuffer, expectedBuffer)) {
+            throw new BadRequestException('Estado de onboarding inválido');
+        }
+        try {
+            const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { userId?: string; exp?: number };
+            if (!decoded.userId || !decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) {
+                throw new Error('expired');
+            }
+            return decoded.userId;
+        } catch {
+            throw new BadRequestException('El enlace de onboarding expiró');
+        }
+    }
+
+    private createOnboardingState(userId: string) {
+        const payload = Buffer.from(JSON.stringify({
+            userId,
+            exp: Math.floor(Date.now() / 1000) + 60 * 60,
+        })).toString('base64url');
+        const signature = createHmac('sha256', this.onboardingStateSecret()).update(payload).digest('base64url');
+        return `${payload}.${signature}`;
+    }
+
+    private onboardingStateSecret() {
+        const secret = this.configService.get('STRIPE_CONNECT_STATE_SECRET')
+            || this.configService.get('ORDER_ACCESS_SECRET');
+        if (!secret) throw new Error('STRIPE_CONNECT_STATE_SECRET es obligatorio');
+        return secret;
     }
 }

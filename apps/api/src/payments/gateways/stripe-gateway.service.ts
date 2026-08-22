@@ -22,14 +22,14 @@ export class StripeGatewayService implements IPaymentGateway {
         this.webhookSecret = this.configService.get('STRIPE_WEBHOOK_SECRET', '');
 
         if (!secretKey) {
-            throw new Error('Stripe secret key not configured');
+            this.logger.warn('Stripe no está configurado; los eventos gratuitos seguirán disponibles');
         }
 
-        this.stripe = new Stripe(secretKey, {
+        this.stripe = new Stripe(secretKey || 'sk_not_configured', {
             apiVersion: '2022-11-15',
         });
 
-        this.logger.log('Stripe Gateway configured');
+        if (secretKey) this.logger.log('Stripe Gateway configured');
     }
 
     /**
@@ -53,19 +53,30 @@ export class StripeGatewayService implements IPaymentGateway {
             const sessionParams: Stripe.Checkout.SessionCreateParams = {
                 mode: 'payment',
                 line_items: lineItems,
-                success_url: `${request.returnUrl}?session_id={CHECKOUT_SESSION_ID}&orderId=${request.orderId}`,
-                cancel_url: `${request.cancelUrl}?orderId=${request.orderId}`,
+                success_url: this.appendQuery(request.returnUrl, {
+                    session_id: '{CHECKOUT_SESSION_ID}',
+                    orderId: request.orderId,
+                }),
+                cancel_url: this.appendQuery(request.cancelUrl, { orderId: request.orderId }),
                 metadata: {
                     orderId: request.orderId,
                     eventId: request.eventId,
                 },
                 payment_intent_data: {
+                    transfer_group: request.transferGroup,
                     metadata: {
                         orderId: request.orderId,
                         eventId: request.eventId,
                     },
                 },
             };
+
+            // URL fragments are never sent to the web server, so the private
+            // order token stays out of access logs and referrer headers.
+            sessionParams.success_url = this.appendFragment(
+                sessionParams.success_url,
+                { token: request.downloadToken },
+            );
 
             // If photographer has Stripe Connect account, use destination charges
             if (request.photographerStripeAccountId) {
@@ -241,5 +252,28 @@ export class StripeGatewayService implements IPaymentGateway {
      */
     getStripeInstance(): Stripe {
         return this.stripe;
+    }
+
+    async getOpenCheckoutUrl(sessionId: string): Promise<string | undefined> {
+        const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+        return session.status === 'open' ? session.url || undefined : undefined;
+    }
+
+    private appendQuery(url: string, values: Record<string, string | undefined>) {
+        const query = Object.entries(values)
+            .filter((entry): entry is [string, string] => Boolean(entry[1]))
+            .map(([key, value]) => `${encodeURIComponent(key)}=${value === '{CHECKOUT_SESSION_ID}' ? value : encodeURIComponent(value)}`)
+            .join('&');
+        return `${url}${url.includes('?') ? '&' : '?'}${query}`;
+    }
+
+    private appendFragment(url: string, values: Record<string, string | undefined>) {
+        const [base, currentFragment = ''] = url.split('#', 2);
+        const fragment = new URLSearchParams(currentFragment);
+        Object.entries(values).forEach(([key, value]) => {
+            if (value) fragment.set(key, value);
+        });
+        const serialized = fragment.toString();
+        return serialized ? `${base}#${serialized}` : base;
     }
 }

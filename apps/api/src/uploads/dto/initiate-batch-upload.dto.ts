@@ -1,4 +1,4 @@
-import { IsInt, IsUUID, Min } from 'class-validator';
+import { IsInt, IsUUID, Max, Min } from 'class-validator';
 
 export class InitiateBatchUploadDto {
   @IsUUID(4, { message: 'El eventId debe ser un UUID válido' })
@@ -6,5 +6,6 @@ export class InitiateBatchUploadDto {
 
   @IsInt({ message: 'totalFiles debe ser un número entero' })
   @Min(1, { message: 'totalFiles debe ser al menos 1' })
+  @Max(5000, { message: 'Un lote no puede superar 5000 archivos' })
   totalFiles: number;
 }

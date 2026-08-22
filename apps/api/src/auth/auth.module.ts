@@ -8,19 +8,25 @@ import { AuthController } from './auth.controller';
 import { RedisService } from './redis.service';
 import { UsersModule } from '../users/users.module';
 import { R2Service } from '../common/services/r2.service';
+import { CloudinaryService } from '../common/services/cloudinary.service';
+import { SharpTransformService } from '../common/services/sharp-transform.service';
+import { StorageService } from '../common/services/storage.service';
 import { PrismaService } from '../common/services/prisma.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
+import { WorkspacesModule } from '../workspaces/workspaces.module';
+import { normalizePem } from '../common/config/validate-environment';
 
 @Module({
   imports: [
     UsersModule,
+    WorkspacesModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        privateKey: configService.get('JWT_PRIVATE_KEY'),
-        publicKey: configService.get('JWT_PUBLIC_KEY'),
+        privateKey: normalizePem(configService.get('JWT_PRIVATE_KEY')),
+        publicKey: normalizePem(configService.get('JWT_PUBLIC_KEY')),
         signOptions: {
           expiresIn: configService.get('JWT_ACCESS_EXPIRY', '15m'),
           algorithm: 'RS256',
@@ -29,7 +35,7 @@ import { LocalStrategy } from './strategies/local.strategy';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, RedisService, JwtStrategy, LocalStrategy, R2Service, PrismaService],
+  providers: [AuthService, RedisService, JwtStrategy, LocalStrategy, R2Service, CloudinaryService, SharpTransformService, StorageService, PrismaService],
   controllers: [AuthController],
   exports: [AuthService],
 })

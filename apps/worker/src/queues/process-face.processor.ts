@@ -8,6 +8,7 @@ import { PythonFaceApiService } from '../services/python-face-api.service';
 import { SpatialMatchingService } from '../services/spatial-matching.service';
 import { AthleteSignatureService } from '../services/athlete-signature.service';
 import { FaceKnnService } from '../services/face-knn.service';
+import { BatchProgressService } from '../services/batch-progress.service';
 import { ProcessFaceJob, InferBibsJob } from '@shared/types';
 import { QUEUES, FACE_RECOGNITION } from '@shared/constants';
 
@@ -23,6 +24,7 @@ export class ProcessFaceProcessor extends WorkerHost {
     private spatialMatchingService: SpatialMatchingService,
     private athleteSignatureService: AthleteSignatureService,
     private faceKnnService: FaceKnnService,
+    private batchProgress: BatchProgressService,
     @InjectQueue(QUEUES.INFER_BIBS) private inferBibsQueue: Queue<InferBibsJob>,
   ) {
     super();
@@ -30,14 +32,24 @@ export class ProcessFaceProcessor extends WorkerHost {
 
   async process(job: Job<ProcessFaceJob>): Promise<void> {
     const { photoId, eventId, imageUrl } = job.data;
+    const isFinalAttempt = job.attemptsMade + 1 >= Number(job.opts.attempts || 1);
 
     this.logger.log(`Processing faces for photo ${photoId} in event ${eventId}`);
 
     try {
-      // Check if Python Face-API is ready
-      if (!this.pythonFaceApiService.isReadySync()) {
-        this.logger.warn(`Python Face-API not ready, skipping face processing for photo ${photoId}`);
+      const currentPhoto = await this.prisma.photo.findUnique({
+        where: { id: photoId },
+        select: { faceProcessedAt: true },
+      });
+      if (!currentPhoto) throw new Error(`Foto ${photoId} no encontrada`);
+      if (currentPhoto.faceProcessedAt) {
+        await this.batchProgress.reconcileForPhoto(photoId);
         return;
+      }
+
+      // Check if Python Face-API is ready
+      if (!(await this.pythonFaceApiService.isReady())) {
+        throw new Error('Python Face-API no está disponible');
       }
 
       // Step 1: Detect all faces in the photo using Python API
@@ -101,25 +113,8 @@ export class ProcessFaceProcessor extends WorkerHost {
             detectedFaces.push(...enhancedFaces);
           } else {
             this.logger.log(
-              `Photo ${photoId}: No faces found even with enhanced detection - creating signature-based associations if available`
+              `Photo ${photoId}: No faces found even with enhanced detection`
             );
-
-            const createdAssociations = await this.createSignatureBasedAssociations(
-              photoId,
-              eventId,
-              photoBibs,
-              signatures
-            );
-
-            if (createdAssociations > 0) {
-              this.logger.log(
-                `Photo ${photoId}: Signature-based associations created for ${createdAssociations} bib(s)`
-              );
-            } else {
-              this.logger.log(
-                `Photo ${photoId}: No signature-based associations created (missing signatures or already linked)`
-              );
-            }
           }
         } else {
           this.logger.log(
@@ -131,6 +126,8 @@ export class ProcessFaceProcessor extends WorkerHost {
       // If still no faces after enhanced detection, return early
       if (detectedFaces.length === 0) {
         this.logger.log(`No faces detected in photo ${photoId} (even after enhanced detection)`);
+        await this.markFaceCompleted(photoId);
+        await job.updateProgress(100);
         return;
       }
 
@@ -148,7 +145,7 @@ export class ProcessFaceProcessor extends WorkerHost {
       });
 
       // Step 2: Save face embeddings to database
-      job.updateProgress(50);
+      await job.updateProgress(50);
 
       const faceEmbeddingData = facesToProcess.map(face => ({
         photoId,
@@ -161,36 +158,39 @@ export class ProcessFaceProcessor extends WorkerHost {
         gender: face.gender || null,
       }));
 
-      // Batch insert all face embeddings
-      await this.prisma.faceEmbedding.createMany({
-        data: faceEmbeddingData,
-        skipDuplicates: true,
+      // A retry replaces any partial face result for this photo.
+      const savedFaces = await this.prisma.$transaction(async transaction => {
+        await transaction.faceEmbedding.deleteMany({ where: { photoId } });
+        const created = await Promise.all(
+          faceEmbeddingData.map(data => transaction.faceEmbedding.create({ data })),
+        );
+
+        // Prisma no maneja el tipo `vector`, así que la copia con la que trabaja
+        // el índice HNSW se escribe con SQL directo. Va en la misma transacción
+        // para que una cara nunca quede visible sin su vector de búsqueda.
+        for (const face of created) {
+          if (face.embedding.length !== 512) continue;
+          await transaction.$executeRawUnsafe(
+            'UPDATE "face_embeddings" SET "embedding_vec" = $1::vector WHERE "id" = $2::uuid',
+            `[${face.embedding.join(',')}]`,
+            face.id,
+          );
+        }
+        return created;
       });
 
-      job.updateProgress(75);
+      await job.updateProgress(75);
       this.logger.log(`Saved ${faceEmbeddingData.length} face embeddings for photo ${photoId}`);
 
       // ═══════════════════════════════════════════════════════
       // Step 3: NEW - Associate faces with bibs (spatial matching)
       // ═══════════════════════════════════════════════════════
-      job.updateProgress(78);
+      await job.updateProgress(78);
 
       if (photoBibs.length > 0 && facesToProcess.length > 0) {
         this.logger.log(
           `🔗 [SPATIAL-MATCH] Photo ${photoId}: Matching ${facesToProcess.length} face(s) with ${photoBibs.length} bib(s)`
         );
-
-        const median = (values: number[]) => {
-          if (values.length === 0) {
-            return undefined;
-          }
-          const sorted = [...values].sort((a, b) => a - b);
-          const mid = Math.floor(sorted.length / 2);
-          if (sorted.length % 2 === 0) {
-            return (sorted[mid - 1] + sorted[mid]) / 2;
-          }
-          return sorted[mid];
-        };
 
         // Calculate scale factor dynamically from Gemini dimensions
         // Use the first bib's dimensions (all bibs from same photo have same dimensions)
@@ -291,11 +291,6 @@ export class ProcessFaceProcessor extends WorkerHost {
         this.logger.log(`   🎯 Spatial matching found ${matches.length} face-bib match(es)`);
 
         // Save face-bib associations
-        const savedFaces = await this.prisma.faceEmbedding.findMany({
-          where: { photoId },
-          orderBy: { createdAt: 'asc' } // Same order as detectedFaces
-        });
-
         for (const match of matches) {
           const faceEmbedding = savedFaces[match.faceIndex];
           const photoBib = photoBibs.find(pb => pb.bib === match.bibValue);
@@ -317,6 +312,16 @@ export class ProcessFaceProcessor extends WorkerHost {
               `   ✅ Created FaceBibAssociation: Face ${match.faceIndex} ↔ Bib "${match.bibValue}" (spatialScore: ${match.spatialScore.toFixed(3)})`
             );
 
+            // El emparejamiento espacial es la semilla del índice: sin esto, la
+            // inferencia de las fotografías siguientes no tendría contra qué
+            // comparar hasta la próxima reconstrucción completa.
+            this.faceKnnService.addToIndex(eventId, {
+              faceEmbeddingId: faceEmbedding.id,
+              photoId,
+              bib: match.bibValue,
+              embedding: faceEmbedding.embedding,
+            });
+
             // Update athlete signature
             // Pass undefined for geminiConfidence to bypass confidence check
             // Spatial matching is already a strong validation
@@ -337,9 +342,6 @@ export class ProcessFaceProcessor extends WorkerHost {
           `✅ [SPATIAL-MATCH] Created ${matches.length} face-bib associations for photo ${photoId}`
         );
 
-        if (matches.length > 0) {
-          this.faceKnnService.invalidate(eventId);
-        }
       } else if (photoBibs.length === 0 && facesToProcess.length > 0) {
         this.logger.log(
           `⚠️  [SPATIAL-MATCH] Photo ${photoId}: ${facesToProcess.length} face(s) detected but NO bibs - skipping spatial matching`
@@ -367,6 +369,7 @@ export class ProcessFaceProcessor extends WorkerHost {
             eventId
           } as InferBibsJob,
           {
+            jobId: `infer-face-${photoId}`,
             delay: 5000, // 5 seconds to ensure KNN cache is updated
             attempts: 3,
             backoff: {
@@ -385,26 +388,11 @@ export class ProcessFaceProcessor extends WorkerHost {
         );
       }
 
-      // Step 5: Update BatchUploadJob face processing counter
-      job.updateProgress(85);
-      const updatedPhoto = await this.prisma.photo.findUnique({
-        where: { id: photoId },
-        select: { batchJobId: true },
-      });
-
-      if (updatedPhoto?.batchJobId) {
-        await this.prisma.batchUploadJob.update({
-          where: { id: updatedPhoto.batchJobId },
-          data: {
-            faceFiles: { increment: 1 },
-            updatedAt: new Date()
-          },
-        });
-        this.logger.debug(`Face processing completed for photo ${photoId}, batch job updated`);
-      }
+      await job.updateProgress(85);
+      await this.markFaceCompleted(photoId);
 
       // Step 4: Complete job
-      job.updateProgress(100);
+      await job.updateProgress(100);
       this.logger.log(`Face processing completed for photo ${photoId}`);
 
     } catch (error) {
@@ -412,118 +400,52 @@ export class ProcessFaceProcessor extends WorkerHost {
       const errorStack = error instanceof Error ? error.stack : undefined;
       this.logger.error(`Error processing faces for photo ${photoId}: ${errorMessage}`, errorStack);
 
-      // Update failed faces counter in BatchUploadJob
-      try {
-        const updatedPhoto = await this.prisma.photo.findUnique({
-          where: { id: photoId },
-          select: { batchJobId: true },
+      if (isFinalAttempt) {
+        await this.markFaceFailed(photoId, errorMessage).catch(updateError => {
+          this.logger.warn(
+            `No se pudo registrar el fallo facial: ${updateError instanceof Error ? updateError.message : 'error desconocido'}`,
+          );
         });
-
-        if (updatedPhoto?.batchJobId) {
-          await this.prisma.batchUploadJob.update({
-            where: { id: updatedPhoto.batchJobId },
-            data: {
-              failedFaces: { increment: 1 },
-              updatedAt: new Date()
-            },
-          });
-          this.logger.debug(`Face processing failed for photo ${photoId}, batch job updated with failure`);
-        }
-      } catch (updateError) {
-        this.logger.warn(`Failed to update batch job after face processing error: ${updateError instanceof Error ? updateError.message : 'Unknown error'}`);
       }
-
-      // Don't throw error - face processing failure shouldn't fail the entire photo processing
-      // The photo can still be searchable by bib number
-      this.logger.warn(`Continuing without face data for photo ${photoId}`);
+      throw error;
     }
   }
 
-  private async createSignatureBasedAssociations(
-    photoId: string,
-    eventId: string,
-    photoBibs: Array<{
-      id: bigint;
-      bib: string;
-      confidence: any;
-      bbox: any;
-      geminiImageWidth: number | null;
-      geminiImageHeight: number | null;
-    }>,
-    signatures: Array<{
-      id: string;
-      eventId: string;
-      bib: string;
-      faceSignature: number[];
-      sampleCount: number;
-      confidence: any;
-    }>
-  ): Promise<number> {
-    if (!signatures || signatures.length === 0) {
-      return 0;
-    }
-
-    const signatureMap = new Map(signatures.map(signature => [signature.bib, signature]));
-    const bibsWithSignature = photoBibs.filter(pb => signatureMap.has(pb.bib));
-
-    if (bibsWithSignature.length === 0) {
-      return 0;
-    }
-
-    const existingAssociations = await this.prisma.faceBibAssociation.findMany({
-      where: {
-        photoId,
-        bib: { in: bibsWithSignature.map(pb => pb.bib) },
-      },
-      select: { bib: true },
+  private async markFaceCompleted(photoId: string): Promise<void> {
+    const processedAt = new Date();
+    const photo = await this.prisma.photo.update({
+      where: { id: photoId },
+      data: { faceProcessedAt: processedAt, faceFailedAt: null },
+      select: { processingCompletedAt: true },
     });
+    await this.prisma.batchUploadItem.updateMany({
+      where: { photoId },
+      data: {
+        faceProcessedAt: processedAt,
+        faceFailedAt: null,
+        status: photo.processingCompletedAt ? 'COMPLETED' : 'PROCESSING',
+        error: null,
+      },
+    });
+    await this.batchProgress.reconcileForPhoto(photoId);
+  }
 
-    const alreadyLinked = new Set(existingAssociations.map(item => item.bib));
-    let created = 0;
-
-    for (const pb of bibsWithSignature) {
-      if (alreadyLinked.has(pb.bib)) {
-        continue;
-      }
-
-      const signature = signatureMap.get(pb.bib);
-      if (!signature || !Array.isArray(signature.faceSignature) || signature.faceSignature.length === 0) {
-        continue;
-      }
-
-      const syntheticEmbedding = await this.prisma.faceEmbedding.create({
-        data: {
-          photoId,
-          eventId,
-          embedding: signature.faceSignature,
-          confidence: Number(signature.confidence ?? 0.7),
-          bbox: null,
-          landmarks: null,
-          age: null,
-          gender: null,
-        },
-      });
-
-      await this.prisma.faceBibAssociation.create({
-        data: {
-          faceEmbeddingId: syntheticEmbedding.id,
-          photoBibId: pb.id,
-          photoId,
-          eventId,
-          bib: pb.bib,
-          spatialScore: Number(signature.confidence ?? 0.7),
-          method: 'INFERRED',
-        },
-      });
-
-      created++;
-    }
-
-    if (created > 0) {
-      this.faceKnnService.invalidate(eventId);
-    }
-
-    return created;
+  private async markFaceFailed(photoId: string, errorMessage: string): Promise<void> {
+    const failedAt = new Date();
+    const photo = await this.prisma.photo.update({
+      where: { id: photoId },
+      data: { faceFailedAt: failedAt },
+      select: { processingCompletedAt: true },
+    });
+    await this.prisma.batchUploadItem.updateMany({
+      where: { photoId },
+      data: {
+        faceFailedAt: failedAt,
+        status: photo.processingCompletedAt ? 'COMPLETED' : 'PROCESSING',
+        error: errorMessage.slice(0, 1000),
+      },
+    });
+    await this.batchProgress.reconcileForPhoto(photoId);
   }
 
   @OnWorkerEvent('completed')

@@ -51,8 +51,8 @@ export class StripeOnboardingController {
             throw new BadRequestException('Usuario no encontrado');
         }
 
-        if (user.role !== UserRole.PHOTOGRAPHER) {
-            throw new BadRequestException('Solo los fotógrafos pueden conectar Stripe');
+        if (user.role !== 'PHOTOGRAPHER') {
+            throw new BadRequestException('Solo fotógrafos y organizadores pueden conectar Stripe');
         }
 
         // If already onboarded, return dashboard link
@@ -87,7 +87,7 @@ export class StripeOnboardingController {
      */
     @Get('callback')
     async handleCallback(
-        @Query('userId') userId: string,
+        @Query('state') state: string,
         @Res() res: Response,
     ): Promise<void> {
         try {
@@ -95,11 +95,9 @@ export class StripeOnboardingController {
                 throw new BadRequestException('Stripe no está configurado');
             }
 
+            if (!state) throw new BadRequestException('Missing onboarding state');
+            const userId = this.stripeConnectService.verifyOnboardingState(state);
             this.logger.log(`Stripe callback received for user: ${userId}`);
-
-            if (!userId) {
-                throw new BadRequestException('Missing userId parameter');
-            }
 
             // Refresh account status from Stripe
             const status = await this.stripeConnectService.refreshAccountStatus(userId);
@@ -137,7 +135,7 @@ export class StripeOnboardingController {
      */
     @Get('refresh')
     async handleRefresh(
-        @Query('userId') userId: string,
+        @Query('state') state: string,
         @Res() res: Response,
     ): Promise<void> {
         try {
@@ -145,11 +143,9 @@ export class StripeOnboardingController {
                 throw new BadRequestException('Stripe no está configurado');
             }
 
+            if (!state) throw new BadRequestException('Missing onboarding state');
+            const userId = this.stripeConnectService.verifyOnboardingState(state);
             this.logger.log(`Stripe refresh requested for user: ${userId}`);
-
-            if (!userId) {
-                throw new BadRequestException('Missing userId parameter');
-            }
 
             const user = await this.prisma.user.findUnique({
                 where: { id: userId },

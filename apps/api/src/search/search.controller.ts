@@ -7,6 +7,7 @@ import {
   Body,
   ParseIntPipe,
   DefaultValuePipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 
@@ -15,6 +16,7 @@ import { FaceSearchService } from './face-search.service';
 import { SubscribeToBibDto } from './dto/subscribe-to-bib.dto';
 import { SendPhotosDto } from './dto/send-photos.dto';
 import { FaceSearchDto } from './dto/face-search.dto';
+import { HybridSearchDto } from './dto/hybrid-search.dto';
 import { ApiResponse } from '@shared/types';
 import { RATE_LIMITS, PAGINATION, FACE_SEARCH_LIMITS } from '@shared/constants';
 
@@ -35,24 +37,6 @@ export class SearchController {
   ): Promise<ApiResponse> {
     // Always use database search for reliability
     const results = await this.searchService.searchPhotosByBib(eventId, bib, limit, cursor);
-    return { 
-      data: results.items,
-      meta: { 
-        cursor: results.nextCursor,
-        total: results.total,
-      },
-    };
-  }
-
-  @Get('photos/original')
-  @Throttle(RATE_LIMITS.SEARCH, 60)
-  async searchOriginalsByBib(
-    @Param('eventId') eventId: string,
-    @Query('bib') bib: string,
-    @Query('limit', new DefaultValuePipe(PAGINATION.DEFAULT_LIMIT), ParseIntPipe) limit: number,
-    @Query('cursor') cursor?: string,
-  ): Promise<ApiResponse> {
-    const results = await this.searchService.searchOriginalPhotosByBib(eventId, bib, limit, cursor);
     return { 
       data: results.items,
       meta: { 
@@ -156,7 +140,7 @@ export class SearchController {
   // Face Recognition Endpoints
   
   @Post('photos/by-face')
-  @Throttle(FACE_SEARCH_LIMITS.REGISTERED, 60)
+  @Throttle(FACE_SEARCH_LIMITS.ANONYMOUS, 60)
   async searchByFace(
     @Param('eventId') eventId: string,
     @Body() faceSearchDto: FaceSearchDto,
@@ -182,6 +166,7 @@ export class SearchController {
   }
 
   @Get('face-stats')
+  @Throttle(30, 60)
   async getFaceStats(
     @Param('eventId') eventId: string,
   ): Promise<ApiResponse> {
@@ -190,11 +175,12 @@ export class SearchController {
   }
 
   @Post('photos/hybrid')
-  @Throttle(RATE_LIMITS.SEARCH, 60)
+  @Throttle(FACE_SEARCH_LIMITS.ANONYMOUS, 60)
   async hybridSearch(
     @Param('eventId') eventId: string,
-    @Body() body: { bib?: string; userImageBase64?: string; threshold?: number },
+    @Body() body: HybridSearchDto,
   ): Promise<ApiResponse> {
+    if (!body.bib && !body.userImageBase64) throw new BadRequestException('Incluye un dorsal o una selfie para buscar');
     const bibResults: any[] = [];
     const faceResults: any[] = [];
     let confirmedBibs: string[] = [];

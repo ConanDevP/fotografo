@@ -13,8 +13,6 @@ import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
 
 import { PhotosService } from './photos.service';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
 import { AddBibDto } from './dto/add-bib.dto';
 import { UserRole, ApiResponse } from '@shared/types';
 
@@ -40,8 +38,6 @@ export class PhotosController {
     return { data: photo };
   }
 
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
   @Post(':id/process')
   async triggerProcessing(
     @Param('id') id: string,
@@ -51,8 +47,6 @@ export class PhotosController {
     return { data: result };
   }
 
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
   @Post(':id/bibs')
   async addBibCorrection(
     @Param('id') photoId: string,
@@ -70,8 +64,6 @@ export class PhotosController {
     return { data: result };
   }
 
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
   @Delete(':id/bibs/:bibId')
   async removeBib(
     @Param('id') photoId: string,
@@ -82,8 +74,6 @@ export class PhotosController {
     return { data: result };
   }
 
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
   @Delete(':id')
   async delete(
     @Param('id') id: string,

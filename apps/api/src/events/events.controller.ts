@@ -11,11 +11,12 @@ import {
   Req,
   UseInterceptors,
   UploadedFile,
+  BadRequestException,
+  Headers,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
-import { Throttle } from '@nestjs/throttler';
 
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -23,6 +24,9 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole, ApiResponse } from '@shared/types';
+import { InviteContributorDto } from './dto/invite-contributor.dto';
+import { ReviewPhotoDto } from './dto/review-photo.dto';
+import { Throttle } from '@nestjs/throttler';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -36,8 +40,7 @@ interface AuthenticatedRequest extends Request {
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+  @UseGuards(AuthGuard('jwt'))
   @Post()
   async create(
     @Body() createEventDto: CreateEventDto,
@@ -79,9 +82,13 @@ export class EventsController {
     };
   }
 
+  @UseGuards(AuthGuard('jwt'))
   @Get(':id')
-  async findOne(@Param('id') id: string): Promise<ApiResponse> {
-    const event = await this.eventsService.findOne(id);
+  async findOne(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const event = await this.eventsService.findOneForUser(id, req.user.id, req.user.role);
     return { data: event };
   }
 
@@ -91,8 +98,7 @@ export class EventsController {
     return { data: event };
   }
 
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+  @UseGuards(AuthGuard('jwt'))
   @Patch(':id')
   async update(
     @Param('id') id: string,
@@ -103,8 +109,7 @@ export class EventsController {
     return { data: event };
   }
 
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+  @UseGuards(AuthGuard('jwt'))
   @Delete(':id')
   async remove(
     @Param('id') id: string,
@@ -125,8 +130,7 @@ export class EventsController {
     return { data: event };
   }
 
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+  @UseGuards(AuthGuard('jwt'))
   @Get(':id/photos')
   async getEventPhotos(
     @Param('id') eventId: string,
@@ -134,6 +138,7 @@ export class EventsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string,
+    @Query('publicationStatus') publicationStatus?: string,
   ): Promise<ApiResponse> {
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 50;
@@ -144,7 +149,8 @@ export class EventsController {
       req.user.role,
       pageNum,
       limitNum,
-      status as any
+      status as any,
+      publicationStatus as any,
     );
     
     return { 
@@ -157,9 +163,14 @@ export class EventsController {
     };
   }
 
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('image'))
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(FileInterceptor('image', {
+    limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 5 },
+    fileFilter: (_req, file, callback) => {
+      if (['image/jpeg', 'image/jpg', 'image/png'].includes(file.mimetype)) callback(null, true);
+      else callback(new BadRequestException('Solo se permiten archivos JPG y PNG'), false);
+    },
+  }))
   @Post(':id/image')
   async uploadEventImage(
     @Param('id') eventId: string,
@@ -170,8 +181,7 @@ export class EventsController {
     return { data: event };
   }
 
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+  @UseGuards(AuthGuard('jwt'))
   @Delete(':id/image')
   async removeEventImage(
     @Param('id') eventId: string,
@@ -181,18 +191,7 @@ export class EventsController {
     return { data: event };
   }
 
-  @Throttle(5, 60)
-  @Post(':id/subscribe')
-  async subscribe(
-    @Param('id') eventId: string,
-    @Body() body: { bib: string; email: string },
-  ): Promise<ApiResponse> {
-    // TODO: Implement subscription logic
-    return { data: { message: 'Suscripción creada' } };
-  }
-
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.PHOTOGRAPHER, UserRole.ADMIN)
+  @UseGuards(AuthGuard('jwt'))
   @Get(':id/bibs/low-confidence')
   async getLowConfidenceBibs(
     @Param('id') eventId: string,
@@ -221,5 +220,80 @@ export class EventsController {
         total: result.pagination.total,
       },
     };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post(':id/contributors/invite')
+  async inviteContributor(
+    @Param('id') eventId: string,
+    @Body() dto: InviteContributorDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.inviteContributor(eventId, dto, req.user.id, req.user.role) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Get(':id/contributors')
+  async listContributors(
+    @Param('id') eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.listContributors(eventId, req.user.id, req.user.role) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Delete(':id/contributors/:contributorId')
+  async revokeContributor(
+    @Param('id') eventId: string,
+    @Param('contributorId') contributorId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.revokeContributor(eventId, contributorId, req.user.id, req.user.role) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Patch(':id/photos/:photoId/review')
+  async reviewPhoto(
+    @Param('id') eventId: string,
+    @Param('photoId') photoId: string,
+    @Body() dto: ReviewPhotoDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.reviewPhoto(eventId, photoId, dto, req.user.id, req.user.role) };
+  }
+
+  @Get('invitations/current')
+  @Throttle(30, 60)
+  async getCurrentInvitation(
+    @Headers('x-invitation-token') token: string | undefined,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.getInvitation(token || '') };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('invitations/current/accept')
+  @Throttle(10, 60)
+  async acceptCurrentInvitation(
+    @Headers('x-invitation-token') token: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.acceptInvitation(token || '', req.user.id) };
+  }
+
+  // Backward compatibility for invitations issued before private-header links.
+  @Get('invitations/:token')
+  @Throttle(30, 60)
+  async getInvitation(@Param('token') token: string): Promise<ApiResponse> {
+    return { data: await this.eventsService.getInvitation(token) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('invitations/:token/accept')
+  @Throttle(10, 60)
+  async acceptInvitation(
+    @Param('token') token: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.acceptInvitation(token, req.user.id) };
   }
 }

@@ -24,7 +24,7 @@ export class SearchService {
   ): Promise<SearchResponse> {
     // Validate event exists
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+      where: { id: eventId, deletedAt: null, isPublished: true },
       select: { id: true, name: true },
     });
 
@@ -35,22 +35,14 @@ export class SearchService {
       });
     }
 
-    // Validate bib format
-    if (!bib || bib.trim().length === 0) {
-      throw new BadRequestException({
-        code: ERROR_CODES.INVALID_BIB_FORMAT,
-        message: 'Formato de dorsal inválido',
-      });
-    }
-
-    const normalizedBib = bib.trim();
-    const limitNum = Math.min(limit, PAGINATION.MAX_LIMIT);
+    const normalizedBib = this.normalizeBib(bib);
+    const limitNum = this.safeLimit(limit);
 
     // Build cursor-based pagination
     let cursorCondition = {};
     if (cursor) {
       try {
-        const decodedCursor = JSON.parse(Buffer.from(cursor, 'base64').toString());
+        const decodedCursor = this.decodeSearchCursor(cursor);
         cursorCondition = {
           OR: [
             {
@@ -59,13 +51,13 @@ export class SearchService {
             {
               confidence: decodedCursor.confidence,
               photo: {
-                takenAt: { lt: new Date(decodedCursor.takenAt) },
+                takenAt: { lt: decodedCursor.takenAt },
               },
             },
             {
               confidence: decodedCursor.confidence,
               photo: {
-                takenAt: new Date(decodedCursor.takenAt),
+                takenAt: decodedCursor.takenAt,
                 id: { lt: decodedCursor.photoId },
               },
             },
@@ -86,6 +78,7 @@ export class SearchService {
         bib: normalizedBib,
         photo: {
           status: 'PROCESSED',
+          publicationStatus: 'APPROVED',
           watermarkUrl: { not: null },
           thumbUrl: { not: null },
         },
@@ -97,7 +90,6 @@ export class SearchService {
             id: true,
             thumbUrl: true,
             watermarkUrl: true,
-            originalUrl: true,
             takenAt: true,
             createdAt: true,
           },
@@ -145,7 +137,7 @@ export class SearchService {
         photoId: photoBib.photo.id,
         thumbUrl: photoBib.photo.thumbUrl!,
         watermarkUrl: photoBib.photo.watermarkUrl!,
-        originalUrl: photoBib.photo.originalUrl!,
+        originalUrl: '',
         confidence: Number(photoBib.confidence),
         type: detectionType,
         takenAt: photoBib.photo.takenAt?.toISOString() || photoBib.photo.createdAt.toISOString(),
@@ -167,6 +159,7 @@ export class SearchService {
         },
         photo: {
           status: 'PROCESSED',
+          publicationStatus: 'APPROVED',
           watermarkUrl: { not: null },
           thumbUrl: { not: null },
         }
@@ -177,7 +170,6 @@ export class SearchService {
             id: true,
             thumbUrl: true,
             watermarkUrl: true,
-            originalUrl: true,
             takenAt: true,
             createdAt: true,
           }
@@ -198,7 +190,7 @@ export class SearchService {
       photoId: ib.photo.id,
       thumbUrl: ib.photo.thumbUrl!,
       watermarkUrl: ib.photo.watermarkUrl!,
-      originalUrl: ib.photo.originalUrl!,
+      originalUrl: '',
       confidence: Number(ib.confidence),
       type: 'INFERRED' as const,
       faceBbox: ib.faceEmbedding.bbox as [number, number, number, number],
@@ -233,6 +225,7 @@ export class SearchService {
           bib: normalizedBib,
           photo: {
             status: 'PROCESSED',
+            publicationStatus: 'APPROVED',
             watermarkUrl: { not: null },
           },
         },
@@ -248,6 +241,7 @@ export class SearchService {
           },
           photo: {
             status: 'PROCESSED',
+            publicationStatus: 'APPROVED',
             watermarkUrl: { not: null },
           },
         },
@@ -271,7 +265,7 @@ export class SearchService {
   ): Promise<{ items: PhotoSearchResult[]; total: number }> {
     // Validate event exists
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+      where: { id: eventId, deletedAt: null, isPublished: true },
       select: { id: true, name: true },
     });
 
@@ -282,7 +276,7 @@ export class SearchService {
       });
     }
 
-    const normalizedBib = bib.trim();
+    const normalizedBib = this.normalizeBib(bib);
 
     try {
       // Get photos directly from organized Cloudinary folders
@@ -303,6 +297,7 @@ export class SearchService {
           photoId: { in: photoIds },
           photo: {
             status: 'PROCESSED',
+            publicationStatus: 'APPROVED',
           },
         },
         include: {
@@ -325,13 +320,12 @@ export class SearchService {
         const photoId = photoBib.photo.id;
         const thumbUrl = bibFolderContents.thumbs.find(url => url.includes(photoId));
         const watermarkUrl = bibFolderContents.watermarks.find(url => url.includes(photoId));
-        const originalUrl = bibFolderContents.originals.find(url => url.includes(photoId));
         
         return {
           photoId,
           thumbUrl: thumbUrl || '',
           watermarkUrl: watermarkUrl || '',
-          originalUrl: originalUrl || '',
+          originalUrl: '',
           confidence: Number(photoBib.confidence),
           takenAt: photoBib.photo.takenAt?.toISOString() || photoBib.photo.createdAt.toISOString(),
         };
@@ -369,7 +363,7 @@ export class SearchService {
   ): Promise<{ message: string }> {
     // Validate event exists
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+      where: { id: eventId, deletedAt: null, isPublished: true },
       select: { id: true },
     });
 
@@ -380,15 +374,7 @@ export class SearchService {
       });
     }
 
-    // Validate inputs
-    if (!bib || bib.trim().length === 0) {
-      throw new BadRequestException({
-        code: ERROR_CODES.INVALID_BIB_FORMAT,
-        message: 'Formato de dorsal inválido',
-      });
-    }
-
-    const normalizedBib = bib.trim();
+    const normalizedBib = this.normalizeBib(bib);
     const normalizedEmail = email.toLowerCase().trim();
 
     // Check if subscription already exists
@@ -405,13 +391,21 @@ export class SearchService {
     }
 
     // Create subscription
-    await this.prisma.bibSubscription.create({
-      data: {
-        eventId,
-        bib: normalizedBib,
-        email: normalizedEmail,
-      },
-    });
+    try {
+      await this.prisma.bibSubscription.create({
+        data: { eventId, bib: normalizedBib, email: normalizedEmail },
+      });
+    } catch (error) {
+      const racedSubscription = await this.prisma.bibSubscription.findUnique({
+        where: {
+          eventId_bib_email: { eventId, bib: normalizedBib, email: normalizedEmail },
+        },
+      });
+      if (racedSubscription) {
+        return { message: 'Ya estás suscrito a las notificaciones de este dorsal' };
+      }
+      throw error;
+    }
 
     // Check if there are already existing photos for this bib
     const existingPhotos = await this.prisma.photoBib.findMany({
@@ -420,6 +414,7 @@ export class SearchService {
         bib: normalizedBib,
         photo: {
           status: 'PROCESSED',
+          publicationStatus: 'APPROVED',
           watermarkUrl: { not: null },
         },
       },
@@ -450,7 +445,7 @@ export class SearchService {
   ): Promise<{ message: string }> {
     // Validate event exists
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+      where: { id: eventId, deletedAt: null, isPublished: true },
       select: { id: true },
     });
 
@@ -461,7 +456,7 @@ export class SearchService {
       });
     }
 
-    const normalizedBib = bib.trim();
+    const normalizedBib = this.normalizeBib(bib);
     const normalizedEmail = email.toLowerCase().trim();
 
     // If specific photos are selected, validate they belong to the bib
@@ -473,6 +468,7 @@ export class SearchService {
           photoId: { in: selectedPhotoIds },
           photo: {
             status: 'PROCESSED',
+            publicationStatus: 'APPROVED',
             watermarkUrl: { not: null },
           },
         },
@@ -499,12 +495,19 @@ export class SearchService {
   }
 
   async getPopularBibs(eventId: string, limit = 10): Promise<Array<{ bib: string; photoCount: number }>> {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId, deletedAt: null, isPublished: true },
+      select: { id: true },
+    });
+    if (!event) throw new NotFoundException('Evento no encontrado');
+    limit = Number.isFinite(limit) ? Math.min(50, Math.max(1, Math.floor(limit))) : 10;
     const popularBibs = await this.prisma.photoBib.groupBy({
       by: ['bib'],
       where: {
         eventId,
         photo: {
           status: 'PROCESSED',
+          publicationStatus: 'APPROVED',
         },
       },
       _count: {
@@ -522,15 +525,6 @@ export class SearchService {
       bib: item.bib,
       photoCount: item._count.bib,
     }));
-  }
-
-  async searchOriginalPhotosByBib(
-    eventId: string,
-    bib: string,
-    limit: number = PAGINATION.DEFAULT_LIMIT,
-    cursor?: string,
-  ): Promise<SearchResponse> {
-    return this.searchPhotosByBibAndType(eventId, bib, 'original', limit, cursor);
   }
 
   async searchWatermarkPhotosByBib(
@@ -558,7 +552,7 @@ export class SearchService {
   ): Promise<SearchResponse> {
     // Validate event exists
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+      where: { id: eventId, deletedAt: null, isPublished: true },
       select: { id: true, name: true },
     });
 
@@ -569,15 +563,17 @@ export class SearchService {
       });
     }
 
-    const limitNum = Math.min(limit, PAGINATION.MAX_LIMIT);
+    const limitNum = this.safeLimit(limit);
 
     // Build cursor-based pagination
     let cursorCondition = {};
     if (cursor) {
       try {
+        if (cursor.length > 512) throw new Error('cursor too large');
         const decodedCursor = JSON.parse(Buffer.from(cursor, 'base64').toString());
         // Support both old (takenAt) and new (createdAt) cursor formats
         const cursorDate = new Date(decodedCursor.createdAt || decodedCursor.takenAt);
+        if (typeof decodedCursor.photoId !== 'string' || Number.isNaN(cursorDate.getTime())) throw new Error('invalid cursor');
         
         cursorCondition = {
           OR: [
@@ -603,14 +599,14 @@ export class SearchService {
       where: {
         eventId,
         status: 'PROCESSED',
+        publicationStatus: 'APPROVED',
         watermarkUrl: { not: null },
         ...cursorCondition,
       },
       select: {
         id: true,
         watermarkUrl: true,
-        thumbUrl: true,
-        originalUrl: true,
+        watermarkThumbUrl: true,
         takenAt: true,
         createdAt: true,
       },
@@ -630,7 +626,10 @@ export class SearchService {
       return {
         photoId: photo.id,
         watermarkUrl: photo.watermarkUrl!,
-        thumbUrl: '',
+        // Miniatura marcada para la cuadrícula. Las fotografías anteriores a
+        // esta versión no la tienen: entonces se sirve la marca completa, que
+        // pesa mucho más pero mantiene la galería funcionando.
+        thumbUrl: photo.watermarkThumbUrl || photo.watermarkUrl!,
         originalUrl: '',
         confidence: 1.0, // Default confidence since we removed complex JOINs
         takenAt: photo.takenAt?.toISOString() || photo.createdAt.toISOString(),
@@ -653,6 +652,7 @@ export class SearchService {
       where: {
         eventId,
         status: 'PROCESSED',
+        publicationStatus: 'APPROVED',
         watermarkUrl: { not: null },
       },
     });
@@ -667,13 +667,13 @@ export class SearchService {
   private async searchPhotosByBibAndType(
     eventId: string,
     bib: string,
-    type: 'original' | 'watermark' | 'thumb',
+    type: 'watermark' | 'thumb',
     limit: number = PAGINATION.DEFAULT_LIMIT,
     cursor?: string,
   ): Promise<SearchResponse> {
     // Validate event exists
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+      where: { id: eventId, deletedAt: null, isPublished: true },
       select: { id: true, name: true },
     });
 
@@ -684,22 +684,14 @@ export class SearchService {
       });
     }
 
-    // Validate bib format
-    if (!bib || bib.trim().length === 0) {
-      throw new BadRequestException({
-        code: ERROR_CODES.INVALID_BIB_FORMAT,
-        message: 'Formato de dorsal inválido',
-      });
-    }
-
-    const normalizedBib = bib.trim();
-    const limitNum = Math.min(limit, PAGINATION.MAX_LIMIT);
+    const normalizedBib = this.normalizeBib(bib);
+    const limitNum = this.safeLimit(limit);
 
     // Build cursor-based pagination
     let cursorCondition = {};
     if (cursor) {
       try {
-        const decodedCursor = JSON.parse(Buffer.from(cursor, 'base64').toString());
+        const decodedCursor = this.decodeSearchCursor(cursor);
         cursorCondition = {
           OR: [
             {
@@ -708,13 +700,13 @@ export class SearchService {
             {
               confidence: decodedCursor.confidence,
               photo: {
-                takenAt: { lt: new Date(decodedCursor.takenAt) },
+                takenAt: { lt: decodedCursor.takenAt },
               },
             },
             {
               confidence: decodedCursor.confidence,
               photo: {
-                takenAt: new Date(decodedCursor.takenAt),
+                takenAt: decodedCursor.takenAt,
                 id: { lt: decodedCursor.photoId },
               },
             },
@@ -731,12 +723,10 @@ export class SearchService {
     // Build photo conditions based on type
     let photoConditions: any = {
       status: 'PROCESSED',
+      publicationStatus: 'APPROVED',
     };
 
     switch (type) {
-      case 'original':
-        photoConditions.originalUrl = { not: null };
-        break;
       case 'watermark':
         photoConditions.watermarkUrl = { not: null };
         break;
@@ -759,7 +749,6 @@ export class SearchService {
             id: true,
             thumbUrl: true,
             watermarkUrl: true,
-            originalUrl: true,
             takenAt: true,
             createdAt: true,
           },
@@ -787,13 +776,6 @@ export class SearchService {
 
       // Return only the requested type URL for security
       switch (type) {
-        case 'original':
-          return { 
-            ...baseItem, 
-            originalUrl: photoBib.photo.originalUrl!,
-            thumbUrl: '', // Empty other URLs
-            watermarkUrl: '',
-          };
         case 'watermark':
           return { 
             ...baseItem,
@@ -813,7 +795,7 @@ export class SearchService {
             ...baseItem,
             thumbUrl: photoBib.photo.thumbUrl || '',
             watermarkUrl: photoBib.photo.watermarkUrl || '',
-            originalUrl: photoBib.photo.originalUrl || '',
+            originalUrl: '',
           };
       }
     });
@@ -844,5 +826,36 @@ export class SearchService {
       nextCursor,
       total: totalCount,
     };
+  }
+
+  private normalizeBib(value: string) {
+    const bib = typeof value === 'string' ? value.trim() : '';
+    if (!/^\d{1,20}$/.test(bib)) {
+      throw new BadRequestException({
+        code: ERROR_CODES.INVALID_BIB_FORMAT,
+        message: 'El dorsal debe contener entre 1 y 20 dígitos',
+      });
+    }
+    return bib;
+  }
+
+  private safeLimit(value: number) {
+    return Number.isFinite(value)
+      ? Math.min(PAGINATION.MAX_LIMIT, Math.max(1, Math.floor(value)))
+      : PAGINATION.DEFAULT_LIMIT;
+  }
+
+  private decodeSearchCursor(cursor: string) {
+    if (cursor.length > 512) throw new Error('cursor too large');
+    const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString());
+    const takenAt = new Date(decoded.takenAt);
+    if (
+      typeof decoded.photoId !== 'string'
+      || !Number.isFinite(decoded.confidence)
+      || Number.isNaN(takenAt.getTime())
+    ) {
+      throw new Error('invalid cursor');
+    }
+    return { confidence: decoded.confidence, photoId: decoded.photoId, takenAt };
   }
 }

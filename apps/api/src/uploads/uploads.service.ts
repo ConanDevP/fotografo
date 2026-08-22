@@ -8,6 +8,9 @@ import { UserRole } from '@shared/types';
 import { getErrorMessage } from '@shared/utils';
 import { InitiateBatchUploadDto } from './dto/initiate-batch-upload.dto';
 import { BatchStatusDetailed, ProcessingPerformance, UserDashboardStats } from './dto/batch-status-detailed.dto';
+import { EventsService } from '../events/events.service';
+import { BillingService } from '../billing/billing.service';
+import { createHash } from 'crypto';
 
 
 @Injectable()
@@ -19,17 +22,12 @@ export class UploadsService {
     private storageService: StorageService,
     private queueService: QueueService,
     private jobRecoveryService: JobRecoveryService,
+    private eventsService: EventsService,
+    private billingService: BillingService,
   ) {}
 
-  async initiateBatchUpload(initiateDto: InitiateBatchUploadDto, ownerId: string) {
-    // Optional: Check if event exists
-    const event = await this.prisma.event.findUnique({ where: { id: initiateDto.eventId } });
-    if (!event) {
-      throw new NotFoundException({
-        code: ERROR_CODES.EVENT_NOT_FOUND,
-        message: 'Evento no encontrado',
-      });
-    }
+  async initiateBatchUpload(initiateDto: InitiateBatchUploadDto, ownerId: string, userRole: UserRole) {
+    await this.eventsService.assertCanUploadToEvent(initiateDto.eventId, ownerId, userRole);
 
     const job = await this.prisma.batchUploadJob.create({
       data: {
@@ -338,6 +336,7 @@ export class UploadsService {
     files: Express.Multer.File[],
     userId: string,
     userRole: UserRole,
+    clientFileIds?: string[],
   ) {
     this.logger.log(`📤 INICIANDO appendToBatchUpload - Job: ${jobId}, Files: ${files?.length || 0}`);
     
@@ -357,9 +356,32 @@ export class UploadsService {
       });
     }
 
-    if (job.status === 'COMPLETED' || job.status === 'FAILED') {
-        this.logger.error(`⛔ Job ya completado/fallido: ${job.status}`);
-        throw new BadRequestException({ code: ERROR_CODES.JOB_COMPLETED, message: 'Este lote de subida ya ha sido completado o ha fallado.' });
+    // Un único recorrido del buffer por archivo: el hash sirve tanto para el
+    // identificador heredado como para la deduplicación posterior.
+    const contentHashes = files.map(file =>
+      createHash('sha256').update(file.buffer).digest('hex'),
+    );
+    const resolvedClientFileIds = files.map((file, index) => {
+      const explicitId = clientFileIds?.[index]?.trim();
+      return explicitId || `legacy-${contentHashes[index]}`;
+    });
+
+    if (resolvedClientFileIds.some(id => id.length > 200)) {
+      throw new BadRequestException('clientFileId no puede superar 200 caracteres');
+    }
+
+    const uniqueClientFileIds = [...new Set(resolvedClientFileIds)];
+    const [currentItemCount, existingItems] = await Promise.all([
+      this.prisma.batchUploadItem.count({ where: { batchJobId: jobId } }),
+      this.prisma.batchUploadItem.findMany({
+        where: { batchJobId: jobId, clientFileId: { in: uniqueClientFileIds } },
+      }),
+    ]);
+    const existingIds = new Set(existingItems.map(item => item.clientFileId));
+    const newItemCount = uniqueClientFileIds.filter(id => !existingIds.has(id)).length;
+
+    if (currentItemCount + newItemCount > job.totalFiles) {
+      throw new BadRequestException('El chunk excede el total de archivos declarado para este lote');
     }
 
     // Set status to uploading if it's the first chunk
@@ -368,70 +390,99 @@ export class UploadsService {
         await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'UPLOADING' } });
     }
 
-    const results = [];
-    const errors = [];
+    const results: Array<Record<string, unknown>> = [];
+    const errors: Array<{ fileName: string; error: string }> = [];
 
-    // SEGURIDAD: Procesar en chunks para evitar sobrecarga con 3000+ fotos
-    const CHUNK_SIZE = parseInt(process.env.MAX_UPLOAD_CHUNK_SIZE || '50');
-    this.logger.log(`🔢 Procesando ${files.length} archivos en chunks de ${CHUNK_SIZE}`);
-    
-    for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-      const chunk = files.slice(i, i + CHUNK_SIZE);
-      const chunkNumber = Math.floor(i / CHUNK_SIZE) + 1;
-      const totalChunks = Math.ceil(files.length / CHUNK_SIZE);
-      
-      this.logger.log(`📦 CHUNK ${chunkNumber}/${totalChunks}: Procesando ${chunk.length} archivos`);
-      
-      const chunkPromises = chunk.map(async (file, chunkIndex) => {
-        const globalIndex = i + chunkIndex;
+    // El controlador ya limita la petición a 5 archivos, así que el lote entero
+    // se procesa en paralelo. El troceo vivía aquí por el endpoint de 5 000
+    // archivos que ya no existe.
+    const fileResults = await Promise.all(
+      files.map(async (file, globalIndex) => {
+        const clientFileId = resolvedClientFileIds[globalIndex];
         try {
+          let item = await this.prisma.batchUploadItem.findUnique({
+            where: { batchJobId_clientFileId: { batchJobId: jobId, clientFileId } },
+            include: { photo: true },
+          });
+
+          if (item?.photoId) {
+            return {
+              success: true,
+              result: {
+                photoId: item.photoId,
+                photo: item.photo,
+                duplicate: item.status === 'DUPLICATE',
+                replayed: true,
+                clientFileId,
+              },
+              fileName: file.originalname,
+            };
+          }
+
+          if (!item) {
+            try {
+              item = await this.prisma.batchUploadItem.create({
+                data: {
+                  batchJobId: jobId,
+                  clientFileId,
+                  fileName: file.originalname,
+                  contentHash: contentHashes[globalIndex],
+                },
+                include: { photo: true },
+              });
+            } catch (error) {
+              item = await this.prisma.batchUploadItem.findUnique({
+                where: { batchJobId_clientFileId: { batchJobId: jobId, clientFileId } },
+                include: { photo: true },
+              });
+              if (!item) throw error;
+              if (item.photoId) {
+                return {
+                  success: true,
+                  result: { photoId: item.photoId, photo: item.photo, replayed: true, clientFileId },
+                  fileName: file.originalname,
+                };
+              }
+            }
+          } else {
+            item = await this.prisma.batchUploadItem.update({
+              where: { id: item.id },
+              data: { status: 'RECEIVED', error: null, fileName: file.originalname },
+              include: { photo: true },
+            });
+          }
+
           this.logger.debug(`📸 Subiendo archivo ${globalIndex + 1}/${files.length}: ${file.originalname}`);
-          const result = await this.uploadPhoto(file, job.eventId, userId, userRole, { batchJobId: jobId });
+          const result = await this.uploadPhoto(file, job.eventId, userId, userRole, {
+            batchJobId: jobId,
+            batchItemId: item.id,
+            contentHash: contentHashes[globalIndex],
+          });
           this.logger.debug(`✅ Archivo ${globalIndex + 1} subido exitosamente: ${result.photoId}`);
-          return { success: true, result, fileName: file.originalname };
+          return { success: true, result: { ...result, clientFileId }, fileName: file.originalname };
         } catch (error) {
-          this.logger.error(`❌ Error subiendo archivo ${globalIndex + 1} (${file.originalname}): ${getErrorMessage(error)}`);
+          const errorMessage = getErrorMessage(error);
+          this.logger.error(`❌ Error subiendo archivo ${globalIndex + 1} (${file.originalname}): ${errorMessage}`);
+          await this.prisma.batchUploadItem.updateMany({
+            where: { batchJobId: jobId, clientFileId, photoId: null },
+            data: { status: 'FAILED', error: errorMessage.slice(0, 1000) },
+          }).catch(() => undefined);
           return {
             success: false,
             error: {
               fileName: file.originalname,
-              error: getErrorMessage(error),
+              error: errorMessage,
             },
           };
         }
-      });
+      }),
+    );
 
-      const chunkResults = await Promise.all(chunkPromises);
-      const successCount = chunkResults.filter(r => r.success).length;
-      const errorCount = chunkResults.filter(r => !r.success).length;
-      
-      this.logger.log(`📊 CHUNK ${chunkNumber} COMPLETADO: ${successCount} exitosos, ${errorCount} errores`);
-      
-      chunkResults.forEach(r => (r.success ? results.push(r.result) : errors.push(r.error)));
-
-      // Pausa entre chunks para no saturar el sistema
-      if (i + CHUNK_SIZE < files.length) {
-        this.logger.debug(`⏸️ Pausa de 500ms antes del siguiente chunk`);
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-    }
+    fileResults.forEach(r => (r.success ? results.push(r.result) : errors.push(r.error)));
 
     this.logger.log(`🎯 UPLOAD BATCH COMPLETADO: ${results.length} exitosos, ${errors.length} errores de ${files.length} total`)
 
-    // Update uploaded files count
-    this.logger.log(`💾 Actualizando contador de archivos subidos: +${results.length}`);
-    const updatedJob = await this.prisma.batchUploadJob.update({
-        where: { id: jobId },
-        data: { uploadedFiles: { increment: results.length } },
-    });
-
-    this.logger.log(`📈 Job actualizado: ${updatedJob.uploadedFiles}/${updatedJob.totalFiles} archivos subidos`);
-
-    // If all files are uploaded, mark as processing
-    if (updatedJob.uploadedFiles >= updatedJob.totalFiles) {
-        this.logger.log(`🎉 TODOS LOS ARCHIVOS SUBIDOS! Cambiando status a PROCESSING`);
-        await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'PROCESSING' } });
-    }
+    const updatedJob = await this.reconcileBatchUpload(jobId);
 
     this.logger.log(`📤 RETORNANDO RESPONSE: ${results.length} successful, ${errors.length} errors`);
 
@@ -441,6 +492,32 @@ export class UploadsService {
       totalInChunk: files.length,
       jobStatus: updatedJob
     };
+  }
+
+  private async reconcileBatchUpload(jobId: string) {
+    const job = await this.prisma.batchUploadJob.findUnique({ where: { id: jobId } });
+    if (!job) {
+      throw new NotFoundException({ code: ERROR_CODES.JOB_NOT_FOUND, message: 'Lote de subida no encontrado' });
+    }
+
+    const [itemCount, uploadedFiles, processedFiles, failedItems] = await Promise.all([
+      this.prisma.batchUploadItem.count({ where: { batchJobId: jobId } }),
+      this.prisma.batchUploadItem.count({ where: { batchJobId: jobId, photoId: { not: null } } }),
+      this.prisma.batchUploadItem.count({
+        where: { batchJobId: jobId, status: { in: ['COMPLETED', 'DUPLICATE', 'FAILED'] } },
+      }),
+      this.prisma.batchUploadItem.count({ where: { batchJobId: jobId, status: 'FAILED' } }),
+    ]);
+
+    let status = job.status;
+    if (itemCount < job.totalFiles) status = 'UPLOADING';
+    else if (processedFiles >= job.totalFiles) status = failedItems > 0 ? 'FAILED' : 'COMPLETED';
+    else status = 'PROCESSING';
+
+    return this.prisma.batchUploadJob.update({
+      where: { id: jobId },
+      data: { status, uploadedFiles, processedFiles, updatedAt: new Date() },
+    });
   }
 
   async getBatchUploadStatus(jobId: string, userId: string) {
@@ -468,51 +545,143 @@ export class UploadsService {
     metadata?: {
       takenAt?: string;
       batchJobId?: string;
+      batchItemId?: string;
+      /// Hash ya calculado por el llamador. Evita recorrer el buffer dos veces
+      /// por archivo, que sobre miles de fotografías es CPU regalada.
+      contentHash?: string;
     },
   ) {
     this.logger.debug(`🔍 uploadPhoto INICIADO: ${file.originalname}, Event: ${eventId}, Batch: ${metadata?.batchJobId}`);
     
     // Validate file
     try {
-      this.validateFile(file);
+      await this.validateFile(file);
       this.logger.debug(`✅ Archivo validado: ${file.originalname}`);
     } catch (error) {
       this.logger.error(`❌ Validación falló: ${file.originalname} - ${getErrorMessage(error)}`);
       throw error;
     }
 
-    // Check if event exists and user has permission
-    const event = await this.prisma.event.findUnique({
-      where: { id: eventId },
+    const event = await this.eventsService.assertCanUploadToEvent(eventId, userId, userRole);
+    const contributor = event.contributors.find(item => item.userId === userId);
+    const photographerWorkspace = contributor?.photographerWorkspaceId
+      ? { id: contributor.photographerWorkspaceId }
+      : await this.prisma.workspace.findFirst({
+          where: { members: { some: { userId, status: 'ACTIVE' } }, deletedAt: null },
+          select: { id: true },
+          orderBy: { createdAt: 'asc' },
+        });
+    // El cupo se comprueba antes de escribir en R2: subir y borrar después
+    // costaría dinero y dejaría objetos huérfanos.
+    await this.billingService.assertStorageAvailable(photographerWorkspace?.id, file.size);
+
+    const contentHash =
+      metadata?.contentHash ?? createHash('sha256').update(file.buffer).digest('hex');
+    const duplicate = await this.prisma.photo.findFirst({
+      where: { eventId, photographerId: userId, contentHash },
+      select: {
+        id: true,
+        status: true,
+        originalUrl: true,
+        thumbUrl: true,
+        watermarkUrl: true,
+        derivativesProcessedAt: true,
+        ocrProcessedAt: true,
+        faceProcessedAt: true,
+        processingCompletedAt: true,
+        watermarkFailedAt: true,
+        ocrFailedAt: true,
+        faceFailedAt: true,
+      },
     });
-
-    if (!event) {
-      throw new NotFoundException({
-        code: ERROR_CODES.EVENT_NOT_FOUND,
-        message: 'Evento no encontrado',
-      });
-    }
-
-    // Check permissions
-    if (userRole !== UserRole.ADMIN && event.ownerId !== userId) {
-      throw new BadRequestException({
-        code: ERROR_CODES.FORBIDDEN,
-        message: 'No tienes permisos para subir fotos a este evento',
-      });
+    if (duplicate) {
+      if (metadata?.batchItemId) {
+        await this.prisma.batchUploadItem.update({
+          where: { id: metadata.batchItemId },
+          data: {
+            photoId: duplicate.id,
+            contentHash,
+            status: duplicate.processingCompletedAt ? 'DUPLICATE' : 'PROCESSING',
+            error: null,
+            derivativesProcessedAt: duplicate.derivativesProcessedAt,
+            ocrProcessedAt: duplicate.ocrProcessedAt,
+            faceProcessedAt: duplicate.faceProcessedAt,
+            watermarkFailedAt: duplicate.watermarkFailedAt,
+            ocrFailedAt: duplicate.ocrFailedAt,
+            faceFailedAt: duplicate.faceFailedAt,
+          },
+        });
+      }
+      return { photoId: duplicate.id, photo: duplicate, duplicate: true, message: 'La fotografía ya estaba subida' };
     }
 
     // Create photo record first
-    const photo = await this.prisma.photo.create({
-      data: {
-        eventId,
-        photographerId: userId,
-        batchJobId: metadata?.batchJobId, // Associate with batch job
-        cloudinaryId: 'temp', // Will be updated after upload
-        originalUrl: 'temp',
-        takenAt: metadata?.takenAt ? new Date(metadata.takenAt) : null,
-        status: 'PENDING',
-      },
-    });
+    let photo;
+    try {
+      photo = await this.prisma.photo.create({
+        data: {
+          eventId,
+          photographerId: userId,
+          photographerWorkspaceId: photographerWorkspace?.id,
+          contentHash,
+          publicationStatus: event.requiresPhotoApproval && event.ownerId !== userId ? 'PENDING_REVIEW' : 'APPROVED',
+          batchJobId: metadata?.batchJobId,
+          cloudinaryId: 'temp',
+          originalUrl: 'temp',
+          takenAt: metadata?.takenAt ? new Date(metadata.takenAt) : null,
+          status: 'PENDING',
+        },
+      });
+    } catch (error) {
+      const racedDuplicate = await this.prisma.photo.findFirst({
+        where: { eventId, photographerId: userId, contentHash },
+        select: {
+          id: true,
+          status: true,
+          originalUrl: true,
+          thumbUrl: true,
+          watermarkUrl: true,
+          derivativesProcessedAt: true,
+          ocrProcessedAt: true,
+          faceProcessedAt: true,
+          processingCompletedAt: true,
+          watermarkFailedAt: true,
+          ocrFailedAt: true,
+          faceFailedAt: true,
+        },
+      });
+      if (!racedDuplicate) throw error;
+      if (metadata?.batchItemId) {
+        await this.prisma.batchUploadItem.update({
+          where: { id: metadata.batchItemId },
+          data: {
+            photoId: racedDuplicate.id,
+            contentHash,
+            status: racedDuplicate.processingCompletedAt ? 'DUPLICATE' : 'PROCESSING',
+            error: null,
+            derivativesProcessedAt: racedDuplicate.derivativesProcessedAt,
+            ocrProcessedAt: racedDuplicate.ocrProcessedAt,
+            faceProcessedAt: racedDuplicate.faceProcessedAt,
+            watermarkFailedAt: racedDuplicate.watermarkFailedAt,
+            ocrFailedAt: racedDuplicate.ocrFailedAt,
+            faceFailedAt: racedDuplicate.faceFailedAt,
+          },
+        });
+      }
+      return {
+        photoId: racedDuplicate.id,
+        photo: racedDuplicate,
+        duplicate: true,
+        message: 'La fotografía ya estaba subida',
+      };
+    }
+
+    if (metadata?.batchItemId) {
+      await this.prisma.batchUploadItem.update({
+        where: { id: metadata.batchItemId },
+        data: { photoId: photo.id, contentHash, status: 'PROCESSING', error: null },
+      });
+    }
 
     try {
       // Upload to Storage (R2 or Cloudinary)
@@ -526,8 +695,32 @@ export class UploadsService {
           originalUrl: uploadResult.originalUrl,
           width: uploadResult.width,
           height: uploadResult.height,
+          originalBytes: file.size,
         },
       });
+
+      // El objeto ya está en R2: contabilizarlo. Si esto fallara, el medidor
+      // quedaría corto, no largo, y `recalculateStorage` lo corrige.
+      await this.billingService
+        .addStorage(photographerWorkspace?.id, file.size)
+        .catch(error =>
+          this.logger.error(
+            `No se pudo contabilizar el consumo de ${photo.id}: ${getErrorMessage(error)}`,
+          ),
+        );
+
+      // Modo compartir: solo se acumula para eventos YA publicados. Lo subido
+      // antes de publicar se cobra de una vez al pulsar Publicar, así que
+      // acumularlo aquí también sería cobrarlo dos veces.
+      if (event.isPublished && this.billingService.isShareMode(event.commerceMode)) {
+        await this.billingService
+          .accrueSharePhotoCharge(photographerWorkspace?.id, 1)
+          .catch(error =>
+            this.logger.error(
+              `No se pudo acumular el cargo de modo compartir para ${photo.id}: ${getErrorMessage(error)}`,
+            ),
+          );
+      }
 
 
       // Enqueue photo for processing with retry
@@ -557,6 +750,12 @@ export class UploadsService {
             where: { id: updatedPhoto.id },
             data: { status: 'FAILED' }
           });
+          if (metadata?.batchItemId) {
+            await this.prisma.batchUploadItem.update({
+              where: { id: metadata.batchItemId },
+              data: { status: 'FAILED', error: 'No se pudo encolar el procesamiento de la fotografía' },
+            });
+          }
         }
       }
 
@@ -596,18 +795,34 @@ export class UploadsService {
       });
     }
 
-    // Verificar permisos
-    if (userRole !== UserRole.ADMIN && photo.event.ownerId !== userId) {
-      throw new BadRequestException({
-        code: ERROR_CODES.FORBIDDEN,
-        message: 'No tienes permisos para reprocesar esta foto',
-      });
+    if (photo.photographerId !== userId) {
+      await this.eventsService.assertCanManageEvent(photo.eventId, userId, userRole);
     }
 
     // Marcar como pendiente y re-encolar
     await this.prisma.photo.update({
       where: { id: photoId },
-      data: { status: 'PENDING' }
+      data: {
+        status: 'PENDING',
+        processingCompletedAt: null,
+        ocrProcessedAt: null,
+        ocrFailedAt: null,
+        faceProcessedAt: null,
+        faceFailedAt: null,
+        watermarkFailedAt: null,
+      }
+    });
+    await this.prisma.batchUploadItem.updateMany({
+      where: { photoId },
+      data: {
+        status: 'PROCESSING',
+        ocrProcessedAt: null,
+        ocrFailedAt: null,
+        faceProcessedAt: null,
+        faceFailedAt: null,
+        watermarkFailedAt: null,
+        error: null,
+      },
     });
 
     try {
@@ -813,71 +1028,253 @@ export class UploadsService {
     }
   }
 
-  /*
-  async uploadPhotoBatch(
-    files: Express.Multer.File[],
-    eventId: string,
+  // ═══════════════════════════════════════════════════════════════════════
+  // Subida directa a R2
+  //
+  // El navegador escribe en R2 con una URL firmada y el archivo nunca ocupa
+  // memoria del servidor. Eso obliga a mover la verificación al final: hasta
+  // que el objeto no está en R2 no sabemos su tamaño real ni si de verdad es
+  // una imagen, y el tamaño decide lo que se factura.
+  //
+  // Reparto de confianza:
+  //   · tamaño      → se verifica contra R2 (afecta al cobro)
+  //   · contenido   → se verifica leyendo su firma (afecta a la integridad)
+  //   · contentHash → se acepta del cliente; solo afecta a su deduplicación
+  // ═══════════════════════════════════════════════════════════════════════
+
+  async presignBatchFiles(
+    jobId: string,
+    requested: Array<{ clientFileId: string; fileName: string; contentType: string; sizeBytes: number; contentHash: string }>,
     userId: string,
     userRole: UserRole,
   ) {
-    const results = [];
-    const errors = [];
-    const CHUNK_SIZE = 10; // Procesar de 10 en 10 para evitar sobrecarga de DB
+    const job = await this.assertOwnedJob(jobId, userId);
+    const event = await this.eventsService.assertCanUploadToEvent(job.eventId, userId, userRole);
+    const workspace = await this.resolvePhotographerWorkspace(event, userId);
 
-    // Procesar en chunks
-    for (let i = 0; i < files.length; i += CHUNK_SIZE) {
-      const chunk = files.slice(i, i + CHUNK_SIZE);
-      console.log(`Procesando chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(files.length / CHUNK_SIZE)} (${chunk.length} fotos)`);
-      
-      // Procesar chunk con Promise.all para paralelizar
-      const chunkPromises = chunk.map(async (file, chunkIndex) => {
-        const globalIndex = i + chunkIndex;
-        try {
-          const result = await this.uploadPhoto(file, eventId, userId, userRole);
-          return { success: true, result, globalIndex, fileName: file.originalname };
-        } catch (error) {
-          return { 
-            success: false, 
-            error: {
-              fileIndex: globalIndex,
-              fileName: file.originalname,
-              error: getErrorMessage(error),
-            }
-          };
-        }
-      });
+    const declaredBytes = requested.reduce((sum, item) => sum + item.sizeBytes, 0);
+    // Comprobación previa con el tamaño declarado: evita firmar URLs para
+    // archivos que no van a caber. El cobro real usa el tamaño verificado.
+    await this.billingService.assertStorageAvailable(workspace?.id, declaredBytes);
 
-      // Esperar que termine el chunk completo
-      const chunkResults = await Promise.all(chunkPromises);
-      
-      // Procesar resultados del chunk
-      chunkResults.forEach(result => {
-        if (result.success) {
-          results.push(result.result);
-        } else {
-          errors.push(result.error);
-        }
-      });
-
-      // Pequeña pausa entre chunks para no sobrecargar el sistema
-      if (i + CHUNK_SIZE < files.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
+    const currentItemCount = await this.prisma.batchUploadItem.count({ where: { batchJobId: jobId } });
+    const known = await this.prisma.batchUploadItem.findMany({
+      where: { batchJobId: jobId, clientFileId: { in: requested.map(item => item.clientFileId) } },
+    });
+    const knownIds = new Set(known.map(item => item.clientFileId));
+    const newCount = requested.filter(item => !knownIds.has(item.clientFileId)).length;
+    if (currentItemCount + newCount > job.totalFiles) {
+      throw new BadRequestException('El lote excede el total de archivos declarado');
     }
 
-    console.log(`Batch completado: ${results.length} exitosas, ${errors.length} fallidas`);
+    if (job.status === 'PENDING') {
+      await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'UPLOADING' } });
+    }
 
-    return {
-      successful: results,
-      errors,
-      total: files.length,
-      successCount: results.length,
-      errorCount: errors.length,
-    };
+    return Promise.all(
+      requested.map(async file => {
+        // Si esa fotografía ya existe en el evento, no hace falta subirla otra vez.
+        const duplicate = await this.prisma.photo.findFirst({
+          where: { eventId: job.eventId, photographerId: userId, contentHash: file.contentHash },
+          select: { id: true },
+        });
+        if (duplicate) {
+          await this.upsertItem(jobId, file, duplicate.id, 'DUPLICATE');
+          return { clientFileId: file.clientFileId, duplicate: true, photoId: duplicate.id, uploadUrl: null, objectKey: null };
+        }
+
+        const item = await this.upsertItem(jobId, file, null, 'RECEIVED');
+        // Foto en estado provisional: existe para reservar la clave del objeto,
+        // y no se considera subida hasta que `completeBatchFiles` la verifique.
+        const photo = item.photoId
+          ? { id: item.photoId }
+          : await this.prisma.photo.create({
+              data: {
+                eventId: job.eventId,
+                photographerId: userId,
+                photographerWorkspaceId: workspace?.id,
+                contentHash: file.contentHash,
+                publicationStatus:
+                  event.requiresPhotoApproval && event.ownerId !== userId ? 'PENDING_REVIEW' : 'APPROVED',
+                batchJobId: jobId,
+                cloudinaryId: 'pending',
+                originalUrl: 'pending',
+                status: 'PENDING',
+              },
+              select: { id: true },
+            });
+
+        const extension = file.contentType === 'image/png' ? 'png' : 'jpg';
+        const objectKey = `events/${job.eventId}/original/${photo.id}.${extension}`;
+        const { uploadUrl } = await this.storageService.createUploadUrl(objectKey, file.contentType, 3600);
+
+        await this.prisma.batchUploadItem.update({
+          where: { id: item.id },
+          data: { photoId: photo.id },
+        });
+        await this.prisma.photo.update({
+          where: { id: photo.id },
+          data: { cloudinaryId: objectKey },
+        });
+
+        return { clientFileId: file.clientFileId, duplicate: false, photoId: photo.id, uploadUrl, objectKey };
+      }),
+    );
   }
-  */
 
-  private validateFile(file: Express.Multer.File) {
+  async completeBatchFiles(jobId: string, clientFileIds: string[], userId: string) {
+    await this.assertOwnedJob(jobId, userId);
+
+    const items = await this.prisma.batchUploadItem.findMany({
+      where: { batchJobId: jobId, clientFileId: { in: clientFileIds } },
+      include: { photo: true },
+    });
+
+    const confirmed: Array<Record<string, unknown>> = [];
+    const errors: Array<{ fileName: string; error: string }> = [];
+
+    await Promise.all(
+      items.map(async item => {
+        const photo = item.photo;
+        if (!photo) return;
+        // Ya confirmada en un intento anterior: reenviar la confirmación no debe
+        // volver a contabilizar bytes ni encolar el procesamiento otra vez.
+        if (photo.originalBytes) {
+          confirmed.push({ clientFileId: item.clientFileId, photoId: photo.id, replayed: true });
+          return;
+        }
+
+        try {
+          const objectKey = photo.cloudinaryId;
+          const head = await this.storageService.headUploadedPhoto(objectKey);
+          if (!head || head.size <= 0) {
+            throw new BadRequestException('El archivo no llegó a subirse a almacenamiento');
+          }
+          if (head.size > FILE_CONSTRAINTS.MAX_SIZE) {
+            await this.storageService.deletePhoto(objectKey).catch(() => undefined);
+            throw new BadRequestException(
+              `El archivo supera el máximo de ${FILE_CONSTRAINTS.MAX_SIZE / (1024 * 1024)}MB`,
+            );
+          }
+
+          // 256 KB bastan para la firma y para la cabecera con las dimensiones,
+          // sin descargar la fotografía entera.
+          const header = await this.storageService.readUploadedHead(objectKey, 256 * 1024);
+          if (!header || !this.looksLikeImage(header)) {
+            await this.storageService.deletePhoto(objectKey).catch(() => undefined);
+            throw new BadRequestException('El contenido no corresponde a una imagen JPG o PNG');
+          }
+
+          // Las dimensiones no son opcionales: el emparejamiento cara↔dorsal
+          // escala las cajas de Gemini al tamaño real de la fotografía, y sin
+          // ellas cae a una aproximación mucho peor.
+          const dimensions = await this.storageService
+            .getImageMetadata(header)
+            .catch(() => null);
+          if (!dimensions?.width || !dimensions?.height) {
+            await this.storageService.deletePhoto(objectKey).catch(() => undefined);
+            throw new BadRequestException('No se pudieron leer las dimensiones de la imagen');
+          }
+
+          const updated = await this.prisma.photo.update({
+            where: { id: photo.id },
+            data: {
+              originalUrl: `r2://${objectKey}`,
+              originalBytes: head.size,
+              width: dimensions.width,
+              height: dimensions.height,
+            },
+          });
+
+          // El consumo se contabiliza con el tamaño verificado, nunca con el
+          // declarado por el cliente.
+          await this.billingService.addStorage(photo.photographerWorkspaceId, head.size);
+          if (photo.photographerWorkspaceId) {
+            const event = await this.prisma.event.findUnique({
+              where: { id: photo.eventId },
+              select: { isPublished: true, commerceMode: true },
+            });
+            if (event?.isPublished && this.billingService.isShareMode(event.commerceMode)) {
+              await this.billingService.accrueSharePhotoCharge(photo.photographerWorkspaceId, 1);
+            }
+          }
+
+          await this.prisma.batchUploadItem.update({
+            where: { id: item.id },
+            data: { status: 'PROCESSING', error: null },
+          });
+          await this.queueService.addProcessPhotoJob({
+            photoId: updated.id,
+            eventId: updated.eventId,
+            objectKey,
+          });
+
+          confirmed.push({ clientFileId: item.clientFileId, photoId: updated.id, replayed: false });
+        } catch (error) {
+          const message = getErrorMessage(error);
+          // La fotografía provisional se borra: si se quedara, contaría como una
+          // foto más del evento y se acabaría facturando algo que nunca se subió.
+          await this.prisma.batchUploadItem
+            .update({ where: { id: item.id }, data: { status: 'FAILED', error: message.slice(0, 1000), photoId: null } })
+            .catch(() => undefined);
+          await this.prisma.photo.delete({ where: { id: photo.id } }).catch(() => undefined);
+          errors.push({ fileName: item.fileName || item.clientFileId, error: message });
+        }
+      }),
+    );
+
+    const jobStatus = await this.reconcileBatchUpload(jobId);
+    return { confirmed, errors, jobStatus };
+  }
+
+  private looksLikeImage(bytes: Buffer): boolean {
+    const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const isPng = bytes.length >= png.length && png.every((value, index) => bytes[index] === value);
+    return isJpeg || isPng;
+  }
+
+  private async assertOwnedJob(jobId: string, userId: string) {
+    const job = await this.prisma.batchUploadJob.findUnique({ where: { id: jobId } });
+    if (!job) {
+      throw new NotFoundException({ code: ERROR_CODES.JOB_NOT_FOUND, message: 'Lote de subida no encontrado' });
+    }
+    if (job.ownerId !== userId) {
+      throw new ForbiddenException({ code: ERROR_CODES.FORBIDDEN, message: 'No tienes permisos sobre este lote' });
+    }
+    return job;
+  }
+
+  private async resolvePhotographerWorkspace(event: any, userId: string) {
+    const contributor = event.contributors?.find((item: any) => item.userId === userId);
+    if (contributor?.photographerWorkspaceId) return { id: contributor.photographerWorkspaceId };
+    return this.prisma.workspace.findFirst({
+      where: { members: { some: { userId, status: 'ACTIVE' } }, deletedAt: null },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  private async upsertItem(
+    jobId: string,
+    file: { clientFileId: string; fileName: string; contentHash: string },
+    photoId: string | null,
+    status: 'RECEIVED' | 'DUPLICATE',
+  ) {
+    return this.prisma.batchUploadItem.upsert({
+      where: { batchJobId_clientFileId: { batchJobId: jobId, clientFileId: file.clientFileId } },
+      create: {
+        batchJobId: jobId,
+        clientFileId: file.clientFileId,
+        fileName: file.fileName,
+        contentHash: file.contentHash,
+        ...(photoId ? { photoId, status } : { status }),
+      },
+      update: { fileName: file.fileName, contentHash: file.contentHash, status, error: null },
+    });
+  }
+
+  private async validateFile(file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException({
         code: ERROR_CODES.VALIDATION_ERROR,
@@ -907,6 +1304,35 @@ export class UploadsService {
       throw new BadRequestException({
         code: ERROR_CODES.INVALID_PHOTO_FORMAT,
         message: 'Extensión de archivo no válida',
+      });
+    }
+
+    const bytes = file.buffer;
+    const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const isPng = bytes.length >= pngSignature.length
+      && pngSignature.every((value, index) => bytes[index] === value);
+    if (!isJpeg && !isPng) {
+      throw new BadRequestException({
+        code: ERROR_CODES.INVALID_PHOTO_FORMAT,
+        message: 'El contenido del archivo no corresponde a una imagen JPG o PNG válida',
+      });
+    }
+
+    try {
+      const metadata = await this.storageService.getImageMetadata(bytes);
+      const pixels = metadata.width * metadata.height;
+      if (!metadata.width || !metadata.height || pixels > 80_000_000 || metadata.width > 20_000 || metadata.height > 20_000) {
+        throw new BadRequestException({
+          code: ERROR_CODES.INVALID_PHOTO_FORMAT,
+          message: 'La imagen tiene dimensiones inválidas o excede el límite de 80 megapíxeles',
+        });
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException({
+        code: ERROR_CODES.INVALID_PHOTO_FORMAT,
+        message: 'No se pudieron validar las dimensiones de la imagen',
       });
     }
   }

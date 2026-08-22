@@ -4,12 +4,14 @@ import { IPaymentGateway } from '../interfaces/payment-gateway.interface';
 // PayPal comentado temporalmente
 // import { PayPalGatewayService } from '../gateways/paypal-gateway.service';
 import { StripeGatewayService } from '../gateways/stripe-gateway.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class PaymentGatewayFactory {
   constructor(
     // @Optional() private readonly paypalGateway: PayPalGatewayService,
     @Optional() private readonly stripeGateway: StripeGatewayService,
+    private readonly configService: ConfigService,
     // private readonly mercadopagoGateway: MercadoPagoGatewayService, // TODO: Implementar
   ) { }
 
@@ -24,7 +26,7 @@ export class PaymentGatewayFactory {
       */
 
       case PaymentGateway.STRIPE:
-        if (!this.stripeGateway) {
+        if (!this.stripeGateway || !this.configService.get('STRIPE_SECRET_KEY')) {
           throw new BadRequestException('Stripe no está configurado');
         }
         return this.stripeGateway;
@@ -42,7 +44,11 @@ export class PaymentGatewayFactory {
   }
 
   getSupportedGateways(): PaymentGateway[] {
-    const gateways: PaymentGateway[] = [PaymentGateway.DEMO];
+    const gateways: PaymentGateway[] = [];
+
+    if (this.configService.get('DEMO_PAYMENTS', 'false') === 'true') {
+      gateways.push(PaymentGateway.DEMO);
+    }
 
     /* PayPal comentado temporalmente
     if (this.paypalGateway) {
@@ -50,7 +56,7 @@ export class PaymentGatewayFactory {
     }
     */
 
-    if (this.stripeGateway) {
+    if (this.stripeGateway && this.configService.get('STRIPE_SECRET_KEY')) {
       gateways.push(PaymentGateway.STRIPE);
     }
 

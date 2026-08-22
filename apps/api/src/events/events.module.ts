@@ -8,8 +8,12 @@ import { CloudinaryService } from '../common/services/cloudinary.service';
 import { StorageService } from '../common/services/storage.service';
 import { R2Service } from '../common/services/r2.service';
 import { SharpTransformService } from '../common/services/sharp-transform.service';
+import { WorkspacesModule } from '../workspaces/workspaces.module';
+import { BillingModule } from '../billing/billing.module';
+import { QueueService } from '../common/services/queue.service';
 
 @Module({
+  imports: [WorkspacesModule, BillingModule],
   controllers: [EventsController, FreeDownloadsController],
   providers: [
     EventsService,
@@ -19,6 +23,7 @@ import { SharpTransformService } from '../common/services/sharp-transform.servic
     StorageService,
     R2Service,
     SharpTransformService,
+    QueueService,
   ],
   exports: [EventsService, FreeDownloadsService],
 })

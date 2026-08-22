@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import IORedis from 'ioredis';
+import { createHash } from 'crypto';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -56,7 +57,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async setRefreshToken(token: string, userId: string, expiresAt: number): Promise<void> {
-    const key = `refresh_token:${token}`;
+    const key = this.refreshTokenKey(token);
     const ttlSeconds = Math.floor((expiresAt - Date.now()) / 1000);
     
     if (ttlSeconds > 0) {
@@ -65,7 +66,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getRefreshToken(token: string): Promise<{ userId: string; expiresAt: number } | null> {
-    const key = `refresh_token:${token}`;
+    const key = this.refreshTokenKey(token);
     const data = await this.connection.get(key);
     
     if (!data) {
@@ -75,8 +76,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return JSON.parse(data);
   }
 
+  async consumeRefreshToken(token: string): Promise<{ userId: string; expiresAt: number } | null> {
+    const data = await this.connection.getdel(this.refreshTokenKey(token));
+    if (!data) return null;
+    return JSON.parse(data);
+  }
+
   async deleteRefreshToken(token: string): Promise<void> {
-    const key = `refresh_token:${token}`;
+    const key = this.refreshTokenKey(token);
     await this.connection.del(key);
+  }
+
+  private refreshTokenKey(token: string) {
+    return `refresh_token:${createHash('sha256').update(token).digest('hex')}`;
   }
 }

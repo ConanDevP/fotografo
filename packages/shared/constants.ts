@@ -15,8 +15,7 @@ export const JOBS = {
   PROCESS_FACE: 'process-face',
   SEND_BIB_EMAIL: 'send-bib-email',
   REPROCESS_PHOTO: 'reprocess-photo',
-
-  
+  INFER_BIBS: 'infer-bibs',
 } as const;
 
 // Error codes
@@ -71,7 +70,7 @@ export const ERROR_CODES = {
 
 // File constraints
 export const FILE_CONSTRAINTS = {
-  MAX_SIZE: 50 * 1024 * 1024, // 50MB
+  MAX_SIZE: 25 * 1024 * 1024, // 25MB per processed image
   ALLOWED_TYPES: ['image/jpeg', 'image/jpg', 'image/png'] as readonly string[],
   ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png'],
 } as const;
@@ -128,7 +127,17 @@ export const URL_EXPIRY = {
 
 // Face Recognition
 export const FACE_RECOGNITION = {
-  DEFAULT_THRESHOLD: 0.4, // Euclidean distance threshold. Lower is more similar. Recommended: 0.4 for high confidence.
+  /**
+   * Distancia COSENO máxima (1 − similitud) para considerar que una selfie
+   * corresponde a una cara del evento. No es euclídea, aunque lo dijera el
+   * comentario anterior: `calculateDistance` calcula coseno.
+   *
+   * Se alinea con KNN_STRICT_DISTANCE a propósito. Estaba en 0.4, más laxo que
+   * el umbral con el que el sistema se atreve a etiquetar un dorsal, lo que
+   * dejaba la parte que enseña fotos a un desconocido más permisiva que la
+   * automatización interna. Un falso positivo aquí es un problema de privacidad.
+   */
+  DEFAULT_THRESHOLD: 0.3,
   MAX_FACES_PER_PHOTO: 20, // Maximum faces to detect per photo
   FACEAPI_MODEL_PATH: path.join(__dirname, '..', '..', '..', 'models', 'face-api'),
   DESCRIPTOR_LENGTH: 128,  // Length of face descriptor vector
@@ -144,14 +153,10 @@ export const FACE_SEARCH_LIMITS = {
 
 // Face-Bib Linking Configuration (NEW)
 export const FACE_BIB_LINKING = {
-  // Spatial matching thresholds
-  SPATIAL_SCORE_THRESHOLD: 0.35,       // Relaxed for running photos where bib is far from face
-  HORIZONTAL_DECAY: 4.0,               // More tolerant horizontal alignment
-  MAX_HORIZONTAL_REJECTION_RATIO: 6.0, // Allow wider horizontal distance
-  HORIZONTAL_WEIGHT: 0.45,             // Weight applied to horizontal alignment component
-  VERTICAL_WEIGHT: 0.55,               // Weight applied to vertical position component
-  MAX_NORMALIZED_VERTICAL_DISTANCE: 12, // Allow bibs up to 12 face-heights away (running photos)
-  MIN_VERTICAL_ZONE_SCORE: 0.05,        // Lower threshold for zone scoring
+  /// Puntuación mínima de proximidad horizontal para aceptar un emparejamiento
+  /// cara↔dorsal. Es el único parámetro espacial que el código usa: el
+  /// emparejamiento compara distancia horizontal y descarta el eje vertical.
+  SPATIAL_SCORE_THRESHOLD: 0.35,
 
   // Inference thresholds
   INFERENCE_THRESHOLD: 0.45,           // Relaxed for better recall
@@ -170,17 +175,4 @@ export const FACE_BIB_LINKING = {
   MIN_GEMINI_CONFIDENCE: 0.70,         // Lower threshold for Gemini detections
   MIN_INFERRED_CONFIDENCE: 0.55,       // Lower threshold to show inferred bibs
 
-  // Vertical zones (normalized by face height) to support bibs in different body locations
-  // NEGATIVE values = bib is ABOVE face (common in running photos where camera is low)
-  // POSITIVE values = bib is BELOW face (standard portrait orientation)
-  VERTICAL_ZONES: [
-    { id: 'RUNNING_FAR', mean: -8.0, stdDev: 3.0, weight: 0.50 }, // Running photo - bib far above face
-    { id: 'RUNNING_NEAR', mean: -5.0, stdDev: 2.5, weight: 0.55 }, // Running photo - bib moderately above
-    { id: 'HELMET', mean: -1.6, stdDev: 1.2, weight: 0.40 }, // Casco / cabeza
-    { id: 'SHOULDERS', mean: 0.2, stdDev: 1.0, weight: 0.35 }, // Parte superior espalda
-    { id: 'CHEST', mean: 3.5, stdDev: 1.5, weight: 0.60 }, // Pecho / torso
-    { id: 'WAIST', mean: 5.2, stdDev: 1.5, weight: 0.50 }, // Cintura / cadera
-    { id: 'THIGH', mean: 7.2, stdDev: 1.5, weight: 0.45 }, // Muslo / pierna
-    { id: 'BIKE_FRAME', mean: 4.8, stdDev: 1.5, weight: 0.45 }, // Tubo bici / placa lateral
-  ] as const,
 } as const;

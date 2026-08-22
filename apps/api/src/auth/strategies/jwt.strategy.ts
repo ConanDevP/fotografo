@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { UsersService } from '../../users/users.service';
 import { ERROR_CODES } from '@shared/constants';
+import { normalizePem } from '../../common/config/validate-environment';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -15,7 +16,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get('JWT_PUBLIC_KEY'),
+      secretOrKey: normalizePem(configService.get('JWT_PUBLIC_KEY')),
       algorithms: ['RS256'],
     });
   }

@@ -69,7 +69,7 @@ export class SharpTransformService implements OnModuleInit {
     } = {
       targetWidth: 2048,
       quality: 85,
-      watermarkText: 'fotocorredor.com',
+      watermarkText: 'lucilamon.com',
       angleDeg: -32,
       spacingPx: 48,
       fontPx: 20,
@@ -113,13 +113,56 @@ export class SharpTransformService implements OnModuleInit {
       return out;
     } catch (e) {
       this.logger.error(`Watermark error: ${getErrorMessage(e)}`, getErrorStack(e));
-      // Fallback: imagen sin watermark
-      return sharp(imageBuffer)
-        .rotate()
-        .resize(options.targetWidth ?? 2048, null, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: options.quality ?? 85 })
-        .toBuffer();
+      throw new Error(`No se pudo generar una versión protegida: ${getErrorMessage(e)}`);
     }
+  }
+
+  async generateSponsoredDownload(
+    imageBuffer: Buffer,
+    logoBuffers: Buffer[],
+    options: { position?: 'top' | 'bottom'; opacity?: number; maxHeightPercent?: number } = {},
+  ): Promise<Buffer> {
+    if (logoBuffers.length === 0) return imageBuffer;
+
+    const metadata = await sharp(imageBuffer).metadata();
+    if (!metadata.width || !metadata.height) throw new Error('No se pudieron leer las dimensiones de la fotografía');
+    const swapsAxes = metadata.orientation !== undefined && metadata.orientation >= 5 && metadata.orientation <= 8;
+    const imageWidth = swapsAxes ? metadata.height : metadata.width;
+    const imageHeight = swapsAxes ? metadata.width : metadata.height;
+    const image = sharp(imageBuffer).rotate();
+
+    const panelHeight = Math.max(90, Math.round(imageHeight * 0.13));
+    const logoHeight = Math.max(36, Math.round(imageHeight * ((options.maxHeightPercent || 8) / 100)));
+    const gap = Math.max(18, Math.round(imageWidth * 0.015));
+    const logoCount = Math.min(6, logoBuffers.length);
+    const maxLogoWidth = Math.max(40, Math.floor((imageWidth - gap * (logoCount + 1)) / logoCount));
+    const preparedLogos = await Promise.all(
+      logoBuffers.slice(0, 6).map(buffer => sharp(buffer).resize({
+        width: maxLogoWidth,
+        height: logoHeight,
+        fit: 'inside',
+        withoutEnlargement: true,
+      }).png().toBuffer()),
+    );
+    const logoMetadata = await Promise.all(preparedLogos.map(buffer => sharp(buffer).metadata()));
+    const totalLogoWidth = logoMetadata.reduce((sum, item) => sum + (item.width || logoHeight), 0) + gap * (preparedLogos.length - 1);
+    let cursor = Math.max(gap, Math.round((imageWidth - totalLogoWidth) / 2));
+    const top = options.position === 'top' ? 0 : imageHeight - panelHeight;
+    const panel = Buffer.from(
+      `<svg width="${imageWidth}" height="${panelHeight}"><rect width="100%" height="100%" fill="rgba(0,0,0,${Math.min(1, Math.max(0.35, options.opacity || 0.82))})"/><text x="${gap}" y="22" fill="white" font-family="Arial" font-size="14" opacity="0.82">PATROCINADO POR</text></svg>`,
+    );
+    const composites: sharp.OverlayOptions[] = [{ input: panel, left: 0, top }];
+    for (let index = 0; index < preparedLogos.length; index++) {
+      const width = logoMetadata[index].width || logoHeight;
+      composites.push({
+        input: preparedLogos[index],
+        left: cursor,
+        top: top + Math.round((panelHeight - logoHeight) / 2) + 8,
+      });
+      cursor += width + gap;
+    }
+
+    return image.composite(composites).jpeg({ quality: 92 }).toBuffer();
   }
 
   private async createWatermarkOverlay(
@@ -132,7 +175,7 @@ export class SharpTransformService implements OnModuleInit {
 
     // Configuración de texto
     const fontPx = Math.max(10, Math.round(options.fontPx ?? 20));
-    const text = options.watermarkText ?? 'fotocorredor.com';
+    const text = options.watermarkText ?? 'lucilamon.com';
     const spacing = Math.max(12, Math.round(options.spacingPx ?? 48));
     const angle = (options.angleDeg ?? -32) * Math.PI / 180; // Convertir a radianes
 

@@ -9,6 +9,17 @@ export class CloudinaryService {
   private readonly logger = new Logger(CloudinaryService.name);
 
   constructor(private configService: ConfigService) {
+    if (
+      this.configService.get('NODE_ENV') === 'production'
+      && this.configService.get('STORAGE_PROVIDER', 'cloudinary') === 'cloudinary'
+      && ![
+        this.configService.get('CLOUDINARY_CLOUD_NAME'),
+        this.configService.get('CLOUDINARY_API_KEY'),
+        this.configService.get('CLOUDINARY_API_SECRET'),
+      ].every(Boolean)
+    ) {
+      throw new Error('Las credenciales de Cloudinary son obligatorias cuando STORAGE_PROVIDER=cloudinary');
+    }
     cloudinary.config({
       cloud_name: this.configService.get('CLOUDINARY_CLOUD_NAME'),
       api_key: this.configService.get('CLOUDINARY_API_KEY'),
@@ -32,6 +43,8 @@ export class CloudinaryService {
       
       const result = await cloudinary.uploader.upload(`data:${file.mimetype};base64,${file.buffer.toString('base64')}`, {
         resource_type: 'auto',
+        type: 'authenticated',
+        access_mode: 'authenticated',
         folder,
         public_id: photoId,
         format: 'jpg',
@@ -43,8 +56,8 @@ export class CloudinaryService {
       this.logger.log(`Foto subida a Cloudinary: ${result.public_id}`);
 
       return {
-        cloudinaryId: result.public_id,
-        originalUrl: result.secure_url,
+        cloudinaryId: this.encodeOriginalId(result.public_id),
+        originalUrl: `cloudinary://authenticated/${result.public_id}`,
         width: result.width,
         height: result.height,
       };
@@ -66,6 +79,7 @@ export class CloudinaryService {
 
   async generateThumbnail(cloudinaryId: string, eventId: string, photoId: string): Promise<string> {
     try {
+      const source = this.decodeOriginalId(cloudinaryId);
       const folder = CLOUDINARY_FOLDERS.THUMB(eventId);
       const targetPublicId = photoId; // Solo el photoId, no la carpeta completa
       
@@ -73,7 +87,9 @@ export class CloudinaryService {
 
       // Create thumbnail by uploading transformed version
       const result = await cloudinary.uploader.upload(
-        cloudinary.url(cloudinaryId, {
+        cloudinary.url(source.publicId, {
+          type: source.type,
+          sign_url: source.type === 'authenticated',
           transformation: [
             { width: 800, crop: 'limit' },
             { quality: 70 },
@@ -105,6 +121,7 @@ export class CloudinaryService {
 
   async generateWatermark(cloudinaryId: string, eventId: string, photoId: string): Promise<string> {
     try {
+      const source = this.decodeOriginalId(cloudinaryId);
       const folder = CLOUDINARY_FOLDERS.WATERMARK(eventId);
       const targetPublicId = photoId; // Solo el photoId, no la carpeta completa
       
@@ -112,7 +129,9 @@ export class CloudinaryService {
 
       // Create watermark by uploading transformed version
       const result = await cloudinary.uploader.upload(
-        cloudinary.url(cloudinaryId, {
+        cloudinary.url(source.publicId, {
+          type: source.type,
+          sign_url: source.type === 'authenticated',
           transformation: [
             { width: 2000, crop: 'limit' },
             { quality: 80 },
@@ -145,7 +164,8 @@ export class CloudinaryService {
   }
 
   async getOptimizedUrlForOCR(cloudinaryId: string): Promise<string> {
-    return cloudinary.url(cloudinaryId, {
+    const source = this.decodeOriginalId(cloudinaryId);
+    return cloudinary.url(source.publicId, {
       transformation: [
         { width: 3000, crop: 'limit' },
         { quality: 90 },
@@ -153,13 +173,15 @@ export class CloudinaryService {
         { effect: 'auto_contrast:10' }
       ],
       secure: true,
-      sign_url: false,
+      type: source.type,
+      sign_url: source.type === 'authenticated',
     });
   }
 
   async deletePhoto(cloudinaryId: string): Promise<void> {
     try {
-      await cloudinary.uploader.destroy(cloudinaryId);
+      const source = this.decodeOriginalId(cloudinaryId);
+      await cloudinary.uploader.destroy(source.publicId, { type: source.type });
       this.logger.log(`Foto eliminada de Cloudinary: ${cloudinaryId}`);
     } catch (error) {
       this.logger.error(`Error eliminando foto: ${getErrorMessage(error)}`, getErrorStack(error));
@@ -169,21 +191,23 @@ export class CloudinaryService {
 
   async generateSecureDownloadUrl(cloudinaryId: string, expiresIn = 300): Promise<string> {
     const timestamp = Math.round(Date.now() / 1000) + expiresIn;
-    
-    return cloudinary.url(cloudinaryId, {
-      sign_url: true,
-      expires_at: timestamp,
+
+    const source = this.decodeOriginalId(cloudinaryId);
+    return cloudinary.utils.private_download_url(source.publicId, 'jpg', {
       resource_type: 'image',
-      type: 'upload',
-      format: 'jpg',
-      secure: true,
+      type: source.type,
+      expires_at: timestamp,
+      attachment: true,
     });
   }
 
   buildUrl(cloudinaryId: string, transformation?: string): string {
-    return cloudinary.url(cloudinaryId, {
+    const source = this.decodeOriginalId(cloudinaryId);
+    return cloudinary.url(source.publicId, {
       transformation,
       secure: true,
+      type: source.type,
+      sign_url: source.type === 'authenticated',
     });
   }
 
@@ -194,6 +218,7 @@ export class CloudinaryService {
     transformationType: 'original' | 'thumb' | 'watermark',
   ): Promise<string> {
     try {
+      const source = this.decodeOriginalId(sourceId);
       let transformation: string | undefined;
       
       switch (transformationType) {
@@ -207,8 +232,8 @@ export class CloudinaryService {
           transformation = undefined;
       }
 
-      const result = await cloudinary.uploader.explicit(sourceId, {
-        type: 'upload',
+      const result = await cloudinary.uploader.explicit(source.publicId, {
+        type: source.type,
         eager: [{
           folder: targetFolder,
           public_id: targetPublicId,
@@ -279,9 +304,29 @@ export class CloudinaryService {
     }
   }
 
+  async uploadPrivateImage(buffer: Buffer, publicId: string): Promise<{ key: string; url: string }> {
+    const result = await cloudinary.uploader.upload(
+      `data:image/jpeg;base64,${buffer.toString('base64')}`,
+      {
+        resource_type: 'image',
+        type: 'authenticated',
+        access_mode: 'authenticated',
+        public_id: publicId,
+        format: 'jpg',
+        quality: 'auto:good',
+        flags: 'progressive',
+      },
+    );
+    return {
+      key: this.encodeOriginalId(result.public_id),
+      url: `cloudinary://authenticated/${result.public_id}`,
+    };
+  }
+
   async deleteImage(publicId: string): Promise<void> {
     try {
-      await cloudinary.uploader.destroy(publicId);
+      const source = this.decodeOriginalId(publicId);
+      await cloudinary.uploader.destroy(source.publicId, { type: source.type });
       this.logger.log(`Imagen eliminada de Cloudinary: ${publicId}`);
     } catch (error) {
       this.logger.error(`Error eliminando imagen: ${getErrorMessage(error)}`, getErrorStack(error));
@@ -302,5 +347,18 @@ export class CloudinaryService {
       // Return empty array if folder doesn't exist yet
       return [];
     }
+  }
+
+  private encodeOriginalId(publicId: string): string {
+    return `authenticated:${publicId}`;
+  }
+
+  private decodeOriginalId(value: string): { publicId: string; type: 'upload' | 'authenticated' } {
+    const prefix = 'authenticated:';
+    if (value.startsWith(prefix)) {
+      return { publicId: value.slice(prefix.length), type: 'authenticated' };
+    }
+    // Backwards compatibility for assets uploaded before originals became private.
+    return { publicId: value, type: 'upload' };
   }
 }

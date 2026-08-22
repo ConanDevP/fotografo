@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import * as https from 'https';
@@ -11,6 +11,7 @@ export class R2Service {
   private readonly logger = new Logger(R2Service.name);
   private readonly s3Client: S3Client;
   private readonly bucketName: string;
+  private readonly publicBucketName: string;
   private readonly publicUrl: string;
 
   constructor(private configService: ConfigService) {
@@ -19,7 +20,27 @@ export class R2Service {
     const secretAccessKey = this.configService.get('R2_SECRET_ACCESS_KEY');
 
     this.bucketName = this.configService.get('R2_BUCKET_NAME', 'fotografos-images');
+    this.publicBucketName = this.configService.get('R2_PUBLIC_BUCKET_NAME', this.bucketName);
     this.publicUrl = this.configService.get('R2_PUBLIC_URL', '');
+    const isProductionR2 = this.configService.get('NODE_ENV') === 'production'
+      && this.configService.get('STORAGE_PROVIDER', 'cloudinary') === 'r2';
+    if (isProductionR2) {
+      const missing = [
+        ['R2_ACCOUNT_ID', accountId],
+        ['R2_ACCESS_KEY_ID', accessKeyId],
+        ['R2_SECRET_ACCESS_KEY', secretAccessKey],
+        ['R2_BUCKET_NAME', this.bucketName],
+        ['R2_PUBLIC_BUCKET_NAME', this.publicBucketName],
+        ['R2_PUBLIC_URL', this.publicUrl],
+      ].filter(([, value]) => !value).map(([name]) => name);
+      if (missing.length) throw new Error(`Falta configuración R2 de producción: ${missing.join(', ')}`);
+    }
+    if (
+      isProductionR2
+      && this.publicBucketName === this.bucketName
+    ) {
+      throw new Error('R2_PUBLIC_BUCKET_NAME debe ser distinto de R2_BUCKET_NAME en producción');
+    }
 
     // Create HTTPS agent with proper TLS configuration
     const httpsAgent = new https.Agent({
@@ -57,7 +78,8 @@ export class R2Service {
     height: number;
   }> {
     try {
-      const key = `events/${eventId}/original/${photoId}.jpg`;
+      const extension = file.mimetype === 'image/png' ? 'png' : 'jpg';
+      const key = `events/${eventId}/original/${photoId}.${extension}`;
 
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
@@ -73,9 +95,9 @@ export class R2Service {
 
       await this.s3Client.send(command);
 
-      const originalUrl = this.publicUrl
-        ? `${this.publicUrl}/${key}`
-        : `https://${this.bucketName}.r2.dev/${key}`;
+      // Originals must never be persisted as a public delivery URL. The object
+      // key is the canonical reference and downloads are always signed below.
+      const originalUrl = `r2://${this.bucketName}/${key}`;
 
       this.logger.log(`Foto subida a R2: ${key}`);
 
@@ -127,16 +149,65 @@ export class R2Service {
     }
   }
 
+  /**
+   * Datos reales del objeto ya subido. Con subida directa, el tamaño que declara
+   * el cliente no es fiable —de él depende la facturación—, así que se comprueba
+   * contra lo que R2 tiene de verdad.
+   */
+  async headPhoto(key: string): Promise<{ size: number; contentType?: string } | null> {
+    try {
+      const result = await this.s3Client.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+      return { size: Number(result.ContentLength ?? 0), contentType: result.ContentType };
+    } catch (error) {
+      // Un objeto ausente no es un error del sistema: es que el cliente aún no
+      // ha subido ese archivo, o falló al hacerlo.
+      return null;
+    }
+  }
+
+  /**
+   * Lee los primeros bytes de un objeto para validar su firma. Sin esto, con
+   * subida directa cualquier archivo podría acabar almacenado como si fuera una
+   * fotografía, porque el servidor ya no ve el contenido al pasar.
+   */
+  async readHead(key: string, bytes = 16): Promise<Buffer | null> {
+    try {
+      const result = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: this.bucketName,
+          Key: key,
+          Range: `bytes=0-${bytes - 1}`,
+        }),
+      );
+      const chunks: Buffer[] = [];
+      for await (const chunk of result.Body as AsyncIterable<Uint8Array>) {
+        chunks.push(Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    } catch (error) {
+      this.logger.warn(`No se pudieron leer los primeros bytes de ${key}: ${getErrorMessage(error)}`);
+      return null;
+    }
+  }
+
   async generateSecureDownloadUrl(key: string, expiresIn = 300): Promise<string> {
     try {
+      const isExplicitlyPrivate = key.startsWith('private:');
+      const objectKey = isExplicitlyPrivate ? key.slice('private:'.length) : key;
+      // Sponsored assets created by older versions lived in the public bucket.
+      // New private assets carry a marker; originals have always used the private key path.
+      const bucket = !isExplicitlyPrivate && objectKey.includes('/downloads/')
+        ? this.publicBucketName
+        : this.bucketName;
       // Extract filename from key for better download experience
-      const filename = key.split('/').pop() || 'download.jpg';
+      const filename = objectKey.split('/').pop() || 'download.jpg';
 
       const command = new GetObjectCommand({
-        Bucket: this.bucketName,
-        Key: key,
-        ResponseContentDisposition: `attachment; filename="${filename}"`, // Force download with filename
-        ResponseContentType: 'image/jpeg', // Explicitly set content type
+        Bucket: bucket,
+        Key: objectKey,
+        ResponseContentDisposition: `attachment; filename="${filename}"`,
       });
 
       const signedUrl = await getSignedUrl(this.s3Client, command, {
@@ -146,7 +217,7 @@ export class R2Service {
       // IMPORTANT: Do NOT use custom domain for signed URLs with response headers
       // Custom domains (R2 custom domains) do not respect ResponseContentDisposition
       // We must use the direct R2 endpoint URL for downloads to work properly
-      this.logger.log(`Generated download URL for key: ${key}, expires in ${expiresIn}s`);
+      this.logger.log(`Generated download URL for key: ${objectKey}, expires in ${expiresIn}s`);
 
       return signedUrl;
     } catch (error) {
@@ -173,7 +244,7 @@ export class R2Service {
   buildUrl(key: string): string {
     return this.publicUrl
       ? `${this.publicUrl}/${key}`
-      : `https://${this.bucketName}.r2.dev/${key}`;
+      : `https://${this.publicBucketName}.r2.dev/${key}`;
   }
 
   async uploadImage(
@@ -183,7 +254,7 @@ export class R2Service {
   ): Promise<string> {
     try {
       const command = new PutObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: this.publicBucketName,
         Key: key,
         Body: buffer,
         ContentType: contentType,
@@ -202,7 +273,33 @@ export class R2Service {
   }
 
   async deleteImage(key: string): Promise<void> {
-    return this.deletePhoto(key);
+    try {
+      const isPrivate = key.startsWith('private:');
+      const objectKey = isPrivate ? key.slice('private:'.length) : key;
+      await this.s3Client.send(new DeleteObjectCommand({
+        Bucket: isPrivate ? this.bucketName : this.publicBucketName,
+        Key: objectKey,
+      }));
+      this.logger.log(`Imagen eliminada de R2: ${objectKey}`);
+    } catch (error) {
+      this.logger.error(`Error eliminando imagen pública: ${getErrorMessage(error)}`, getErrorStack(error));
+      throw error;
+    }
+  }
+
+  async uploadPrivateImage(
+    buffer: Buffer,
+    key: string,
+    contentType = 'image/jpeg',
+  ): Promise<{ key: string; url: string }> {
+    await this.s3Client.send(new PutObjectCommand({
+      Bucket: this.bucketName,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    }));
+    this.logger.log(`Imagen privada subida a R2: ${key}`);
+    return { key: `private:${key}`, url: `r2://${this.bucketName}/${key}` };
   }
 
   async uploadAvatar(
@@ -213,11 +310,11 @@ export class R2Service {
     url: string;
   }> {
     try {
-      const extension = file.originalname.split('.').pop() || 'jpg';
+      const extension = file.mimetype === 'image/png' ? 'png' : file.mimetype === 'image/webp' ? 'webp' : 'jpg';
       const key = `avatars/${userId}/avatar.${extension}`;
 
       const command = new PutObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: this.publicBucketName,
         Key: key,
         Body: file.buffer,
         ContentType: file.mimetype,
@@ -232,7 +329,7 @@ export class R2Service {
 
       const publicUrl = this.publicUrl
         ? `${this.publicUrl}/${key}`
-        : `https://${this.bucketName}.r2.cloudflarestorage.com/${key}`;
+        : `https://${this.publicBucketName}.r2.dev/${key}`;
 
       this.logger.log(`Avatar subido exitosamente para usuario ${userId}: ${key}`);
 

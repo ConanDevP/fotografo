@@ -172,6 +172,13 @@ export class AdminOrdersService {
       });
     }
 
+    if (status !== 'CANCELLED' || order.status !== 'CREATED') {
+      throw new BadRequestException({
+        code: ERROR_CODES.VALIDATION_ERROR,
+        message: 'El estado de pago no se modifica manualmente. Solo puedes cancelar pedidos todavía no pagados.',
+      });
+    }
+
     const updatedOrder = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: status as any },

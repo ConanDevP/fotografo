@@ -7,6 +7,9 @@ interface FaceKnnIndex {
   vectors: Float32Array[];
   bibs: string[];
   faceEmbeddingIds: string[];
+  /// Foto de origen de cada entrada. Dos caras en una misma fotografía son dos
+  /// personas distintas, así que jamás deben emparejarse entre ellas.
+  photoIds: string[];
 }
 
 export interface FaceKnnMatch {
@@ -20,13 +23,38 @@ export interface FaceKnnMatch {
 export class FaceKnnService {
   private readonly logger = new Logger(FaceKnnService.name);
   private readonly cache = new Map<string, FaceKnnIndex>();
-  private readonly ttlMs = 30 * 1000; // 30 seconds - shorter TTL for faster updates
+  /**
+   * El índice se mantiene al día añadiendo cada asociación nueva en memoria, así
+   * que no caduca por tiempo. Antes se invalidaba antes de cada fotografía y se
+   * reconstruía entero desde la base de datos: como el índice crece con el
+   * evento, el coste total era cuadrático y las últimas fotografías de una
+   * carrera tardaban órdenes de magnitud más que las primeras.
+   */
 
   constructor(private prisma: PrismaService) { }
 
+  /** Solo para cambios que este proceso no ha visto, como una edición manual. */
   invalidate(eventId: string) {
     this.cache.delete(eventId);
     this.logger.log(`[KNN] Cache invalidated for event ${eventId}`);
+  }
+
+  /**
+   * Incorpora una asociación recién creada sin releer el evento entero. Es lo
+   * que permite que el índice siga vivo entre fotografías.
+   */
+  addToIndex(eventId: string, entry: { faceEmbeddingId: string; photoId: string; bib: string; embedding: number[] }) {
+    const index = this.cache.get(eventId);
+    if (!index) return;
+    if (index.faceEmbeddingIds.includes(entry.faceEmbeddingId)) return;
+
+    const vector = this.normalize(entry.embedding);
+    if (!vector) return;
+
+    index.vectors.push(vector);
+    index.bibs.push(entry.bib);
+    index.faceEmbeddingIds.push(entry.faceEmbeddingId);
+    index.photoIds.push(entry.photoId);
   }
 
   invalidateAll() {
@@ -37,7 +65,10 @@ export class FaceKnnService {
   async findMatches(
     eventId: string,
     queryEmbedding: number[],
-    topK: number
+    topK: number,
+    /// Fotografía de la cara consultada: sus propias caras se excluyen porque
+    /// pertenecen necesariamente a otras personas.
+    excludePhotoId?: string,
   ): Promise<FaceKnnMatch[]> {
     const index = await this.getIndex(eventId);
     if (!index || index.vectors.length === 0) {
@@ -54,6 +85,9 @@ export class FaceKnnService {
     for (let i = 0; i < index.vectors.length; i++) {
       const candidate = index.vectors[i];
       if (candidate.length !== queryVector.length) {
+        continue;
+      }
+      if (excludePhotoId && index.photoIds[i] === excludePhotoId) {
         continue;
       }
       const similarity = this.cosineSimilarity(queryVector, candidate);
@@ -73,7 +107,7 @@ export class FaceKnnService {
 
   private async getIndex(eventId: string): Promise<FaceKnnIndex | null> {
     const cached = this.cache.get(eventId);
-    if (cached && Date.now() - cached.createdAt < this.ttlMs) {
+    if (cached) {
       return cached;
     }
 
@@ -99,6 +133,7 @@ export class FaceKnnService {
       },
       select: {
         id: true,
+        photoId: true,
         embedding: true,
         faceBibAssociations: {
           select: {
@@ -116,7 +151,7 @@ export class FaceKnnService {
 
     if (embeddings.length === 0) {
       this.logger.warn(`[KNN] No indexed embeddings available for event ${eventId} - check if FaceBibAssociations exist`);
-      return { createdAt: Date.now(), vectors: [], bibs: [], faceEmbeddingIds: [] };
+      return { createdAt: Date.now(), vectors: [], bibs: [], faceEmbeddingIds: [], photoIds: [] };
     }
 
     this.logger.log(`[KNN] Found ${embeddings.length} embeddings with associations for event ${eventId}`);
@@ -124,6 +159,7 @@ export class FaceKnnService {
     const vectors: Float32Array[] = [];
     const bibs: string[] = [];
     const faceEmbeddingIds: string[] = [];
+    const photoIds: string[] = [];
 
     for (const record of embeddings) {
       const bibAssociation = this.pickBestAssociation(record.faceBibAssociations);
@@ -139,6 +175,7 @@ export class FaceKnnService {
       vectors.push(vector);
       bibs.push(bibAssociation.bib);
       faceEmbeddingIds.push(record.id);
+      photoIds.push(record.photoId);
     }
 
     this.logger.log(
@@ -150,6 +187,7 @@ export class FaceKnnService {
       vectors,
       bibs,
       faceEmbeddingIds,
+      photoIds,
     };
   }
 

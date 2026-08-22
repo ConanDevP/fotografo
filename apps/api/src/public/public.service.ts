@@ -21,8 +21,10 @@ export class PublicService {
   ) {}
 
   async getEventPhotosWithWatermark(eventId: string, page: number = 1, limit: number = 50) {
+    page = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    limit = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 50;
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId, deletedAt: null },
+      where: { id: eventId, deletedAt: null, isPublished: true },
     });
 
     if (!event) {
@@ -36,13 +38,14 @@ export class PublicService {
         where: {
           eventId,
           status: PhotoStatus.PROCESSED,
+          publicationStatus: 'APPROVED',
         },
         include: {
           bibs: true,
           photographer: {
             select: {
               id: true,
-              email: true,
+              name: true,
             },
           },
         },
@@ -56,6 +59,7 @@ export class PublicService {
         where: {
           eventId,
           status: PhotoStatus.PROCESSED,
+          publicationStatus: 'APPROVED',
         },
       }),
     ]);
@@ -93,8 +97,12 @@ export class PublicService {
     page: number = 1,
     limit: number = 20
   ) {
+    page = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    limit = Number.isFinite(limit) ? Math.min(50, Math.max(1, Math.floor(limit))) : 20;
+    bib = typeof bib === 'string' ? bib.trim() : '';
+    if (!/^\d{1,20}$/.test(bib)) throw new NotFoundException('Dorsal no encontrado');
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId, deletedAt: null },
+      where: { id: eventId, deletedAt: null, isPublished: true },
     });
 
     if (!event) {
@@ -108,12 +116,13 @@ export class PublicService {
         where: {
           eventId,
           status: PhotoStatus.PROCESSED,
+          publicationStatus: 'APPROVED',
           bibs: { some: { bib } },
         },
         include: {
           bibs: { where: { bib } },
           photographer: {
-            select: { id: true, email: true },
+            select: { id: true, name: true },
           },
         },
         orderBy: { takenAt: 'desc' },
@@ -124,6 +133,7 @@ export class PublicService {
         where: {
           eventId,
           status: PhotoStatus.PROCESSED,
+          publicationStatus: 'APPROVED',
           bibs: { some: { bib } },
         },
       }),
@@ -158,14 +168,22 @@ export class PublicService {
 
   async getEventPublic(eventId: string) {
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId, deletedAt: null },
+      where: { id: eventId, deletedAt: null, isPublished: true },
       include: {
         owner: {
-          select: { id: true, email: true, role: true },
+          select: { id: true, role: true },
+        },
+        workspace: {
+          select: { id: true, name: true, slug: true, logoUrl: true, coverUrl: true, brandTheme: true },
+        },
+        eventSponsors: {
+          where: { status: 'ACTIVE' },
+          orderBy: { priority: 'desc' },
+          include: { sponsor: { select: { id: true, name: true, logoUrl: true, websiteUrl: true } } },
         },
         _count: {
           select: {
-            photos: { where: { status: PhotoStatus.PROCESSED } },
+            photos: { where: { status: PhotoStatus.PROCESSED, publicationStatus: 'APPROVED' } },
           },
         },
       },
@@ -183,24 +201,32 @@ export class PublicService {
       location: event.location,
       imageUrl: event.imageUrl,
       owner: event.owner,
+      workspace: event.workspace,
+      commerceMode: event.commerceMode,
+      pricing: event.pricing,
+      isFreeDownload: event.isFreeDownload,
+      sponsorOverlayEnabled: event.sponsorOverlayEnabled,
+      sponsors: event.eventSponsors.map(item => item.sponsor),
       photoCount: event._count.photos,
       createdAt: event.createdAt,
     };
   }
 
   async getEventsPublic(page: number = 1, limit: number = 20) {
+    page = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    limit = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 20;
     const skip = (page - 1) * limit;
 
     const [events, total] = await Promise.all([
       this.prisma.event.findMany({
-        where: { deletedAt: null },
+        where: { deletedAt: null, isPublished: true },
         include: {
           owner: {
-            select: { id: true, email: true, role: true },
+            select: { id: true, role: true },
           },
           _count: {
             select: {
-              photos: { where: { status: PhotoStatus.PROCESSED } },
+              photos: { where: { status: PhotoStatus.PROCESSED, publicationStatus: 'APPROVED' } },
             },
           },
         },
@@ -208,7 +234,9 @@ export class PublicService {
         skip,
         take: limit,
       }),
-      this.prisma.event.count({ where: { deletedAt: null } }),
+      this.prisma.event.count({
+        where: { deletedAt: null, isPublished: true },
+      }),
     ]);
 
     const items = events.map(event => ({
@@ -247,8 +275,10 @@ export class PublicService {
       FROM photos p
       INNER JOIN events e ON p.event_id = e.id
       WHERE p.status = 'PROCESSED'
+        AND p.publication_status = 'APPROVED'
         AND p.watermark_url IS NOT NULL
         AND e.deleted_at IS NULL
+        AND e.is_published = true
       ORDER BY RANDOM()
       LIMIT ${safeLimit}
     `;
@@ -267,9 +297,17 @@ export class PublicService {
   // Real platform stats for the landing page
   async getPublicStats() {
     const [photoCount, eventCount, photographerCount, athleteCount] = await Promise.all([
-      this.prisma.photo.count({ where: { status: PhotoStatus.PROCESSED } }),
-      this.prisma.event.count({ where: { deletedAt: null } }),
-      this.prisma.user.count({ where: { role: UserRole.PHOTOGRAPHER } }),
+      this.prisma.photo.count({
+        where: {
+          status: PhotoStatus.PROCESSED,
+          publicationStatus: 'APPROVED',
+          event: { deletedAt: null, isPublished: true },
+        },
+      }),
+      this.prisma.event.count({
+        where: { deletedAt: null, isPublished: true },
+      }),
+      this.prisma.workspace.count({ where: { isPublished: true, deletedAt: null } }),
       this.prisma.user.count({ where: { role: UserRole.ATHLETE } }),
     ]);
 

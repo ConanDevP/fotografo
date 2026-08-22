@@ -9,6 +9,7 @@ import { SharpTransformService } from '../common/services/sharp-transform.servic
 import { StorageService } from '../common/services/storage.service';
 import { QueueService } from '../common/services/queue.service';
 import { PaymentGatewayFactory } from './factories/payment-gateway.factory';
+import { BillingModule } from '../billing/billing.module';
 // PayPal comentado temporalmente
 // import { PayPalGatewayService } from './gateways/paypal-gateway.service';
 // import { PayPalPartnerService } from './gateways/paypal-partner.service';
@@ -71,6 +72,7 @@ const paypalPartnerProvider = {
 */
 
 @Module({
+  imports: [BillingModule],
   controllers: [PaymentsController, StripeOnboardingController],
   providers: [
     PaymentsService,

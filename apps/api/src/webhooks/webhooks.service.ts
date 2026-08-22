@@ -135,12 +135,7 @@ export class WebhooksService {
 
       this.logger.log(`Processing Stripe webhook: ${event.type}`);
 
-      // Log full event for debugging
-      this.logger.log(`Stripe webhook event data: ${JSON.stringify({
-        type: event.type,
-        id: event.id,
-        data: event.data.object
-      }, null, 2)}`);
+      this.logger.debug(`Stripe webhook verificado: ${event.id}`);
 
       switch (event.type) {
         // Payment events
@@ -150,16 +145,13 @@ export class WebhooksService {
 
           if (session.payment_status === 'paid') {
             this.logger.log(`Processing paid session ${session.id}...`);
-            try {
-              await this.paymentsService.confirmPaymentFromWebhook(
-                session.id,
-                PaymentGateway.STRIPE,
-                event
-              );
-              this.logger.log(`Successfully confirmed payment for session ${session.id}`);
-            } catch (error) {
-              this.logger.error(`Error confirming payment for session ${session.id}:`, error);
-            }
+            const result = await this.paymentsService.confirmPaymentFromWebhook(
+              session.id,
+              PaymentGateway.STRIPE,
+              event
+            );
+            if (!result.success) throw new Error(`No se pudo confirmar la sesión ${session.id}`);
+            this.logger.log(`Successfully confirmed payment for session ${session.id}`);
           } else {
             this.logger.log(`Session ${session.id} not paid yet, status: ${session.payment_status}`);
           }
@@ -189,53 +181,47 @@ export class WebhooksService {
           break;
         }
 
+        // ── Contracargos ────────────────────────────────────────────────
+        // El banco del comprador retiene el importe. Hay que recuperar lo ya
+        // transferido al fotógrafo y responder con la prueba de entrega antes
+        // de que venza el plazo.
+        case 'charge.dispute.created': {
+          const dispute = event.data.object as Stripe.Dispute;
+          this.logger.warn(`Contracargo abierto: ${dispute.id} (${dispute.amount} ${dispute.currency})`);
+          await this.paymentsService.handleDisputeOpened({
+            disputeId: dispute.id,
+            chargeId: typeof dispute.charge === 'string' ? dispute.charge : dispute.charge.id,
+            amountCents: dispute.amount,
+            feeCents: Math.abs(
+              dispute.balance_transactions?.reduce((sum, item) => sum + (item.fee || 0), 0) || 0,
+            ),
+            reason: dispute.reason,
+          });
+          break;
+        }
+
+        case 'charge.dispute.closed': {
+          const dispute = event.data.object as Stripe.Dispute;
+          await this.paymentsService.handleDisputeClosed(dispute.id, dispute.status);
+          break;
+        }
+
         // Payment intent events (for more granular tracking)
         case 'payment_intent.succeeded': {
           const paymentIntent = event.data.object as Stripe.PaymentIntent;
-          this.logger.log(`Payment intent succeeded: ${paymentIntent.id}, metadata: ${JSON.stringify(paymentIntent.metadata)}`);
+          this.logger.log(`Payment intent succeeded: ${paymentIntent.id}`);
 
-          // Confirm payment using orderId from metadata
           if (paymentIntent.metadata?.orderId) {
             const orderId = paymentIntent.metadata.orderId;
-            this.logger.log(`Confirming payment for orderId: ${orderId}`);
-
-            try {
-              // Update order directly since we have the orderId
-              const order = await this.prisma.order.findUnique({
-                where: { id: orderId },
-                include: {
-                  items: { include: { photo: true } },
-                  event: { select: { name: true } },
-                  user: { select: { email: true } },
-                },
-              });
-
-              if (!order) {
-                this.logger.error(`Order not found: ${orderId}`);
-                break;
-              }
-
-              if (order.status === 'PAID') {
-                this.logger.log(`Order ${orderId} already paid, skipping`);
-                break;
-              }
-
-              // Update order to PAID
-              await this.prisma.order.update({
-                where: { id: orderId },
-                data: {
-                  status: 'PAID',
-                  stripeSessionId: paymentIntent.id, // Store payment intent ID
-                },
-              });
-
-              this.logger.log(`✅ Order ${orderId} marked as PAID via payment_intent.succeeded`);
-
-            } catch (error) {
-              this.logger.error(`Error confirming payment for order ${orderId}:`, error);
-            }
+            const result = await this.paymentsService.confirmStripeIntentFromWebhook({
+              orderId,
+              paymentIntentId: paymentIntent.id,
+              amountReceived: paymentIntent.amount_received,
+              currency: paymentIntent.currency,
+            });
+            if (!result.success) throw new Error(`No se pudo confirmar el PaymentIntent ${paymentIntent.id}`);
           } else {
-            this.logger.warn(`No orderId in payment_intent metadata`);
+            this.logger.warn('PaymentIntent sin orderId en metadata');
           }
           break;
         }

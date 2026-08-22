@@ -1,9 +1,11 @@
-import { IsString, IsOptional, IsNumber, Min, Max, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsNumber, Min, Max, IsNotEmpty, Matches, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class FaceSearchDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(8_000_000)
+  @Matches(/^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=\r\n]+$/)
   userImageBase64: string;
 
   @IsOptional()

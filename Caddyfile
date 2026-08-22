@@ -1,0 +1,31 @@
+{
+	email {$ACME_EMAIL}
+	on_demand_tls {
+		ask http://api:8080/v1/workspaces/internal/tls/authorize
+	}
+	servers {
+		strict_sni_host on
+	}
+}
+
+(lucilamon_app) {
+	encode zstd gzip
+
+	@internal path /v1/workspaces/internal/*
+	respond @internal 404
+
+	@backend path /v1/*
+	reverse_proxy @backend api:8080
+	reverse_proxy web:3000
+}
+
+{$PLATFORM_DOMAINS:lucilamon.com, www.lucilamon.com} {
+	import lucilamon_app
+}
+
+https:// {
+	tls {
+		on_demand
+	}
+	import lucilamon_app
+}

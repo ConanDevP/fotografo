@@ -1,10 +1,14 @@
-import { IsString, IsEmail, MinLength } from 'class-validator';
+import { IsString, IsEmail, Matches, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class SubscribeToBibDto {
   @IsString({ message: 'El dorsal debe ser texto' })
-  @MinLength(1, { message: 'El dorsal no puede estar vacío' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Matches(/^\d{1,20}$/, { message: 'El dorsal debe contener entre 1 y 20 dígitos' })
   bib: string;
 
   @IsEmail({}, { message: 'Email debe ser válido' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
+  @MaxLength(254)
   email: string;
 }

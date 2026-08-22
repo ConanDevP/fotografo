@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
@@ -19,7 +19,22 @@ export class UsersService {
 
   async create(userData: CreateUserData) {
     return this.prisma.user.create({
-      data: userData,
+      data: { ...userData, email: userData.email.trim().toLowerCase() },
+    });
+  }
+
+  async createFirstAdmin(userData: CreateUserData) {
+    return this.prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('lucilamon-initial-admin'))`;
+      const adminCount = await tx.user.count({ where: { role: UserRole.ADMIN } });
+      if (adminCount > 0) {
+        throw new BadRequestException('El administrador inicial ya fue creado');
+      }
+      const email = userData.email.trim().toLowerCase();
+      if (await tx.user.findUnique({ where: { email }, select: { id: true } })) {
+        throw new BadRequestException('El usuario ya existe');
+      }
+      return tx.user.create({ data: { ...userData, email, role: UserRole.ADMIN } });
     });
   }
 
@@ -40,7 +55,7 @@ export class UsersService {
 
   async findByEmail(email: string) {
     return this.prisma.user.findUnique({
-      where: { email },
+      where: { email: email.trim().toLowerCase() },
     });
   }
 

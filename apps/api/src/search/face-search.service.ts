@@ -11,6 +11,7 @@ import {
 } from '@shared/types';
 import { FACE_RECOGNITION, ERROR_CODES } from '@shared/constants';
 import { getErrorMessage } from '@shared/utils';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class FaceSearchService {
@@ -21,6 +22,7 @@ export class FaceSearchService {
     private storageService: StorageService,
     private pythonFaceApiService: PythonFaceApiService,
     private identityResolver: IdentityResolverService,
+    private configService: ConfigService,
   ) {}
 
   async searchPhotosByFace(
@@ -32,7 +34,7 @@ export class FaceSearchService {
     try {
       // ── Verify event ──
       const event = await this.prisma.event.findUnique({
-        where: { id: eventId },
+        where: { id: eventId, deletedAt: null, isPublished: true },
         select: { id: true, name: true },
       });
       if (!event) {
@@ -42,7 +44,7 @@ export class FaceSearchService {
         });
       }
 
-      if (!this.pythonFaceApiService.isReadySync()) {
+      if (!(await this.pythonFaceApiService.isReady())) {
         throw new BadRequestException({
           code: ERROR_CODES.INTERNAL_ERROR,
           message: 'Face recognition service is not available',
@@ -54,14 +56,24 @@ export class FaceSearchService {
 
       const base64Data = searchRequest.userImageBase64.split(',').pop() || '';
       const imageBuffer = Buffer.from(base64Data, 'base64');
+      if (imageBuffer.length === 0 || imageBuffer.length > 6 * 1024 * 1024) {
+        throw new BadRequestException('La selfie debe pesar menos de 6 MB');
+      }
+
+      let normalizedImage: Buffer;
+      try {
+        normalizedImage = await this.storageService.prepareFaceSearchImage(imageBuffer);
+      } catch {
+        throw new BadRequestException('La selfie no es una imagen JPG, PNG o WEBP válida');
+      }
 
       const tempImageKey = `temp/search/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
-      await this.storageService.uploadImage(imageBuffer, tempImageKey);
-      const tempImageUrl = await this.storageService.generateSecureDownloadUrl(tempImageKey, 900);
+      const temporaryImage = await this.storageService.uploadPrivateTemporaryImage(normalizedImage, tempImageKey);
 
       let userFaceDescriptor: Float32Array | null = null;
 
       try {
+        const tempImageUrl = await this.storageService.generateSecureDownloadUrl(temporaryImage.key, 300);
         const faces = await this.pythonFaceApiService.detectAllFaces(tempImageUrl, 1);
         if (faces.length > 0) {
           userFaceDescriptor = new Float32Array(faces[0].embedding);
@@ -71,7 +83,7 @@ export class FaceSearchService {
         }
       } finally {
         try {
-          await this.storageService.deleteImage(tempImageKey);
+          await this.storageService.deleteImage(temporaryImage.key);
         } catch (cleanupError) {
           this.logger.warn(`Failed to cleanup temp image ${tempImageKey}:`, cleanupError);
         }
@@ -86,77 +98,102 @@ export class FaceSearchService {
         };
       }
 
-      // ── Step 2: Load all face embeddings for this event ──
-      // We load them all at once and do in-memory distance calculation.
-      // At 10k photos × ~1.5 faces = ~15k embeddings, each 512 floats × 4 bytes = ~30MB.
-      // This is intentional — Redis KNN is used for inference (worker side);
-      // for search latency we want a single DB round-trip.
-      const eventFaces = await this.prisma.faceEmbedding.findMany({
-        where: { eventId },
-        select: {
-          id: true,
-          embedding: true,
-          confidence: true,
-          bbox: true,
-          photoId: true,
-          photo: {
-            select: {
-              id: true,
-              thumbUrl: true,
-              watermarkUrl: true,
-              originalUrl: true,
-              takenAt: true,
-              createdAt: true,
-              status: true,
-            },
-          },
-        },
-      });
-
-      this.logger.log(`Comparing selfie against ${eventFaces.length} face embeddings`);
-
-      if (eventFaces.length === 0) {
-        return {
-          matches: [],
-          total: 0,
-          searchTime: Date.now() - startTime,
-          userFaceDetected: true,
-        };
-      }
-
-      // ── Step 3: Distance comparison ──
+      // ── Step 2: Compare in bounded batches so a large event cannot exhaust API memory ──
       const threshold = searchRequest.threshold ?? FACE_RECOGNITION.DEFAULT_THRESHOLD;
       const userDescriptor = Array.from(userFaceDescriptor);
-
-      // directMatches: photos where the face is directly visible and similar
+      type SearchPhoto = {
+        id: string;
+        thumbUrl: string | null;
+        watermarkUrl: string | null;
+        takenAt: Date | null;
+        createdAt: Date;
+        status: string;
+      };
       const directMatchMap = new Map<
         string,
-        { faceId: string; similarity: number; confidence: number; bbox: any; photo: (typeof eventFaces)[0]['photo'] }
+        { faceId: string; similarity: number; confidence: number; bbox: any; photo: SearchPhoto }
       >();
 
-      for (const ef of eventFaces) {
-        if (ef.photo.status !== 'PROCESSED') continue;
+      // ── Búsqueda por vecino más cercano dentro de Postgres ──
+      //
+      // Antes se traían todos los embeddings del evento y se comparaba en Node:
+      // decenas de MB por consulta y un fallo en firme al superar cierto tamaño.
+      // Con el índice HNSW, Postgres devuelve solo los candidatos y no se
+      // transfiere ningún vector. `<=>` es distancia coseno, la misma métrica
+      // que se usaba antes, así que el umbral conserva su significado.
+      const maxCandidates = Math.max(
+        1,
+        Number(this.configService.get('FACE_SEARCH_MAX_CANDIDATES', 200)) || 200,
+      );
+      const queryVector = `[${userDescriptor.join(',')}]`;
 
-        const distance = this.pythonFaceApiService.calculateDistance(
-          userDescriptor,
-          ef.embedding.map((d) => Number(d)),
-        );
+      // `hnsw.ef_search` es la anchura del recorrido del índice y por defecto
+      // vale 40. Con un LIMIT mayor, pgvector devolvería menos candidatos de los
+      // pedidos y perdería coincidencias buenas, así que se sube por transacción.
+      const rows = await this.prisma.$transaction(async tx => {
+        await tx.$executeRawUnsafe(`SET LOCAL hnsw.ef_search = ${Math.max(40, maxCandidates * 2)}`);
+        return tx.$queryRaw<Array<{
+        id: string;
+        photo_id: string;
+        confidence: any;
+        bbox: any;
+        distance: number;
+        p_id: string;
+        thumb_url: string | null;
+        watermark_url: string | null;
+        taken_at: Date | null;
+        created_at: Date;
+        status: string;
+      }>>`
+        SELECT fe."id",
+               fe."photo_id",
+               fe."confidence",
+               fe."bounding_box" AS bbox,
+               (fe."embedding_vec" <=> ${queryVector}::vector) AS distance,
+               p."id" AS p_id,
+               p."thumb_url",
+               p."watermark_url",
+               p."taken_at",
+               p."created_at",
+               p."status"::text AS status
+        FROM "face_embeddings" fe
+        JOIN "photos" p ON p."id" = fe."photo_id"
+        WHERE fe."event_id" = ${eventId}::uuid
+          AND fe."embedding_vec" IS NOT NULL
+          AND p."status" = 'PROCESSED'
+          AND p."publication_status" = 'APPROVED'
+        ORDER BY fe."embedding_vec" <=> ${queryVector}::vector
+        LIMIT ${maxCandidates}
+      `;
+      });
 
+      const comparedFaces = rows.length;
+      for (const row of rows) {
+        const distance = Number(row.distance);
         if (distance > threshold) continue;
-
         const similarity = Number((1 - distance).toFixed(3));
-        const existing = directMatchMap.get(ef.photoId);
-
-        // Keep the highest-similarity face per photo
+        const existing = directMatchMap.get(row.photo_id);
         if (!existing || similarity > existing.similarity) {
-          directMatchMap.set(ef.photoId, {
-            faceId: ef.id,
+          directMatchMap.set(row.photo_id, {
+            faceId: row.id,
             similarity,
-            confidence: Number(ef.confidence),
-            bbox: ef.bbox,
-            photo: ef.photo,
+            confidence: Number(row.confidence),
+            bbox: row.bbox,
+            photo: {
+              id: row.p_id,
+              thumbUrl: row.thumb_url,
+              watermarkUrl: row.watermark_url,
+              takenAt: row.taken_at,
+              createdAt: row.created_at,
+              status: row.status,
+            },
           });
         }
+      }
+
+      this.logger.log(`Compared selfie against ${comparedFaces} face embeddings`);
+      if (comparedFaces === 0) {
+        return { matches: [], total: 0, searchTime: Date.now() - startTime, userFaceDetected: true };
       }
 
       this.logger.log(`Direct face matches: ${directMatchMap.size} photos`);
@@ -201,7 +238,7 @@ export class FaceSearchService {
             bbox: dm.bbox as [number, number, number, number],
             thumbUrl: p.thumbUrl ?? '',
             watermarkUrl: p.watermarkUrl ?? '',
-            originalUrl: p.originalUrl ?? '',
+            originalUrl: '',
             discoveryType: 'FACE_DIRECT',
           });
         } else {
@@ -258,8 +295,16 @@ export class FaceSearchService {
     totalFacesDetected: number;
     averageFacesPerPhoto: number;
   }> {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId, deletedAt: null, isPublished: true },
+      select: { id: true },
+    });
+    if (!event) throw new NotFoundException('Evento no encontrado');
+
     const [totalPhotos, faceStats] = await Promise.all([
-      this.prisma.photo.count({ where: { eventId, status: 'PROCESSED' } }),
+      this.prisma.photo.count({
+        where: { eventId, status: 'PROCESSED', publicationStatus: 'APPROVED' },
+      }),
       this.prisma.faceEmbedding.groupBy({
         by: ['photoId'],
         where: { eventId },
@@ -285,7 +330,7 @@ export class FaceSearchService {
       photoId: result.photoId,
       thumbUrl: result.thumbUrl ?? '',
       watermarkUrl: result.watermarkUrl ?? '',
-      originalUrl: result.originalUrl ?? '',
+      originalUrl: '',
       confidence: result.similarity ?? result.confidence,
       takenAt: new Date().toISOString(),
     }));
@@ -301,7 +346,7 @@ function resolvedPhotoToFaceResult(rp: ResolvedPhoto): FaceSearchResult {
     bbox: rp.faceBbox ?? ([] as unknown as [number, number, number, number]),
     thumbUrl: rp.thumbUrl,
     watermarkUrl: rp.watermarkUrl,
-    originalUrl: rp.originalUrl,
+    originalUrl: '',
     discoveryType: rp.discoveryType,
     detectedBibs: rp.detectedBibs,
   };

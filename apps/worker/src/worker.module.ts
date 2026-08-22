@@ -25,6 +25,8 @@ import { SpatialMatchingService } from './services/spatial-matching.service';
 import { AthleteSignatureService } from './services/athlete-signature.service';
 import { FaceKnnService } from './services/face-knn.service';
 import { RescueJobsService } from './services/rescue-jobs.service';
+import { BatchProgressService } from './services/batch-progress.service';
+import { validateEnvironment } from '../../api/src/common/config/validate-environment';
 
 import { QUEUES } from '@shared/constants';
 
@@ -32,6 +34,7 @@ import { QUEUES } from '@shared/constants';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnvironment,
     }),
     BullModule.forRoot({
       connection: (() => {
@@ -79,6 +82,7 @@ import { QUEUES } from '@shared/constants';
     AthleteSignatureService,
     FaceKnnService,
     RescueJobsService,
+    BatchProgressService,
   ],
 })
 export class WorkerModule {}

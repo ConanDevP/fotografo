@@ -52,12 +52,13 @@ export class OcrGeminiService {
       
       this.logger.log(`Iniciando OCR con ${strategy} para imagen: ${imageUrl}`);
 
+      const imagePayload = await this.fetchImageAsBase64(imageUrl);
       const result = await model.generateContent([
         prompt,
         {
           inlineData: {
             mimeType: "image/jpeg",
-            data: await this.fetchImageAsBase64(imageUrl),
+            data: imagePayload.base64,
           },
         },
       ]);
@@ -86,7 +87,7 @@ export class OcrGeminiService {
       return {
         bibs: processedBibs,
         notes: validated.notes,
-        imageDimensions: this.geminiImageDimensions || undefined,
+        imageDimensions: imagePayload.dimensions,
         usage: usageMetadata ? {
           promptTokens: usageMetadata.promptTokenCount || 0,
           candidatesTokens: usageMetadata.candidatesTokenCount || 0,
@@ -242,9 +243,7 @@ Responde SOLO en formato JSON:
     return true;
   }
 
-  private geminiImageDimensions: { width: number; height: number } | null = null;
-
-  private async fetchImageAsBase64(url: string): Promise<string> {
+  private async fetchImageAsBase64(url: string): Promise<{ base64: string; dimensions: { width: number; height: number } }> {
     try {
       const response = await fetch(url);
       if (!response.ok) {
@@ -294,10 +293,10 @@ Responde SOLO en formato JSON:
         );
       }
 
-      // Guardar dimensiones para incluirlas en la respuesta
-      this.geminiImageDimensions = { width: finalWidth, height: finalHeight };
-
-      return processedBuffer.toString('base64');
+      return {
+        base64: processedBuffer.toString('base64'),
+        dimensions: { width: finalWidth, height: finalHeight },
+      };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       throw new Error(`Error descargando imagen: ${errorMessage}`);
