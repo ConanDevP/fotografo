@@ -720,6 +720,85 @@ export class BillingService {
     };
   }
 
+  /**
+   * Lo que ha ganado un espacio y en qué estado está cada importe.
+   *
+   * Se lee del libro de movimientos, no de los pedidos: un pedido tiene un
+   * total, pero lo que el fotógrafo cobra es su asiento, ya descontadas la
+   * comisión de la plataforma y la de la pasarela. Es la única cifra que
+   * coincide con lo que le llega al banco.
+   */
+  async earnings(
+    workspaceId: string,
+    userId: string,
+    userRole: UserRole,
+    options: { limit?: number; eventId?: string } = {},
+  ) {
+    if (userRole !== UserRole.ADMIN) {
+      await this.workspaces.assertAccess(workspaceId, userId, [
+        WorkspaceRole.OWNER,
+        WorkspaceRole.ADMIN,
+        WorkspaceRole.ANALYST,
+      ]);
+    }
+
+    const where = {
+      workspaceId,
+      ...(options.eventId ? { eventId: options.eventId } : {}),
+    };
+
+    const [grouped, entries] = await Promise.all([
+      this.prisma.ledgerEntry.groupBy({
+        by: ['type', 'status'],
+        where,
+        _sum: { amountCents: true },
+        _count: true,
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(options.limit ?? 50, 200),
+        select: {
+          id: true,
+          orderId: true,
+          type: true,
+          status: true,
+          amountCents: true,
+          currency: true,
+          createdAt: true,
+          paidOutAt: true,
+          failureReason: true,
+          event: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
+
+    const sum = (predicate: (row: (typeof grouped)[number]) => boolean) =>
+      grouped.filter(predicate).reduce((total, row) => total + (row._sum.amountCents || 0), 0);
+
+    // Lo que gana el espacio son sus asientos de ingreso; el resto del reparto
+    // pertenece a la plataforma o a la pasarela y no se le suma.
+    const ownTypes = ['PHOTOGRAPHER_EARNING', 'ORGANIZER_COMMISSION'];
+    const isOwn = (row: (typeof grouped)[number]) => ownTypes.includes(row.type);
+
+    return {
+      summary: {
+        // Cobrado y transferido a su cuenta.
+        paidOutCents: sum(row => isOwn(row) && row.status === 'PAID_OUT'),
+        // Cobrado al comprador, pendiente de transferir.
+        pendingCents: sum(row => isOwn(row) && (row.status === 'PENDING' || row.status === 'AVAILABLE')),
+        // Retenido por un contracargo o devuelto.
+        reversedCents: sum(row => isOwn(row) && row.status === 'REVERSED'),
+        // Lo que se quedó la plataforma y la pasarela, para que cuadre la cuenta.
+        platformFeeCents: Math.abs(sum(row => row.type === 'PLATFORM_FEE')),
+        processorFeeCents: Math.abs(sum(row => row.type === 'PROCESSOR_FEE')),
+        grossCents: sum(row => row.type === 'GROSS_SALE'),
+        currency: entries[0]?.currency || 'USD',
+      },
+      entries,
+    };
+  }
+
   formatBytes(value: bigint | number): string {
     const bytes = typeof value === 'bigint' ? Number(value) : value;
     if (bytes < 1024) return `${bytes} B`;

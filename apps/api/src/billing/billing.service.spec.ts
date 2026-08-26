@@ -177,6 +177,70 @@ describe('BillingService', () => {
     });
   });
 
+  describe('ingresos', () => {
+    const givenLedger = (rows: Array<{ type: string; status: string; total: number }>) => {
+      prisma.ledgerEntry = {
+        groupBy: jest.fn().mockResolvedValue(
+          rows.map(row => ({ type: row.type, status: row.status, _sum: { amountCents: row.total }, _count: 1 })),
+        ),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+    };
+
+    it('separa lo transferido de lo que sigue pendiente', async () => {
+      givenLedger([
+        { type: 'PHOTOGRAPHER_EARNING', status: 'PAID_OUT', total: 7000 },
+        { type: 'PHOTOGRAPHER_EARNING', status: 'AVAILABLE', total: 2500 },
+      ]);
+
+      const result = await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
+
+      expect(result.summary.paidOutCents).toBe(7000);
+      expect(result.summary.pendingCents).toBe(2500);
+    });
+
+    it('no suma al fotógrafo las comisiones de plataforma ni pasarela', async () => {
+      // Si se sumaran, vería como suyo un dinero que nunca va a recibir.
+      givenLedger([
+        { type: 'PHOTOGRAPHER_EARNING', status: 'PAID_OUT', total: 7390 },
+        { type: 'PLATFORM_FEE', status: 'PAID_OUT', total: -1200 },
+        { type: 'PROCESSOR_FEE', status: 'PAID_OUT', total: -590 },
+        { type: 'GROSS_SALE', status: 'PAID_OUT', total: 10000 },
+      ]);
+
+      const result = await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
+
+      expect(result.summary.paidOutCents).toBe(7390);
+      // Las comisiones se informan en positivo aunque se guarden en negativo.
+      expect(result.summary.platformFeeCents).toBe(1200);
+      expect(result.summary.processorFeeCents).toBe(590);
+      expect(result.summary.grossCents).toBe(10000);
+    });
+
+    it('cuenta aparte lo retenido por un contracargo', async () => {
+      givenLedger([
+        { type: 'PHOTOGRAPHER_EARNING', status: 'PAID_OUT', total: 5000 },
+        { type: 'PHOTOGRAPHER_EARNING', status: 'REVERSED', total: 1500 },
+      ]);
+
+      const result = await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
+
+      // Lo revertido no debe seguir contando como cobrado.
+      expect(result.summary.paidOutCents).toBe(5000);
+      expect(result.summary.reversedCents).toBe(1500);
+    });
+
+    it('exige permiso sobre el espacio si no es administrador', async () => {
+      givenLedger([]);
+      const workspaces = (service as any).workspaces;
+      workspaces.assertAccess.mockRejectedValueOnce(new ForbiddenException('sin acceso'));
+
+      await expect(service.earnings(WORKSPACE, 'intruso', UserRole.ATHLETE)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
   describe('cambio de plan', () => {
     it('rechaza bajar a un plan que no cubre lo que ya ocupas', async () => {
       prisma.plan.findUnique.mockResolvedValue(arranque);

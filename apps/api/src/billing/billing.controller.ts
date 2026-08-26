@@ -37,6 +37,23 @@ export class BillingController {
     return { data: await this.billing.overview(workspaceId, req.user.id, req.user.role) };
   }
 
+  /** Ingresos del espacio: cuánto se ha cobrado, cuánto se ha transferido y qué falta. */
+  @Get('workspaces/:workspaceId/earnings')
+  @UseGuards(AuthGuard('jwt'))
+  async earnings(
+    @Param('workspaceId') workspaceId: string,
+    @Req() req: any,
+    @Query('eventId') eventId?: string,
+    @Query('limit') limit?: string,
+  ): Promise<ApiResponse> {
+    return {
+      data: await this.billing.earnings(workspaceId, req.user.id, req.user.role, {
+        eventId,
+        limit: limit ? Number(limit) : undefined,
+      }),
+    };
+  }
+
   /** Qué costará publicar este evento en modo compartir, antes de pulsar. */
   @Get('events/:eventId/billing/publication-estimate')
   @UseGuards(AuthGuard('jwt'))
