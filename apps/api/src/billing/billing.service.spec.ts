@@ -6,7 +6,18 @@ import { ConfigService } from '@nestjs/config';
 import { BillingService } from './billing.service';
 import { PrismaService } from '../common/services/prisma.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
+import { PlanSubscriptionsService } from './plan-subscriptions.service';
 import { UserRole } from '@shared/types';
+
+const planSubscriptions = {
+  applyPlan: jest.fn().mockResolvedValue({
+    stripeSubscriptionId: null,
+    stripePlanItemId: null,
+    stripeStorageItemId: null,
+    currentPeriodEnd: null,
+    status: 'ACTIVE',
+  }),
+};
 
 const GB = BigInt(1024) * BigInt(1024) * BigInt(1024);
 const WORKSPACE = 'ws-1';
@@ -65,6 +76,7 @@ describe('BillingService', () => {
         BillingService,
         { provide: PrismaService, useValue: prisma },
         { provide: WorkspacesService, useValue: { assertAccess: jest.fn() } },
+        { provide: PlanSubscriptionsService, useValue: planSubscriptions },
         { provide: ConfigService, useValue: { get: (key: string, fallback?: any) => (key === 'STRIPE_SECRET_KEY' ? 'sk_test_fake' : fallback) } },
       ],
     }).compile();
@@ -190,6 +202,40 @@ describe('BillingService', () => {
       );
     });
 
+    it('no activa el plan si la pasarela rechaza el cobro', async () => {
+      // Guardar antes de cobrar regalaría el plan en cada tarjeta rechazada.
+      prisma.plan.findUnique.mockResolvedValue(profesional);
+      prisma.workspace.findUnique.mockResolvedValue({ storageBytesUsed: BigInt(1) * GB });
+      planSubscriptions.applyPlan.mockRejectedValueOnce(
+        new BadRequestException({ code: 'SUBSCRIPTION_CHARGE_FAILED' }),
+      );
+
+      await expect(
+        service.changePlan(WORKSPACE, 'profesional', 0, 'user-1', UserRole.ADMIN),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.subscription.upsert).not.toHaveBeenCalled();
+    });
+
+    it('guarda los identificadores que devuelve la pasarela', async () => {
+      prisma.plan.findUnique.mockResolvedValue(profesional);
+      prisma.workspace.findUnique.mockResolvedValue({ storageBytesUsed: BigInt(1) * GB });
+      planSubscriptions.applyPlan.mockResolvedValueOnce({
+        stripeSubscriptionId: 'sub_1',
+        stripePlanItemId: 'si_plan',
+        stripeStorageItemId: null,
+        currentPeriodEnd: new Date('2026-09-24T00:00:00Z'),
+        status: 'ACTIVE',
+      });
+
+      await service.changePlan(WORKSPACE, 'profesional', 0, 'user-1', UserRole.ADMIN);
+
+      expect(prisma.subscription.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ stripeSubscriptionId: 'sub_1', stripePlanItemId: 'si_plan' }),
+        }),
+      );
+    });
+
     it('rechaza ampliaciones en un plan que no las admite', async () => {
       prisma.plan.findUnique.mockResolvedValue(arranque);
 
@@ -308,6 +354,7 @@ describe('BillingService', () => {
           BillingService,
           { provide: PrismaService, useValue: prisma },
           { provide: WorkspacesService, useValue: { assertAccess: jest.fn() } },
+        { provide: PlanSubscriptionsService, useValue: planSubscriptions },
           {
             provide: ConfigService,
             useValue: { get: (key: string) => (key === 'DEMO_PAYMENTS' ? 'true' : undefined) },

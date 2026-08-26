@@ -5,6 +5,7 @@ import { Request } from 'express';
 import { Prisma, WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../common/services/prisma.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
+import { BillingService } from '../billing/billing.service';
 import { RecordMetricDto } from './dto/record-metric.dto';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class MetricsService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly workspaces: WorkspacesService,
+    private readonly billing: BillingService,
   ) {}
 
   async record(dto: RecordMetricDto, req: Request, userId?: string) {
@@ -131,8 +133,13 @@ export class MetricsService {
       WorkspaceRole.ADMIN,
       WorkspaceRole.ANALYST,
     ]);
-    const start = from ? new Date(from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const end = to ? new Date(to) : new Date();
+    // Los totales de cabecera los ve todo el mundo: sin ellos el plan gratuito
+    // parecería roto. Lo que se paga es el desglose y elegir el periodo.
+    const { plan } = await this.billing.resolveForWorkspace(workspaceId);
+    const advanced = plan.allowsAdvancedMetrics;
+
+    const start = advanced && from ? new Date(from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const end = advanced && to ? new Date(to) : new Date();
     if (
       Number.isNaN(start.getTime()) ||
       Number.isNaN(end.getTime()) ||
@@ -206,9 +213,14 @@ export class MetricsService {
         sponsorExposures: metrics.SPONSOR_DOWNLOAD_EXPOSURE || 0,
         sponsorClicks: metrics.SPONSOR_CLICK || 0,
       },
-      ledger: Object.fromEntries(ledger.map(entry => [entry.type, entry._sum.amountCents || 0])),
-      events: recentEvents,
-      rawMetrics: metrics,
+      advanced,
+      ...(advanced
+        ? {
+            ledger: Object.fromEntries(ledger.map(entry => [entry.type, entry._sum.amountCents || 0])),
+            events: recentEvents,
+            rawMetrics: metrics,
+          }
+        : {}),
     };
   }
 }

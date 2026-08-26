@@ -131,25 +131,51 @@ export class SharpTransformService implements OnModuleInit {
     const imageHeight = swapsAxes ? metadata.width : metadata.height;
     const image = sharp(imageBuffer).rotate();
 
-    const panelHeight = Math.max(90, Math.round(imageHeight * 0.13));
-    const logoHeight = Math.max(36, Math.round(imageHeight * ((options.maxHeightPercent || 8) / 100)));
+    // La franja se mide contra el ANCHO, no el alto: es lo que la cruza y lo que
+    // ordena los logos. Con el alto, una foto vertical de 6000px se llevaba una
+    // banda de 780px casi vacía, y la misma escena en horizontal una de 520px.
+    const panelHeight = Math.max(90, Math.round(imageWidth * 0.09));
+    const logoHeight = Math.max(36, Math.round(panelHeight * 0.62));
     const gap = Math.max(18, Math.round(imageWidth * 0.015));
     const logoCount = Math.min(6, logoBuffers.length);
     const maxLogoWidth = Math.max(40, Math.floor((imageWidth - gap * (logoCount + 1)) / logoCount));
+    // Un logo sin canal alfa —un JPEG, lo más habitual— lleva su propio fondo,
+    // y sobre la franja oscura se ve como un recorte pegado. Se le pone una
+    // tarjeta blanca detrás para que parezca intencionado. El que sí tiene
+    // transparencia se compone directo, que es como mejor queda.
     const preparedLogos = await Promise.all(
-      logoBuffers.slice(0, 6).map(buffer => sharp(buffer).resize({
-        width: maxLogoWidth,
-        height: logoHeight,
-        fit: 'inside',
-        withoutEnlargement: true,
-      }).png().toBuffer()),
+      logoBuffers.slice(0, 6).map(async buffer => {
+        const hasAlpha = Boolean((await sharp(buffer).metadata()).hasAlpha);
+        const resized = sharp(buffer).resize({
+          width: maxLogoWidth,
+          height: hasAlpha ? logoHeight : Math.round(logoHeight * 0.8),
+          fit: 'inside',
+          withoutEnlargement: true,
+        });
+        if (hasAlpha) return resized.png().toBuffer();
+
+        const padding = Math.max(6, Math.round(logoHeight * 0.1));
+        return sharp(await resized.png().toBuffer())
+          .extend({
+            top: padding,
+            bottom: padding,
+            left: padding,
+            right: padding,
+            background: { r: 255, g: 255, b: 255, alpha: 1 },
+          })
+          .png()
+          .toBuffer();
+      }),
     );
     const logoMetadata = await Promise.all(preparedLogos.map(buffer => sharp(buffer).metadata()));
     const totalLogoWidth = logoMetadata.reduce((sum, item) => sum + (item.width || logoHeight), 0) + gap * (preparedLogos.length - 1);
     let cursor = Math.max(gap, Math.round((imageWidth - totalLogoWidth) / 2));
     const top = options.position === 'top' ? 0 : imageHeight - panelHeight;
+    // El rótulo también escala: a tamaño fijo era ilegible en una foto de 4000px.
+    const captionSize = Math.max(12, Math.round(panelHeight * 0.14));
+    const captionY = Math.round(captionSize * 1.6);
     const panel = Buffer.from(
-      `<svg width="${imageWidth}" height="${panelHeight}"><rect width="100%" height="100%" fill="rgba(0,0,0,${Math.min(1, Math.max(0.35, options.opacity || 0.82))})"/><text x="${gap}" y="22" fill="white" font-family="Arial" font-size="14" opacity="0.82">PATROCINADO POR</text></svg>`,
+      `<svg width="${imageWidth}" height="${panelHeight}"><rect width="100%" height="100%" fill="rgba(0,0,0,${Math.min(1, Math.max(0.35, options.opacity || 0.82))})"/><text x="${gap}" y="${captionY}" fill="white" font-family="Arial" font-size="${captionSize}" letter-spacing="${Math.round(captionSize * 0.12)}" opacity="0.75">PATROCINADO POR</text></svg>`,
     );
     const composites: sharp.OverlayOptions[] = [{ input: panel, left: 0, top }];
     for (let index = 0; index < preparedLogos.length; index++) {
@@ -157,7 +183,7 @@ export class SharpTransformService implements OnModuleInit {
       composites.push({
         input: preparedLogos[index],
         left: cursor,
-        top: top + Math.round((panelHeight - logoHeight) / 2) + 8,
+        top: top + captionY + Math.round((panelHeight - captionY - logoHeight) / 2),
       });
       cursor += width + gap;
     }
@@ -174,9 +200,12 @@ export class SharpTransformService implements OnModuleInit {
     const ctx = canvas.getContext('2d');
 
     // Configuración de texto
-    const fontPx = Math.max(10, Math.round(options.fontPx ?? 20));
+    // El tamaño se deriva del ancho, no de un valor fijo. Con 20px constantes la
+    // marca era casi invisible en una foto de 2048px, y desaparecía del todo en
+    // la miniatura, que se compone a tamaño completo y luego se reduce a 800.
+    const fontPx = Math.max(12, Math.round(options.fontPx ?? width * 0.022));
     const text = options.watermarkText ?? 'lucilamon.com';
-    const spacing = Math.max(12, Math.round(options.spacingPx ?? 48));
+    const spacing = Math.max(12, Math.round(options.spacingPx ?? fontPx * 3.2));
     const angle = (options.angleDeg ?? -32) * Math.PI / 180; // Convertir a radianes
 
     // CRITICAL FIX: Usar la fuente pre-registrada
@@ -193,9 +222,10 @@ export class SharpTransformService implements OnModuleInit {
     this.logger.debug(`Fuente pre-registrada 'Arial' validada con éxito (testWidth: ${testWidth})`);
 
     // Colores con opacidad
-    const fillOpacity = Math.min(1, Math.max(0, options.fillOpacity ?? 0.18));
-    const strokeOpacity = Math.min(1, Math.max(0, options.strokeOpacity ?? 0.35));
-    const strokeWidth = Math.max(0.5, options.strokeWidthPx ?? 1.0);
+    const fillOpacity = Math.min(1, Math.max(0, options.fillOpacity ?? 0.26));
+    const strokeOpacity = Math.min(1, Math.max(0, options.strokeOpacity ?? 0.3));
+    // El contorno también escala: a 1px fijo no sostenía una letra grande.
+    const strokeWidth = Math.max(0.5, options.strokeWidthPx ?? fontPx * 0.045);
 
     ctx.fillStyle = `rgba(255, 255, 255, ${fillOpacity})`;
     ctx.strokeStyle = `rgba(0, 0, 0, ${strokeOpacity})`;
@@ -211,7 +241,7 @@ export class SharpTransformService implements OnModuleInit {
       textWidth = text.length * fontPx * 0.6;
       this.logger.warn(`measureText falló, usando fallback: ${textWidth}px para "${text}"`);
     }
-    const textSpacing = textWidth + 20; // Espaciado horizontal entre repeticiones
+    const textSpacing = textWidth + fontPx * 1.6;
 
     // Guardar estado y aplicar transformación
     ctx.save();
@@ -276,7 +306,7 @@ export class SharpTransformService implements OnModuleInit {
   }
 
   // -------------------- METADATA --------------------
-  async getImageMetadata(imageBuffer: Buffer): Promise<{ width: number; height: number; format: string; size: number }> {
+  async getImageMetadata(imageBuffer: Buffer): Promise<{ width: number; height: number; format: string; size: number; hasAlpha: boolean }> {
     try {
       const metadata = await sharp(imageBuffer).metadata();
       return {
@@ -284,6 +314,7 @@ export class SharpTransformService implements OnModuleInit {
         height: metadata.height || 0,
         format: metadata.format || 'unknown',
         size: metadata.size || imageBuffer.length,
+        hasAlpha: Boolean(metadata.hasAlpha),
       };
     } catch (error) {
       this.logger.error(`Error obteniendo metadatos: ${getErrorMessage(error)}`, getErrorStack(error));

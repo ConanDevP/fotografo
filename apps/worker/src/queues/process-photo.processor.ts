@@ -64,7 +64,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
             objectKey,
             eventId,
             photoId,
-            event.workspace ? `${event.workspace.name} · LucilaMon` : 'lucilamon.com',
+            event.workspace?.name || 'lucilamon.com',
           );
           const processedAt = new Date();
           photo = await this.prisma.photo.update({

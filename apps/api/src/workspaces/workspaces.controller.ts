@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from '@nestjs/passport';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ApiResponse } from '@shared/types';
@@ -45,6 +46,57 @@ export class WorkspacesController {
   @Get(':workspaceId')
   async findOne(@Param('workspaceId') workspaceId: string, @Req() req: any): Promise<ApiResponse> {
     return { data: await this.workspaces.findOneForMember(workspaceId, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+      fileFilter: (_req, file, callback) => {
+        if (['image/jpeg', 'image/jpg', 'image/png'].includes(file.mimetype)) callback(null, true);
+        else callback(new BadRequestException('Solo se permiten archivos JPG y PNG'), false);
+      },
+    }),
+  )
+  @Post(':workspaceId/brand-asset/:kind')
+  async uploadBrandAsset(
+    @Param('workspaceId') workspaceId: string,
+    @Param('kind') kind: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ): Promise<ApiResponse> {
+    if (kind !== 'logo' && kind !== 'cover') throw new BadRequestException('Recurso no válido');
+    return { data: await this.workspaces.uploadBrandAsset(workspaceId, kind, file, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+      fileFilter: (_req, file, callback) => {
+        if (['image/jpeg', 'image/jpg', 'image/png'].includes(file.mimetype)) callback(null, true);
+        else callback(new BadRequestException('Solo se permiten archivos JPG y PNG'), false);
+      },
+    }),
+  )
+  @Post(':workspaceId/assets')
+  async uploadAsset(
+    @Param('workspaceId') workspaceId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ): Promise<ApiResponse> {
+    return { data: await this.workspaces.uploadAsset(workspaceId, file, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Delete(':workspaceId/brand-asset/:kind')
+  async removeBrandAsset(
+    @Param('workspaceId') workspaceId: string,
+    @Param('kind') kind: string,
+    @Req() req: any,
+  ): Promise<ApiResponse> {
+    if (kind !== 'logo' && kind !== 'cover') throw new BadRequestException('Recurso no válido');
+    return { data: await this.workspaces.removeBrandAsset(workspaceId, kind, req.user.id) };
   }
 
   @UseGuards(AuthGuard('jwt'))

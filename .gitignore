@@ -141,3 +141,11 @@ temp/
 # Test files
 coverage/
 .nyc_output
+
+# Secretos. `.env` ya estaba cubierto, pero no las copias sueltas ni las claves,
+# y por eso private.pem acabó publicado en un repositorio público.
+*.pem
+.env.bak*
+.env.backup*
+!.env.example
+!.env.production.example

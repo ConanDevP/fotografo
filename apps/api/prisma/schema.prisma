@@ -53,6 +53,7 @@ model User {
   sentEventInvitations      EventContributor[] @relation("ContributorInviter")
   beneficiaryLedgerEntries  LedgerEntry[]      @relation("LedgerBeneficiary")
   metricEvents              MetricEvent[]
+  passwordResetTokens       PasswordResetToken[]
 
   @@index([slug])
   @@index([role, isFeatured])
@@ -98,6 +99,7 @@ model Workspace {
   ledgerEntries                 LedgerEntry[]
   metricEvents                  MetricEvent[]
   orderItems                    OrderItem[]
+  shareUsageCharges             ShareUsageCharge[]
 
   @@index([ownerId])
   @@index([isPublished])
@@ -754,6 +756,49 @@ enum MetricType {
   SPONSOR_DOWNLOAD_EXPOSURE
 }
 
+model ShareUsageCharge {
+  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId           String            @map("workspace_id") @db.Uuid
+  /// Periodo facturado en formato AAAA-MM. Junto al espacio forma una clave
+  /// única: es lo que impide cobrar dos veces el mismo mes si el cron se repite.
+  period                String            @db.VarChar(7)
+  amountCents           Int               @map("amount_cents")
+  photos                Int               @default(0)
+  status                ShareChargeStatus @default(PENDING)
+  failureReason         String?           @map("failure_reason")
+  stripePaymentIntentId String?           @map("stripe_payment_intent_id")
+  chargedAt             DateTime?         @map("charged_at") @db.Timestamptz(6)
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace             Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, period])
+  @@index([status])
+  @@map("share_usage_charges")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  /// Solo el hash. Si se filtra la base de datos, los enlaces pendientes no
+  /// sirven para entrar en ninguna cuenta.
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+enum ShareChargeStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
 enum LedgerEntryType {
   GROSS_SALE
   PROCESSOR_FEE
@@ -822,6 +867,9 @@ model Plan {
   isDefault              Boolean        @default(false) @map("is_default")
   sortOrder              Int            @default(0) @map("sort_order")
   stripePriceId          String?        @unique @map("stripe_price_id")
+  /// Precio del bloque adicional de almacenamiento en Stripe. Va como segunda
+  /// línea de la suscripción, con la cantidad igual a los bloques contratados.
+  stripeStoragePriceId   String?        @unique @map("stripe_storage_price_id")
   createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   subscriptions          Subscription[]
@@ -841,6 +889,9 @@ model Subscription {
   cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
   stripeCustomerId     String?            @map("stripe_customer_id")
   stripeSubscriptionId String?            @unique @map("stripe_subscription_id")
+  /// Líneas de la suscripción en Stripe: la del plan y la del almacenamiento.
+  stripePlanItemId     String?            @map("stripe_plan_item_id")
+  stripeStorageItemId  String?            @map("stripe_storage_item_id")
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

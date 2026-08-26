@@ -70,7 +70,15 @@ export const ERROR_CODES = {
 
 // File constraints
 export const FILE_CONSTRAINTS = {
-  MAX_SIZE: 25 * 1024 * 1024, // 25MB per processed image
+  /// Tope de peso. Generoso a propósito: quien paga el almacenamiento no debe
+  /// además pelearse con el tamaño del archivo. Lo que de verdad protege al
+  /// procesamiento es MAX_PIXELS, porque la memoria la consumen los píxeles
+  /// descomprimidos, no los bytes en disco.
+  MAX_SIZE: 100 * 1024 * 1024,
+  /// Un JPEG de estos píxeles ocupa ~240 MB ya descomprimido en memoria, y de
+  /// cada fotografía se generan tres derivadas.
+  MAX_PIXELS: 80_000_000,
+  MAX_DIMENSION: 20_000,
   ALLOWED_TYPES: ['image/jpeg', 'image/jpg', 'image/png'] as readonly string[],
   ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png'],
 } as const;

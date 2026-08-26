@@ -1590,11 +1590,25 @@ export class PaymentsService {
   }
 
   async retrySettlements(userId: string, userRole: UserRole) {
+    return this.sweepPendingSettlements(userRole === UserRole.ADMIN ? undefined : userId);
+  }
+
+  /**
+   * Reintenta las liquidaciones que quedaron sin transferir.
+   *
+   * Una venta no se bloquea porque el fotógrafo aún no haya terminado su alta
+   * en Stripe: se cobra y el asiento espera. Este barrido es lo que hace que
+   * ese dinero acabe llegando en lugar de quedarse quieto para siempre.
+   *
+   * Sin `beneficiaryUserId` recorre todos los pendientes, que es como lo usa
+   * el cron.
+   */
+  async sweepPendingSettlements(beneficiaryUserId?: string) {
     const pending = await this.prisma.ledgerEntry.findMany({
       where: {
         status: 'AVAILABLE',
         type: { in: ['ORGANIZER_COMMISSION', 'PHOTOGRAPHER_EARNING'] },
-        ...(userRole === UserRole.ADMIN ? {} : { beneficiaryUserId: userId }),
+        ...(beneficiaryUserId ? { beneficiaryUserId } : {}),
         order: { status: 'PAID', paymentGateway: PaymentGateway.STRIPE, refundRequestedAt: null },
       },
       select: { orderId: true },

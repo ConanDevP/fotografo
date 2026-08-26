@@ -1176,6 +1176,23 @@ export class UploadsService {
             throw new BadRequestException('No se pudieron leer las dimensiones de la imagen');
           }
 
+          // Este tope vivía solo en la ruta multipart antigua, así que la subida
+          // directa —la que se usa hoy— no lo comprobaba. Una imagen de 300
+          // megapíxeles pasaba el filtro de peso y reventaba al procesarla.
+          const pixels = dimensions.width * dimensions.height;
+          if (
+            pixels > FILE_CONSTRAINTS.MAX_PIXELS ||
+            dimensions.width > FILE_CONSTRAINTS.MAX_DIMENSION ||
+            dimensions.height > FILE_CONSTRAINTS.MAX_DIMENSION
+          ) {
+            await this.storageService.deletePhoto(objectKey).catch(() => undefined);
+            throw new BadRequestException(
+              `La imagen tiene ${Math.round(pixels / 1_000_000)} megapíxeles y el máximo son ${
+                FILE_CONSTRAINTS.MAX_PIXELS / 1_000_000
+              }. Redúcela antes de subirla.`,
+            );
+          }
+
           const updated = await this.prisma.photo.update({
             where: { id: photo.id },
             data: {
@@ -1322,10 +1339,16 @@ export class UploadsService {
     try {
       const metadata = await this.storageService.getImageMetadata(bytes);
       const pixels = metadata.width * metadata.height;
-      if (!metadata.width || !metadata.height || pixels > 80_000_000 || metadata.width > 20_000 || metadata.height > 20_000) {
+      if (
+        !metadata.width ||
+        !metadata.height ||
+        pixels > FILE_CONSTRAINTS.MAX_PIXELS ||
+        metadata.width > FILE_CONSTRAINTS.MAX_DIMENSION ||
+        metadata.height > FILE_CONSTRAINTS.MAX_DIMENSION
+      ) {
         throw new BadRequestException({
           code: ERROR_CODES.INVALID_PHOTO_FORMAT,
-          message: 'La imagen tiene dimensiones inválidas o excede el límite de 80 megapíxeles',
+          message: `La imagen tiene dimensiones inválidas o supera los ${FILE_CONSTRAINTS.MAX_PIXELS / 1_000_000} megapíxeles`,
         });
       }
     } catch (error) {

@@ -13,6 +13,8 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
+import { ForgotPasswordDto, ResetPasswordWithTokenDto } from './dto/password-reset.dto';
+import { PasswordResetService } from './password-reset.service';
 import { ApiResponse } from '@shared/types';
 
 @Controller('auth')
@@ -21,6 +23,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
     private readonly storageService: StorageService,
+    private readonly passwordReset: PasswordResetService,
   ) {}
 
   @Post('register')
@@ -31,6 +34,19 @@ export class AuthController {
   ): Promise<ApiResponse> {
     const result = await this.authService.register(registerDto);
     return { data: this.establishBrowserSession(res, result) };
+  }
+
+  /** Siempre responde igual, exista la cuenta o no: si no, delataría quién está registrado. */
+  @Post('forgot-password')
+  @Throttle(5, 900)
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<ApiResponse> {
+    return { data: await this.passwordReset.request(dto.email) };
+  }
+
+  @Post('reset-password')
+  @Throttle(5, 900)
+  async resetPassword(@Body() dto: ResetPasswordWithTokenDto): Promise<ApiResponse> {
+    return { data: await this.passwordReset.reset(dto.token, dto.password) };
   }
 
   @Post('login')

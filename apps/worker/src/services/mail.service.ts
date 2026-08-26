@@ -26,6 +26,9 @@ export class MailService {
     const service = this.configService.get('EMAIL_SERVICE', 'sendgrid');
     const smtpHost = this.configService.get('SMTP_HOST');
 
+    // Con Resend no hace falta transporte SMTP: el envío no pasa por aquí.
+    if (this.configService.get('RESEND_API_KEY')) return;
+
     if ((service === 'sendgrid' && !sendgridApiKey) || (service !== 'sendgrid' && !smtpHost)) {
       if (this.configService.get('NODE_ENV') === 'production') {
         throw new Error('Configura SENDGRID_API_KEY o un transporte SMTP para enviar emails');
@@ -133,12 +136,30 @@ export class MailService {
   }
 
   private async sendEmail(options: EmailOptions): Promise<void> {
-    const mailOptions = {
-      from: this.configService.get('EMAIL_FROM', 'noreply@lucilamon.com'),
-      ...options,
-    };
+    const from = this.configService.get('EMAIL_FROM', 'noreply@lucilamon.com');
 
-    await this.transporter.sendMail(mailOptions);
+    // Resend manda cuando hay clave: una petición HTTP, sin transporte SMTP que
+    // mantener. El camino de nodemailer se conserva para no obligar a migrar
+    // los despliegues que ya usaran SendGrid o un SMTP propio.
+    const resendApiKey = this.configService.get('RESEND_API_KEY');
+    if (resendApiKey) {
+      const recipients = Array.isArray(options.to) ? options.to : [options.to];
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ from, to: recipients, subject: options.subject, html: options.html }),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`Resend devolvió ${response.status}: ${detail.slice(0, 200)}`);
+      }
+      return;
+    }
+
+    await this.transporter.sendMail({ from, ...options });
   }
 
   private escapeHtml(value: string): string {

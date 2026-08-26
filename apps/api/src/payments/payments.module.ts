@@ -17,6 +17,7 @@ import { StripeGatewayService } from './gateways/stripe-gateway.service';
 import { StripeConnectService } from './gateways/stripe-connect.service';
 // import { PayPalOnboardingController } from '../photographers/paypal-onboarding.controller';
 import { StripeOnboardingController } from '../photographers/stripe-onboarding.controller';
+import { SettlementSweeperService } from './settlement-sweeper.service';
 
 // Factory providers para servicios opcionales
 const stripeGatewayProvider = {
@@ -87,6 +88,7 @@ const paypalPartnerProvider = {
     // paypalPartnerProvider,
     stripeGatewayProvider,
     stripeConnectProvider,
+    SettlementSweeperService,
   ],
   exports: [PaymentsService, StripeConnectService],
 })

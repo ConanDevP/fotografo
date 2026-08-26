@@ -3,6 +3,7 @@ import { Prisma, WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../common/services/prisma.service';
 import { EventsService } from '../events/events.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
+import { BillingService } from '../billing/billing.service';
 import { CreateSponsorDto } from './dto/create-sponsor.dto';
 import { AttachEventSponsorDto } from './dto/attach-event-sponsor.dto';
 import { UserRole } from '@shared/types';
@@ -14,10 +15,12 @@ export class SponsorsService {
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService,
     private readonly events: EventsService,
+    private readonly billing: BillingService,
   ) {}
 
   async create(workspaceId: string, dto: CreateSponsorDto, userId: string) {
     await this.workspaces.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.EDITOR]);
+    await this.billing.assertPlanAllows(workspaceId, 'allowsSponsors');
     return this.prisma.sponsor.create({ data: { workspaceId, ...dto } });
   }
 

@@ -4,6 +4,7 @@ import { PrismaService } from '../common/services/prisma.service';
 import { StripeGatewayService } from '../payments/gateways/stripe-gateway.service';
 import { StripeConnectService } from '../payments/gateways/stripe-connect.service';
 import { PaymentGateway } from '@shared/payment-types';
+import { PlanSubscriptionsService } from '../billing/plan-subscriptions.service';
 import Stripe from 'stripe';
 
 /* PayPal comentado temporalmente
@@ -26,6 +27,7 @@ export class WebhooksService {
     private readonly prisma: PrismaService,
     @Optional() private readonly stripeGateway: StripeGatewayService,
     @Optional() private readonly stripeConnect: StripeConnectService,
+    private readonly planSubscriptions: PlanSubscriptionsService,
   ) { }
 
   /* PayPal comentado temporalmente
@@ -171,6 +173,23 @@ export class WebhooksService {
           if (this.stripeConnect) {
             await this.stripeConnect.handleAccountUpdated(account);
           }
+          // Momento exacto en que alguien pasa a poder cobrar. Sus ventas
+          // anteriores quedaron esperando, así que se liquidan ya en vez de
+          // dejarlas hasta el barrido de la hora siguiente.
+          if (account.charges_enabled && account.payouts_enabled) {
+            const userId = account.metadata?.userId;
+            if (userId) {
+              const result = await this.paymentsService
+                .sweepPendingSettlements(userId)
+                .catch(error => {
+                  this.logger.error(`No se pudieron liquidar los pendientes de ${userId}: ${error?.message}`);
+                  return null;
+                });
+              if (result?.settled.length) {
+                this.logger.log(`Alta completada: liquidados ${result.settled.length} pedidos de ${userId}`);
+              }
+            }
+          }
           break;
         }
 
@@ -206,6 +225,43 @@ export class WebhooksService {
           break;
         }
 
+        // ── Mensualidad del plan ────────────────────────────────────────
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated': {
+          const subscription = event.data.object as Stripe.Subscription;
+          await this.planSubscriptions.syncFromStripe(subscription);
+          break;
+        }
+
+        case 'customer.subscription.deleted': {
+          // Stripe agotó los reintentos y canceló. El espacio baja al plan
+          // gratuito; no se toca su landing ni sus fotografías.
+          const subscription = event.data.object as Stripe.Subscription;
+          this.logger.warn(`Suscripción cancelada: ${subscription.id}`);
+          await this.planSubscriptions.downgradeToFreePlan(subscription.id);
+          break;
+        }
+
+        case 'invoice.paid': {
+          const invoice = event.data.object as Stripe.Invoice;
+          const subscriptionId =
+            typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+          if (subscriptionId) {
+            await this.planSubscriptions.markActive(subscriptionId, invoice.period_end ?? null);
+          }
+          break;
+        }
+
+        case 'invoice.payment_failed': {
+          // Todavía no es un impago definitivo: Stripe seguirá reintentando
+          // durante semanas. Solo se marca para poder avisar al fotógrafo.
+          const invoice = event.data.object as Stripe.Invoice;
+          const subscriptionId =
+            typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+          if (subscriptionId) await this.planSubscriptions.markPastDue(subscriptionId);
+          break;
+        }
+
         // Payment intent events (for more granular tracking)
         case 'payment_intent.succeeded': {
           const paymentIntent = event.data.object as Stripe.PaymentIntent;
@@ -220,6 +276,10 @@ export class WebhooksService {
               currency: paymentIntent.currency,
             });
             if (!result.success) throw new Error(`No se pudo confirmar el PaymentIntent ${paymentIntent.id}`);
+          } else if (paymentIntent.metadata?.period) {
+            this.logger.log(`Consumo del modo compartir cobrado: ${paymentIntent.metadata.period}`);
+          } else if (paymentIntent.metadata?.eventId) {
+            this.logger.log(`Publicación cobrada: evento ${paymentIntent.metadata.eventId}`);
           } else {
             this.logger.warn('PaymentIntent sin orderId en metadata');
           }

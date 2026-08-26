@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -15,6 +17,8 @@ import { UpdateWorkspaceMemberDto } from './dto/update-workspace-member.dto';
 import { randomBytes } from 'crypto';
 import { resolveTxt } from 'dns/promises';
 import { ConfigService } from '@nestjs/config';
+import { StorageService } from '../common/services/storage.service';
+import { BillingService } from '../billing/billing.service';
 
 const MANAGER_ROLES: WorkspaceRole[] = [
   WorkspaceRole.OWNER,
@@ -27,6 +31,11 @@ export class WorkspacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
+    // Ciclo declarado: facturación necesita workspaces para resolver el plan, y
+    // workspaces necesita facturación para saber qué permite ese plan.
+    @Inject(forwardRef(() => BillingService))
+    private readonly billing: BillingService,
   ) {}
 
   async create(dto: CreateWorkspaceDto, userId: string) {
@@ -104,6 +113,9 @@ export class WorkspacesService {
             location: true,
             imageUrl: true,
             commerceMode: true,
+            requireEmailForFree: true,
+            // Sin precios la galería solo puede mirarse, no comprarse.
+            pricing: true,
             sponsorOverlayEnabled: true,
             isPublished: true,
             _count: { select: { photos: true } },
@@ -145,6 +157,9 @@ export class WorkspacesService {
             location: true,
             imageUrl: true,
             commerceMode: true,
+            requireEmailForFree: true,
+            // Sin precios la galería solo puede mirarse, no comprarse.
+            pricing: true,
             sponsorOverlayEnabled: true,
             eventSponsors: {
               where: {
@@ -203,7 +218,14 @@ export class WorkspacesService {
         select: { customDomain: true },
       });
       const customDomain = requestedDomain ? this.normalizeCustomDomain(requestedDomain) : null;
-      if (customDomain) await this.assertDomainAvailable(customDomain, workspaceId);
+      if (customDomain) {
+        // Solo al ponerlo: si el plan baja, el dominio ya configurado se
+        // respeta en lugar de dejar la landing inaccesible sin avisar.
+        if (customDomain !== current?.customDomain) {
+          await this.billing.assertPlanAllows(workspaceId, 'allowsCustomDomain');
+        }
+        await this.assertDomainAvailable(customDomain, workspaceId);
+      }
       data.customDomain = customDomain;
       if (customDomain !== current?.customDomain) {
         data.customDomainVerifiedAt = null;
@@ -238,6 +260,108 @@ export class WorkspacesService {
     });
   }
 
+  /**
+   * Logo y portada de la landing. No son fotografías del catálogo: no crean
+   * `Photo`, no consumen la cuota de almacenamiento del plan ni entran en la
+   * cola de reconocimiento. Por eso viven aquí y no en /uploads.
+   */
+  async uploadBrandAsset(
+    workspaceId: string,
+    kind: 'logo' | 'cover',
+    file: Express.Multer.File,
+    userId: string,
+  ) {
+    await this.assertAccess(workspaceId, userId, MANAGER_ROLES);
+    if (!file) throw new BadRequestException('Se requiere un archivo de imagen');
+
+    this.assertIsImage(file.buffer);
+
+    try {
+      const metadata = await this.storage.getImageMetadata(file.buffer);
+      if (!metadata.width || !metadata.height || metadata.width * metadata.height > 30_000_000) {
+        throw new BadRequestException('La imagen excede el límite de 30 megapíxeles');
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('No se pudieron validar las dimensiones de la imagen');
+    }
+
+    const key = `workspaces/${workspaceId}/brand/${kind}`;
+    const uploaded = await this.storage.uploadImage(
+      file.buffer,
+      key,
+      kind === 'logo' ? { width: 512, height: 512, crop: 'fit' } : { width: 1600, height: 900, crop: 'fill' },
+    );
+
+    // La clave es fija para no acumular basura al reemplazar, pero entonces la
+    // URL tampoco cambia y el navegador seguiría mostrando la imagen anterior.
+    const versioned = `${uploaded.secure_url}?v=${Date.now()}`;
+    return this.prisma.workspace.update({
+      where: { id: workspaceId },
+      data: kind === 'logo' ? { logoUrl: versioned } : { coverUrl: versioned },
+      select: { id: true, logoUrl: true, coverUrl: true },
+    });
+  }
+
+  /**
+   * Sube una imagen suelta y devuelve su URL, sin asociarla a nada.
+   *
+   * La usan los logos de patrocinador: se necesita la URL ANTES de que el
+   * patrocinador exista, así que no puede colgar de su registro. Exigir que el
+   * fotógrafo tuviera ya una URL HTTPS a mano era pedirle que alojara el
+   * archivo por su cuenta.
+   */
+  async uploadAsset(workspaceId: string, file: Express.Multer.File, userId: string) {
+    await this.assertAccess(workspaceId, userId, MANAGER_ROLES);
+    if (!file) throw new BadRequestException('Se requiere un archivo de imagen');
+    this.assertIsImage(file.buffer);
+
+    try {
+      const metadata = await this.storage.getImageMetadata(file.buffer);
+      if (!metadata.width || !metadata.height || metadata.width * metadata.height > 30_000_000) {
+        throw new BadRequestException('La imagen excede el límite de 30 megapíxeles');
+      }
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('No se pudieron validar las dimensiones de la imagen');
+    }
+
+    // Clave única: estas imágenes no se reemplazan, se acumulan como biblioteca.
+    const key = `workspaces/${workspaceId}/assets/${randomBytes(12).toString('hex')}`;
+    const uploaded = await this.storage.uploadImage(file.buffer, key, {
+      width: 600,
+      height: 600,
+      crop: 'fit',
+      preserveAlpha: true,
+    });
+    return { url: uploaded.secure_url };
+  }
+
+  /** El mimetype lo declara el cliente; los bytes no mienten. */
+  private assertIsImage(buffer: Buffer): void {
+    const isJpeg =
+      buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    const isPng = buffer.length >= png.length && png.every((byte, index) => buffer[index] === byte);
+    if (!isJpeg && !isPng) {
+      throw new BadRequestException('El contenido no corresponde a una imagen JPG o PNG');
+    }
+  }
+
+  async removeBrandAsset(workspaceId: string, kind: 'logo' | 'cover', userId: string) {
+    await this.assertAccess(workspaceId, userId, MANAGER_ROLES);
+    try {
+      await this.storage.deleteImage(`workspaces/${workspaceId}/brand/${kind}`);
+    } catch {
+      // El objeto puede no existir (URL puesta a mano). Basta con soltar la referencia.
+    }
+    return this.prisma.workspace.update({
+      where: { id: workspaceId },
+      data: kind === 'logo' ? { logoUrl: null } : { coverUrl: null },
+      select: { id: true, logoUrl: true, coverUrl: true },
+    });
+  }
+
   async verifyCustomDomain(workspaceId: string, userId: string) {
     await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     const workspace = await this.prisma.workspace.findUnique({
@@ -266,6 +390,25 @@ export class WorkspacesService {
   }
 
   async addMember(workspaceId: string, dto: AddWorkspaceMemberDto, userId: string) {
+    // Los roles que administran cuentan contra el cupo del plan; fotógrafos
+    // invitados, analistas y soporte no lo consumen.
+    const managerRoles: WorkspaceRole[] = [WorkspaceRole.OWNER, WorkspaceRole.ADMIN];
+    if (managerRoles.includes(dto.role as WorkspaceRole)) {
+      const limit = await this.billing.maxAdminsFor(workspaceId);
+      if (limit !== null) {
+        const current = await this.prisma.workspaceMember.count({
+          where: { workspaceId, status: 'ACTIVE', role: { in: managerRoles } },
+        });
+        if (current >= limit) {
+          throw new ForbiddenException({
+            code: 'PLAN_UPGRADE_REQUIRED',
+            message: `Tu plan admite ${limit} administrador${limit === 1 ? '' : 'es'}. Sube de plan para añadir más.`,
+            feature: 'maxAdmins',
+          });
+        }
+      }
+    }
+
     await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     if (dto.role === 'OWNER') throw new BadRequestException('La propiedad se transfiere mediante un proceso separado');
 

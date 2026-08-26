@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
 import { PaymentsModule } from '../payments/payments.module';
+import { BillingModule } from '../billing/billing.module';
 import { PrismaService } from '../common/services/prisma.service';
 import { StripeGatewayService } from '../payments/gateways/stripe-gateway.service';
 import { StripeConnectService } from '../payments/gateways/stripe-connect.service';
@@ -33,7 +34,7 @@ const stripeConnectProvider = {
 };
 
 @Module({
-  imports: [PaymentsModule],
+  imports: [PaymentsModule, BillingModule],
   controllers: [WebhooksController],
   providers: [
     WebhooksService,

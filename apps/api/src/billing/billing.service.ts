@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,6 +13,7 @@ import Stripe from 'stripe';
 
 import { PrismaService } from '../common/services/prisma.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
+import { PlanSubscriptionsService } from './plan-subscriptions.service';
 import { UserRole } from '@shared/types';
 
 export interface EffectivePlan {
@@ -36,8 +39,12 @@ export class BillingService {
 
   constructor(
     private readonly prisma: PrismaService,
+    // El otro extremo del ciclo con WorkspacesModule: sin forwardRef aquí, el
+    // token no está resuelto todavía cuando Nest construye este servicio.
+    @Inject(forwardRef(() => WorkspacesService))
     private readonly workspaces: WorkspacesService,
     private readonly config: ConfigService,
+    private readonly planSubscriptions: PlanSubscriptionsService,
   ) {
     const secretKey = this.config.get<string>('STRIPE_SECRET_KEY');
     this.stripe = secretKey ? new Stripe(secretKey, { apiVersion: '2022-11-15' }) : null;
@@ -61,10 +68,12 @@ export class BillingService {
     });
 
     // Los tamaños son BigInt y JSON no sabe serializarlos: se emiten como texto
-    // para no perder precisión ni romper la respuesta.
-    return plans.map(plan => ({
+    // para no perder precisión ni romper la respuesta. Los Decimal se emiten
+    // como número para que el cliente no tenga que convertirlos.
+    return plans.map(({ stripePriceId, stripeStoragePriceId, ...plan }) => ({
       ...plan,
       commissionPercent: Number(plan.commissionPercent),
+      sharePhotoCents: Number(plan.sharePhotoCents),
       includedStorageBytes: plan.includedStorageBytes.toString(),
       extraStorageBlockBytes: plan.extraStorageBlockBytes?.toString() ?? null,
     }));
@@ -149,6 +158,46 @@ export class BillingService {
    * Comprueba que caben `bytes` más antes de subir. Se llama antes de escribir
    * en R2 para no pagar por objetos que luego habría que borrar.
    */
+  /**
+   * Comprueba que el plan del espacio incluye una capacidad concreta.
+   *
+   * Sin esto los planes solo se diferencian en comisión y almacenamiento: el
+   * resto de lo que se anuncia en la página de precios estaba disponible para
+   * todo el mundo, de pago o no.
+   */
+  async assertPlanAllows(
+    workspaceId: string,
+    feature: 'allowsCustomDomain' | 'allowsSponsors' | 'allowsAdvancedMetrics',
+  ): Promise<void> {
+    const { plan } = await this.resolveForWorkspace(workspaceId);
+    if (plan[feature]) return;
+
+    const names: Record<typeof feature, string> = {
+      allowsCustomDomain: 'usar un dominio propio',
+      allowsSponsors: 'trabajar con patrocinadores',
+      allowsAdvancedMetrics: 'ver las métricas avanzadas',
+    };
+    const upgrade = await this.prisma.plan.findFirst({
+      where: { isActive: true, [feature]: true },
+      orderBy: { priceCents: 'asc' },
+      select: { name: true, priceCents: true },
+    });
+
+    throw new ForbiddenException({
+      code: 'PLAN_UPGRADE_REQUIRED',
+      message: upgrade
+        ? `Tu plan ${plan.name} no incluye ${names[feature]}. Está disponible desde ${upgrade.name} (${this.formatMoney(upgrade.priceCents)} al mes).`
+        : `Tu plan ${plan.name} no incluye ${names[feature]}.`,
+      feature,
+    });
+  }
+
+  /** Administradores que admite el plan. Nulo significa sin límite. */
+  async maxAdminsFor(workspaceId: string): Promise<number | null> {
+    const { plan } = await this.resolveForWorkspace(workspaceId);
+    return plan.maxAdmins ?? null;
+  }
+
   async assertStorageAvailable(workspaceId: string | null | undefined, bytes: number): Promise<void> {
     if (!workspaceId || bytes <= 0) return;
 
@@ -558,6 +607,7 @@ export class BillingService {
         allowsSponsors: effective.plan.allowsSponsors,
         allowsAdvancedMetrics: effective.plan.allowsAdvancedMetrics,
         sponsoredEventFeeCents: effective.plan.sponsoredEventFeeCents,
+        maxAdmins: effective.plan.maxAdmins,
       },
       // Modo compartir acumulado desde la última factura.
       shareMode: {
@@ -589,8 +639,9 @@ export class BillingService {
   }
 
   /**
-   * Cambia el plan de un espacio. Registra la intención en base de datos; el
-   * cobro real de la mensualidad lo hace Stripe en la capa de suscripciones.
+   * Cambia el plan de un espacio. El cobro de la mensualidad ocurre aquí mismo,
+   * de forma síncrona: si la tarjeta se rechaza, esto lanza y el espacio
+   * conserva el plan que ya tenía.
    */
   async changePlan(
     workspaceId: string,
@@ -635,18 +686,24 @@ export class BillingService {
       });
     }
 
+    // El cobro va PRIMERO: si la tarjeta falla, esto lanza y el espacio se queda
+    // en el plan que ya tenía. Guardar antes de cobrar regalaría el plan cada vez
+    // que un pago fuese rechazado.
+    const stripeState = await this.planSubscriptions.applyPlan(workspaceId, plan, extraStorageBlocks);
+
     const subscription = await this.prisma.subscription.upsert({
       where: { workspaceId },
       create: {
         workspaceId,
         planId: plan.id,
-        status: 'ACTIVE',
         extraStorageBlocks,
+        ...stripeState,
       },
       update: {
         planId: plan.id,
-        status: 'ACTIVE',
         extraStorageBlocks,
+        cancelAtPeriodEnd: false,
+        ...stripeState,
       },
     });
 

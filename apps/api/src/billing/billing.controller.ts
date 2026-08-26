@@ -1,15 +1,25 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PlanAudience } from '@prisma/client';
 import { ApiResponse } from '@shared/types';
 
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { UserRole } from '@shared/types';
+
 import { BillingService } from './billing.service';
+import { PlanSubscriptionsService } from './plan-subscriptions.service';
+import { ShareBillingService } from './share-billing.service';
 import { ChangePlanDto } from './dto/change-plan.dto';
 import { SavePaymentMethodDto } from './dto/save-payment-method.dto';
 
 @Controller()
 export class BillingController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly planSubscriptions: PlanSubscriptionsService,
+    private readonly shareBilling: ShareBillingService,
+  ) {}
 
   /** Catálogo público: alimenta la página de precios. */
   @Get('billing/plans')
@@ -78,5 +88,31 @@ export class BillingController {
         req.user.role,
       ),
     };
+  }
+
+  /**
+   * Crea en Stripe el producto y los precios que faltan y guarda sus ids. Hay
+   * que ejecutarlo una vez antes de vender planes, y de nuevo al añadir uno.
+   */
+  @Post('admin/billing/sync-plans')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async syncPlans(): Promise<ApiResponse> {
+    return { data: await this.planSubscriptions.syncPlanPrices() };
+  }
+
+  /**
+   * Dispara a mano la liquidación mensual del modo compartir. El cron ya la
+   * ejecuta el día 1; esto sirve para reintentar un periodo que falló.
+   */
+  @Post('admin/billing/share-usage/run')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async runShareBilling(@Body() body: { period?: string }): Promise<ApiResponse> {
+    const period = body?.period;
+    if (period && !/^\d{4}-\d{2}$/.test(period)) {
+      throw new BadRequestException('El periodo debe tener el formato AAAA-MM');
+    }
+    return { data: await this.shareBilling.billPeriod(period ?? this.shareBilling.previousPeriod()) };
   }
 }

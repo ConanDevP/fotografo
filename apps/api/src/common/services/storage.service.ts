@@ -243,18 +243,27 @@ export class StorageService {
   async uploadImage(
     buffer: Buffer,
     publicId: string,
-    transformation?: { width?: number; height?: number; crop?: string }
+    transformation?: { width?: number; height?: number; crop?: string; preserveAlpha?: boolean }
   ): Promise<{ secure_url: string; public_id: string }> {
     if (this.provider === 'r2') {
       let processedBuffer = buffer;
+      // Un logo con transparencia debe seguir siendo PNG: convertirlo a JPEG le
+      // aplasta el alfa contra un fondo negro y lo deja inservible sobre la foto.
+      const keepAlpha =
+        transformation?.preserveAlpha && (await this.sharpService.getImageMetadata(buffer)).hasAlpha;
       if (transformation?.width || transformation?.height) {
         processedBuffer = await this.sharpService.resizeImage(
-          buffer, 
-          transformation.width, 
-          transformation.height
+          buffer,
+          transformation.width,
+          transformation.height,
+          keepAlpha ? { format: 'png' } : {},
         );
       }
-      const url = await this.r2Service.uploadImage(processedBuffer, publicId);
+      const url = await this.r2Service.uploadImage(
+        processedBuffer,
+        publicId,
+        keepAlpha ? 'image/png' : 'image/jpeg',
+      );
       return {
         secure_url: url,
         public_id: publicId,
