@@ -643,6 +643,67 @@ export class BillingService {
    * de forma síncrona: si la tarjeta se rechaza, esto lanza y el espacio
    * conserva el plan que ya tenía.
    */
+  /**
+   * Prepara el pago de un plan y devuelve a dónde mandar al fotógrafo.
+   *
+   * El plan NO se asigna aquí: se asigna cuando Stripe confirma el cobro por
+   * webhook. Concederlo antes dejaría planes activos sin pagar cada vez que
+   * alguien abandona el checkout.
+   */
+  async startPlanCheckout(
+    workspaceId: string,
+    planSlug: string,
+    extraStorageBlocks: number,
+    userId: string,
+    userRole: UserRole,
+    urls: { successUrl?: string; cancelUrl?: string } = {},
+  ) {
+    if (userRole !== UserRole.ADMIN) {
+      await this.workspaces.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER]);
+    }
+
+    const plan = await this.prisma.plan.findUnique({ where: { slug: planSlug } });
+    if (!plan || !plan.isActive) throw new NotFoundException('Plan no encontrado');
+
+    // Un plan sin coste no pasa por caja: se aplica y ya.
+    if (plan.priceCents === 0 && extraStorageBlocks === 0) {
+      await this.changePlan(workspaceId, planSlug, 0, userId, userRole);
+      return { url: null, applied: true };
+    }
+
+    // Con una suscripción viva NO se abre otro checkout: Stripe crearía una
+    // segunda y le cobraría dos veces. Se modifica la que ya tiene, que además
+    // es lo correcto —Stripe prorratea la diferencia— y no vuelve a pedir la
+    // tarjeta, porque ya la tiene guardada.
+    const current = await this.prisma.subscription.findUnique({
+      where: { workspaceId },
+      select: { stripeSubscriptionId: true },
+    });
+    if (current?.stripeSubscriptionId) {
+      await this.changePlan(workspaceId, planSlug, extraStorageBlocks, userId, userRole);
+      return { url: null, applied: true };
+    }
+
+    const appUrl = (this.config.get<string>('FRONTEND_URL') || 'http://localhost:3000').replace(/\/$/, '');
+    const checkout = await this.planSubscriptions.createCheckout(workspaceId, plan, extraStorageBlocks, {
+      successUrl: this.safeUrl(urls.successUrl, `${appUrl}/dashboard/billing?checkout=ok`),
+      cancelUrl: this.safeUrl(urls.cancelUrl, `${appUrl}/pricing`),
+    });
+    return { url: checkout.url, applied: false };
+  }
+
+  /** Solo se aceptan destinos propios: un `success_url` ajeno sería un salto abierto. */
+  private safeUrl(candidate: string | undefined, fallback: string): string {
+    if (!candidate) return fallback;
+    try {
+      const allowed = new URL(this.config.get<string>('FRONTEND_URL') || 'http://localhost:3000');
+      const target = new URL(candidate);
+      return target.host === allowed.host ? target.toString() : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   async changePlan(
     workspaceId: string,
     planSlug: string,
@@ -781,6 +842,8 @@ export class BillingService {
     const ownTypes = ['PHOTOGRAPHER_EARNING', 'ORGANIZER_COMMISSION'];
     const isOwn = (row: (typeof grouped)[number]) => ownTypes.includes(row.type);
 
+    const share = await this.shareOfSales(where, ownTypes);
+
     return {
       summary: {
         // Cobrado y transferido a su cuenta.
@@ -790,12 +853,85 @@ export class BillingService {
         // Retenido por un contracargo o devuelto.
         reversedCents: sum(row => isOwn(row) && row.status === 'REVERSED'),
         // Lo que se quedó la plataforma y la pasarela, para que cuadre la cuenta.
-        platformFeeCents: Math.abs(sum(row => row.type === 'PLATFORM_FEE')),
-        processorFeeCents: Math.abs(sum(row => row.type === 'PROCESSOR_FEE')),
-        grossCents: sum(row => row.type === 'GROSS_SALE'),
+        platformFeeCents: share.platformFeeCents,
+        processorFeeCents: share.processorFeeCents,
+        grossCents: share.grossCents,
         currency: entries[0]?.currency || 'USD',
       },
       entries,
+    };
+  }
+
+  /**
+   * Venta bruta y comisiones que corresponden a este espacio.
+   *
+   * Los asientos de comisión son de la plataforma y se guardan sin
+   * `workspaceId`, así que al filtrar por espacio salían siempre en cero: el
+   * fotógrafo veía "vendido 23,97, para ti 17,88" con las dos comisiones a
+   * cero y seis dólares sin explicación. En la pantalla donde se le dice a
+   * alguien cuánto ha ganado, una cuenta que no cuadra es lo peor que puede
+   * aparecer.
+   *
+   * Se recuperan por los pedidos en los que el espacio participa y se reparten
+   * en la misma proporción que su parte de cada pedido. Con un solo fotógrafo
+   * la proporción es 1 y las cifras son exactas; con varios, cada uno ve la
+   * comisión que pagó su parte y no la de los demás.
+   */
+  private async shareOfSales(
+    where: { workspaceId: string; eventId?: string },
+    ownTypes: string[],
+  ): Promise<{ platformFeeCents: number; processorFeeCents: number; grossCents: number }> {
+    const empty = { platformFeeCents: 0, processorFeeCents: 0, grossCents: 0 };
+
+    const ownByOrder = await this.prisma.ledgerEntry.groupBy({
+      by: ['orderId'],
+      where: { ...where, type: { in: ownTypes as any } },
+      _sum: { amountCents: true },
+    });
+
+    const orderIds = ownByOrder
+      .map(row => row.orderId)
+      .filter((id): id is string => Boolean(id));
+    if (!orderIds.length) return empty;
+
+    // Sin filtro de espacio: aquí es donde aparecen los asientos de la
+    // plataforma y los del resto de fotógrafos del mismo pedido.
+    const byOrder = await this.prisma.ledgerEntry.groupBy({
+      by: ['orderId', 'type'],
+      where: { orderId: { in: orderIds } },
+      _sum: { amountCents: true },
+    });
+
+    type Bucket = { beneficiaries: number; platform: number; processor: number; gross: number };
+    const totals = new Map<string, Bucket>();
+    for (const row of byOrder) {
+      if (!row.orderId) continue;
+      const bucket = totals.get(row.orderId) ?? { beneficiaries: 0, platform: 0, processor: 0, gross: 0 };
+      // Las comisiones se guardan en negativo; el reparto se razona en positivo.
+      const amount = Math.abs(row._sum.amountCents || 0);
+      if (ownTypes.includes(row.type)) bucket.beneficiaries += amount;
+      else if (row.type === 'PLATFORM_FEE') bucket.platform += amount;
+      else if (row.type === 'PROCESSOR_FEE') bucket.processor += amount;
+      else if (row.type === 'GROSS_SALE') bucket.gross += amount;
+      totals.set(row.orderId, bucket);
+    }
+
+    let platformFeeCents = 0;
+    let processorFeeCents = 0;
+    let grossCents = 0;
+    for (const row of ownByOrder) {
+      const bucket = row.orderId ? totals.get(row.orderId) : undefined;
+      if (!bucket || bucket.beneficiaries <= 0) continue;
+      const share = Math.abs(row._sum.amountCents || 0) / bucket.beneficiaries;
+      platformFeeCents += bucket.platform * share;
+      processorFeeCents += bucket.processor * share;
+      grossCents += bucket.gross * share;
+    }
+
+    return {
+      platformFeeCents: Math.round(platformFeeCents),
+      processorFeeCents: Math.round(processorFeeCents),
+      grossCents: Math.round(grossCents),
     };
   }
 

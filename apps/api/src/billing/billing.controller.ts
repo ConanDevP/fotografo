@@ -89,6 +89,26 @@ export class BillingController {
     };
   }
 
+  /** Devuelve la dirección de Stripe donde el fotógrafo paga su plan. */
+  @Post('workspaces/:workspaceId/billing/checkout')
+  @UseGuards(AuthGuard('jwt'))
+  async planCheckout(
+    @Param('workspaceId') workspaceId: string,
+    @Body() dto: ChangePlanDto & { successUrl?: string; cancelUrl?: string },
+    @Req() req: any,
+  ): Promise<ApiResponse> {
+    return {
+      data: await this.billing.startPlanCheckout(
+        workspaceId,
+        dto.planSlug,
+        dto.extraStorageBlocks ?? 0,
+        req.user.id,
+        req.user.role,
+        { successUrl: dto.successUrl, cancelUrl: dto.cancelUrl },
+      ),
+    };
+  }
+
   @Post('workspaces/:workspaceId/billing/plan')
   @UseGuards(AuthGuard('jwt'))
   async changePlan(

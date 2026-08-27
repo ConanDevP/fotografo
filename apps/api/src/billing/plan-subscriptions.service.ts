@@ -16,6 +16,15 @@ import { PrismaService } from '../common/services/prisma.service';
  * fotografía y se liquida aparte en ShareBillingService, porque también lo
  * generan los espacios del plan gratuito, que no tienen suscripción en Stripe.
  */
+/**
+ * Código fiscal de Stripe: SaaS de uso comercial. Los planes van dirigidos a
+ * fotógrafos profesionales, no a consumidores.
+ *
+ * Es obligatorio cuando la cuenta tiene Managed Payments activo —lo está por
+ * defecto— y sin él Stripe rechaza el checkout entero.
+ */
+const SAAS_TAX_CODE = 'txcd_10103001';
+
 @Injectable()
 export class PlanSubscriptionsService {
   private readonly logger = new Logger(PlanSubscriptionsService.name);
@@ -124,6 +133,80 @@ export class PlanSubscriptionsService {
     };
   }
 
+  /**
+   * Sesión de Checkout alojada por Stripe para contratar un plan.
+   *
+   * Se prefiere a pedir la tarjeta dentro del panel: el comprador ve el dominio
+   * de Stripe, con su 3D Secure y sus métodos de pago locales, y nosotros no
+   * tocamos ni un dato de tarjeta. Es también lo que la gente espera al pulsar
+   * "contratar".
+   */
+  async createCheckout(
+    workspaceId: string,
+    plan: Plan,
+    extraStorageBlocks: number,
+    urls: { successUrl: string; cancelUrl: string },
+  ): Promise<{ url: string }> {
+    if (!this.stripe) {
+      throw new BadRequestException({
+        code: 'BILLING_NOT_CONFIGURED',
+        message: 'La facturación no está configurada.',
+      });
+    }
+    if (!plan.stripePriceId) {
+      throw new BadRequestException({
+        code: 'PLAN_NOT_SYNCED',
+        message: `El plan ${plan.name} todavía no tiene precio en la pasarela.`,
+      });
+    }
+
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { stripeCustomerId: true, contactEmail: true, owner: { select: { email: true } } },
+    });
+    if (!workspace) throw new NotFoundException('Espacio no encontrado');
+
+    const items: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      { price: plan.stripePriceId, quantity: 1 },
+    ];
+    if (extraStorageBlocks > 0 && plan.stripeStoragePriceId) {
+      items.push({ price: plan.stripeStoragePriceId, quantity: extraStorageBlocks });
+    }
+
+    const params: Stripe.Checkout.SessionCreateParams = {
+      mode: 'subscription',
+      line_items: items,
+      success_url: urls.successUrl,
+      cancel_url: urls.cancelUrl,
+      // Con cliente existente se reutiliza; si no, Stripe lo crea y lo
+      // recuperamos del webhook. Así no se duplican clientes por espacio.
+      ...(workspace.stripeCustomerId
+        ? { customer: workspace.stripeCustomerId }
+        : { customer_email: workspace.contactEmail || workspace.owner?.email || undefined }),
+      // El identificador viaja en los metadatos porque el webhook llega sin
+      // sesión de usuario y es lo único que ata el pago a un espacio.
+      metadata: { workspaceId, planSlug: plan.slug, extraStorageBlocks: String(extraStorageBlocks) },
+      subscription_data: {
+        metadata: { workspaceId, planSlug: plan.slug },
+      },
+      allow_promotion_codes: true,
+    };
+
+    // Managed Payments viene activo por defecto en la cuenta y exige código
+    // fiscal, pero no existe en la versión de API a la que está fijado el
+    // proyecto (2022-11-15). Se desactiva por sesión en lugar de subir la
+    // versión, que cambiaría el comportamiento de todos los cobros,
+    // transferencias y disputas. La API lo acepta aunque los tipos no lo
+    // declaren, de ahí el acceso sin tipar.
+    (params as unknown as Record<string, unknown>).managed_payments = { enabled: false };
+
+    const session = await this.stripe.checkout.sessions.create(params);
+
+    if (!session.url) throw new BadRequestException('Stripe no devolvió la dirección de pago');
+    this.logger.log(`Checkout de suscripción creado para ${workspaceId}: ${session.id}`);
+    return { url: session.url };
+  }
+
   private async createSubscription(
     customerId: string,
     paymentMethodId: string,
@@ -145,6 +228,12 @@ export class PlanSubscriptionsService {
         payment_behavior: 'error_if_incomplete',
         proration_behavior: 'create_prorations',
         expand: ['items'],
+      }, {
+        // Sin esto, dos peticiones a la vez —un doble clic, un reintento de
+        // red— crearían DOS suscripciones y le cobrarían el plan dos veces.
+        // La clave incluye el cliente y el plan: cambiar de plan es una
+        // operación distinta y debe poder ocurrir.
+        idempotencyKey: `lucilamon-sub-${customerId}-${plan.slug}-${extraStorageBlocks}`,
       });
     } catch (error) {
       throw this.asPaymentError(error, plan);
@@ -219,6 +308,82 @@ export class PlanSubscriptionsService {
   // ───────────────────────────────────────────────────────────────────────────
   // Webhooks
   // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Stripe confirmó el pago del checkout: ahora sí se concede el plan.
+   *
+   * Es el único punto donde un plan de pago pasa a estar activo. Hacerlo antes
+   * —al pulsar contratar— regalaría el plan a quien abandona el formulario.
+   */
+  async applyPaidCheckout(session: Stripe.Checkout.Session): Promise<void> {
+    const workspaceId = session.metadata?.workspaceId;
+    const planSlug = session.metadata?.planSlug;
+    if (!workspaceId || !planSlug) {
+      this.logger.warn(`Checkout ${session.id} sin workspaceId o planSlug en metadatos`);
+      return;
+    }
+
+    const plan = await this.prisma.plan.findUnique({ where: { slug: planSlug } });
+    if (!plan) {
+      this.logger.error(`Checkout ${session.id} apunta a un plan inexistente: ${planSlug}`);
+      return;
+    }
+
+    const subscriptionId =
+      typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+    const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    const extraStorageBlocks = Number(session.metadata?.extraStorageBlocks || 0);
+
+    // El cliente que creó Stripe se guarda para reutilizarlo en cobros futuros
+    // —consumo del modo gratuito, cambios de plan— sin duplicarlo.
+    if (customerId) {
+      await this.prisma.workspace.updateMany({
+        where: { id: workspaceId, stripeCustomerId: null },
+        data: { stripeCustomerId: customerId },
+      });
+    }
+
+    let planItemId: string | null = null;
+    let storageItemId: string | null = null;
+    let currentPeriodEnd: Date | null = null;
+
+    if (subscriptionId && this.stripe) {
+      const subscription = await this.stripe.subscriptions.retrieve(subscriptionId, { expand: ['items'] });
+      planItemId = subscription.items.data.find(item => item.price.id === plan.stripePriceId)?.id ?? null;
+      storageItemId = subscription.items.data.find(item => item.price.id === plan.stripeStoragePriceId)?.id ?? null;
+      currentPeriodEnd = subscription.current_period_end
+        ? new Date(subscription.current_period_end * 1000)
+        : null;
+    }
+
+    await this.prisma.subscription.upsert({
+      where: { workspaceId },
+      create: {
+        workspaceId,
+        planId: plan.id,
+        status: SubscriptionStatus.ACTIVE,
+        extraStorageBlocks,
+        stripeSubscriptionId: subscriptionId ?? null,
+        stripeCustomerId: customerId ?? null,
+        stripePlanItemId: planItemId,
+        stripeStorageItemId: storageItemId,
+        currentPeriodEnd,
+      },
+      update: {
+        planId: plan.id,
+        status: SubscriptionStatus.ACTIVE,
+        extraStorageBlocks,
+        cancelAtPeriodEnd: false,
+        stripeSubscriptionId: subscriptionId ?? null,
+        stripeCustomerId: customerId ?? null,
+        stripePlanItemId: planItemId,
+        stripeStorageItemId: storageItemId,
+        currentPeriodEnd,
+      },
+    });
+
+    this.logger.log(`Plan ${plan.name} activado en ${workspaceId} tras el checkout ${session.id}`);
+  }
 
   /** Sincroniza estado y fin de periodo con lo que dice Stripe. */
   async syncFromStripe(subscription: Stripe.Subscription): Promise<void> {
@@ -316,6 +481,88 @@ export class PlanSubscriptionsService {
     });
   }
 
+  /**
+   * Busca en Stripe suscripciones activas que aquí no constan y las registra.
+   *
+   * Es la red para el peor caso del cobro: alguien paga, Stripe cobra, y el
+   * webhook no llega —el túnel caducó, la API estaba caída, la firma falló—.
+   * Sin esto se queda pagando sin plan y nadie se entera hasta que reclama.
+   *
+   * Solo mira suscripciones que llevan nuestros metadatos, así que no toca
+   * nada ajeno aunque la cuenta de Stripe se comparta.
+   */
+  async reconcileSubscriptions(): Promise<{ checked: number; repaired: string[] }> {
+    if (!this.stripe) return { checked: 0, repaired: [] };
+
+    const active = await this.stripe.subscriptions.list({
+      status: 'active',
+      limit: 100,
+      expand: ['data.items'],
+    });
+
+    const repaired: string[] = [];
+    for (const subscription of active.data) {
+      const workspaceId = subscription.metadata?.workspaceId;
+      const planSlug = subscription.metadata?.planSlug;
+      if (!workspaceId || !planSlug) continue;
+
+      const local = await this.prisma.subscription.findUnique({
+        where: { workspaceId },
+        select: { stripeSubscriptionId: true },
+      });
+      if (local?.stripeSubscriptionId === subscription.id) continue;
+
+      // Otra suscripción viva para el mismo espacio significa que se creó por
+      // duplicado. Se conserva la registrada y se cancela la huérfana, o el
+      // fotógrafo pagaría dos veces cada mes.
+      if (local?.stripeSubscriptionId) {
+        this.logger.error(
+          `${workspaceId} tiene dos suscripciones activas: ${local.stripeSubscriptionId} y ${subscription.id}. Se cancela la segunda.`,
+        );
+        await this.cancelInStripe(subscription.id);
+        repaired.push(`${workspaceId}: duplicada cancelada`);
+        continue;
+      }
+
+      const plan = await this.prisma.plan.findUnique({ where: { slug: planSlug } });
+      if (!plan) continue;
+
+      const customerId =
+        typeof subscription.customer === 'string' ? subscription.customer : subscription.customer?.id;
+
+      await this.prisma.subscription.upsert({
+        where: { workspaceId },
+        create: {
+          workspaceId,
+          planId: plan.id,
+          status: SubscriptionStatus.ACTIVE,
+          extraStorageBlocks: Number(subscription.metadata?.extraStorageBlocks || 0),
+          stripeSubscriptionId: subscription.id,
+          stripeCustomerId: customerId ?? null,
+          stripePlanItemId: subscription.items.data.find(i => i.price.id === plan.stripePriceId)?.id ?? null,
+          stripeStorageItemId:
+            subscription.items.data.find(i => i.price.id === plan.stripeStoragePriceId)?.id ?? null,
+          currentPeriodEnd: subscription.current_period_end
+            ? new Date(subscription.current_period_end * 1000)
+            : null,
+        },
+        update: {
+          planId: plan.id,
+          status: SubscriptionStatus.ACTIVE,
+          stripeSubscriptionId: subscription.id,
+          stripeCustomerId: customerId ?? null,
+        },
+      });
+
+      this.logger.warn(
+        `Recuperada: ${workspaceId} pagaba ${plan.name} en Stripe y aquí no constaba (${subscription.id})`,
+      );
+      repaired.push(`${workspaceId}: ${plan.name} registrado`);
+    }
+
+    return { checked: active.data.length, repaired };
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Sincronización del catálogo
   // ───────────────────────────────────────────────────────────────────────────
@@ -345,6 +592,7 @@ export class PlanSubscriptionsService {
       const product = await this.stripe.products.create({
         name: `LucilaMon · ${plan.name}`,
         description: plan.description ?? undefined,
+        tax_code: SAAS_TAX_CODE,
         metadata: { planSlug: plan.slug },
       });
 

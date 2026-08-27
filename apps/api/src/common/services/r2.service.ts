@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import * as https from 'https';
@@ -239,6 +239,64 @@ export class R2Service {
       this.logger.error(`Error eliminando foto: ${getErrorMessage(error)}`, getErrorStack(error));
       throw error;
     }
+  }
+
+  /**
+   * Borra todo lo que cuelga de un prefijo, en los dos cubos.
+   *
+   * Cada objeto de un evento vive bajo `events/{id}/` — original, miniatura,
+   * marca de agua, portada y descargas patrocinadas — así que barrer el
+   * prefijo se lleva también lo que ninguna fila de la base referencia: los
+   * restos de subidas que fallaron a medias. Recorrer foto por foto los habría
+   * dejado ahí, ocupando y pagándose para siempre.
+   *
+   * No lanza. Quien llama ya ha borrado las filas, y dejar la base a medias
+   * sería peor que arrastrar unos objetos huérfanos que podemos limpiar luego.
+   */
+  async deletePrefix(prefix: string): Promise<{ deleted: number; failed: number }> {
+    let deleted = 0;
+    let failed = 0;
+
+    for (const bucket of [this.bucketName, this.publicBucketName]) {
+      if (!bucket) continue;
+      let continuationToken: string | undefined;
+
+      do {
+        try {
+          const listed = await this.s3Client.send(new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          }));
+
+          const keys = (listed.Contents || [])
+            .map(object => object.Key)
+            .filter((key): key is string => Boolean(key));
+
+          if (keys.length) {
+            // La API acepta 1000 claves por llamada: un evento de 2.000
+            // fotografías se resuelve en un puñado de peticiones en lugar de
+            // una por objeto.
+            const response = await this.s3Client.send(new DeleteObjectsCommand({
+              Bucket: bucket,
+              Delete: { Objects: keys.map(Key => ({ Key })), Quiet: true },
+            }));
+            const errors = (response.Errors || []).length;
+            failed += errors;
+            deleted += keys.length - errors;
+          }
+
+          continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+        } catch (error) {
+          this.logger.error(`Error borrando el prefijo ${prefix} en ${bucket}: ${getErrorMessage(error)}`);
+          failed += 1;
+          continuationToken = undefined;
+        }
+      } while (continuationToken);
+    }
+
+    this.logger.log(`Prefijo ${prefix}: ${deleted} objeto(s) borrado(s), ${failed} fallo(s)`);
+    return { deleted, failed };
   }
 
   buildUrl(key: string): string {

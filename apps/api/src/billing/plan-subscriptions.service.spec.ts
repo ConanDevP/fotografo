@@ -99,6 +99,8 @@ describe('PlanSubscriptionsService', () => {
           // el plan activo sin haber cobrado.
           payment_behavior: 'error_if_incomplete',
         }),
+        // Dos peticiones a la vez no deben crear dos suscripciones.
+        expect.objectContaining({ idempotencyKey: expect.stringContaining('cus_1') }),
       );
       expect(result.stripeSubscriptionId).toBe('sub_1');
       expect(result.stripePlanItemId).toBe('si_plan');
@@ -112,6 +114,8 @@ describe('PlanSubscriptionsService', () => {
         expect.objectContaining({
           items: [{ price: 'price_plan' }, { price: 'price_storage', quantity: 3 }],
         }),
+        // La clave incluye los bloques: ampliar espacio es otra operación.
+        expect.objectContaining({ idempotencyKey: expect.stringContaining('-3') }),
       );
     });
 

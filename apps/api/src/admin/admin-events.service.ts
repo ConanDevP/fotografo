@@ -2,10 +2,14 @@ import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/commo
 import { PrismaService } from '../common/services/prisma.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
+import { EventsService } from '../events/events.service';
 
 @Injectable()
 export class AdminEventsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventsService: EventsService,
+  ) {}
 
   async getAllEvents(
     userRole: UserRole,
@@ -219,7 +223,16 @@ export class AdminEventsService {
     return updatedEvent;
   }
 
-  async deleteEventPermanently(eventId: string, userRole: UserRole) {
+  /**
+   * Borrado permanente desde el panel de administración.
+   *
+   * Delega en el borrado del fotógrafo, que es el que libera la cuota y limpia
+   * el almacenamiento. La versión anterior hacía `event.delete()` a secas
+   * confiando en una cascada que no existe: la clave ajena de `photos` hacia
+   * `events` es RESTRICT, así que fallaba en cualquier evento con fotografías,
+   * y en los vacíos no devolvía ni el espacio ni borraba nada de R2.
+   */
+  async deleteEventPermanently(eventId: string, userId: string, userRole: UserRole) {
     if (userRole !== UserRole.ADMIN) {
       throw new ForbiddenException({
         code: ERROR_CODES.FORBIDDEN,
@@ -246,20 +259,18 @@ export class AdminEventsService {
       });
     }
 
-    // Note: This will cascade delete photos, bibs, subscriptions, etc.
-    await this.prisma.event.delete({
-      where: { id: eventId },
-    });
+    const result = await this.eventsService.remove(eventId, userId, userRole);
 
-    // Log the action
     await this.prisma.auditLog.create({
       data: {
+        userId,
         action: 'EVENT_DELETED_PERMANENTLY',
         data: {
           eventId,
           eventName: event.name,
           photosCount: event._count.photos,
           ordersCount: event._count.orders,
+          deletedObjects: result.deletedObjects,
         },
       },
     });
@@ -268,6 +279,7 @@ export class AdminEventsService {
       message: 'Evento eliminado permanentemente',
       deletedPhotos: event._count.photos,
       deletedOrders: event._count.orders,
+      deletedObjects: result.deletedObjects,
     };
   }
 

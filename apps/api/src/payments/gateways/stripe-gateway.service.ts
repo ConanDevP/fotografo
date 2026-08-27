@@ -93,6 +93,13 @@ export class StripeGatewayService implements IPaymentGateway {
                 this.logger.log(`Creating Stripe session with Connect: destination=${request.photographerStripeAccountId}, fee=${platformFeeAmount}`);
             }
 
+            // Managed Payments viene activo por defecto en la cuenta y es
+            // incompatible con Connect: rechaza `transfer_group`, que es lo que
+            // ata el cobro con las transferencias al fotógrafo. Se desactiva por
+            // sesión en lugar de subir la versión de API, que cambiaría el
+            // comportamiento de todos los cobros y disputas.
+            (sessionParams as unknown as Record<string, unknown>).managed_payments = { enabled: false };
+
             const session = await this.stripe.checkout.sessions.create(sessionParams);
 
             this.logger.log(`Stripe Checkout Session created: ${session.id}`);

@@ -142,6 +142,15 @@ export class WebhooksService {
       switch (event.type) {
         // Payment events
         case 'checkout.session.completed': {
+          const completed = event.data.object as Stripe.Checkout.Session;
+          // Los checkout de suscripción son de planes, no de fotografías: se
+          // desvían antes de que el flujo de pedidos intente resolver un orderId
+          // que no existe.
+          if (completed.mode === 'subscription') {
+            await this.planSubscriptions.applyPaidCheckout(completed);
+            break;
+          }
+
           const session = event.data.object as Stripe.Checkout.Session;
           this.logger.log(`Checkout session completed: ${session.id}, payment_status: ${session.payment_status}, metadata: ${JSON.stringify(session.metadata)}`);
 

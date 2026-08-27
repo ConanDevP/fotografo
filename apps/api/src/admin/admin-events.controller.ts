@@ -109,7 +109,7 @@ export class AdminEventsController {
     @Param('id') id: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<ApiResponse> {
-    const result = await this.adminEventsService.deleteEventPermanently(id, req.user.role);
+    const result = await this.adminEventsService.deleteEventPermanently(id, req.user.id, req.user.role);
     return { data: result };
   }
 

@@ -55,12 +55,12 @@ export class CreateOrderDto {
   currency?: string;
 
   @IsOptional()
-  @IsUrl({}, { message: 'URL de retorno inválida' })
+  @IsUrl({ require_tld: false }, { message: 'URL de retorno inválida' })
   @MaxLength(2048)
   returnUrl?: string;
 
   @IsOptional()
-  @IsUrl({}, { message: 'URL de cancelación inválida' })
+  @IsUrl({ require_tld: false }, { message: 'URL de cancelación inválida' })
   @MaxLength(2048)
   cancelUrl?: string;
 

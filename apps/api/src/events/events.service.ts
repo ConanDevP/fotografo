@@ -303,17 +303,86 @@ export class EventsService {
     });
   }
 
+  /**
+   * Borra un evento de verdad: sus fotografías, sus objetos en almacenamiento y
+   * el espacio que ocupaban.
+   *
+   * Antes solo marcaba `deletedAt`. Un evento "eliminado" seguía consumiendo la
+   * cuota del fotógrafo para siempre y sus ficheros se seguían pagando en
+   * Cloudflare sin que nadie pudiera verlos.
+   *
+   * No se permite si alguien ya compró fotografías. `order_items` apunta a
+   * `photos` con ON DELETE SET NULL: borrarlas dejaría el pedido en pie pero sin
+   * nada que descargar, y quien pagó se quedaría sin lo suyo. Para retirarlo de
+   * la vista está despublicarlo, que no destruye nada.
+   */
   async remove(id: string, userId: string, userRole: UserRole) {
-    await this.findOne(id);
+    const event = await this.findOne(id);
     await this.assertCanManageEvent(id, userId, userRole);
 
-    // Soft delete: marcar como eliminado en lugar de borrar físicamente
-    return this.prisma.event.update({
-      where: { id },
-      data: { 
-        deletedAt: new Date() 
-      },
+    const paidOrders = await this.prisma.order.count({
+      where: { eventId: id, status: { in: ['PAID', 'REFUNDED', 'DISPUTED'] } },
     });
+    if (paidOrders > 0) {
+      throw new BadRequestException({
+        code: ERROR_CODES.VALIDATION_ERROR,
+        message:
+          `Este evento tiene ${paidOrders} compra(s) y no puede eliminarse: ` +
+          'quien pagó perdería sus fotografías. Despublícalo para que deje de ser visible.',
+      });
+    }
+
+    // Cuánto le devuelve a cada espacio. En un evento con colaboradores las
+    // fotografías pertenecen a varios, y cada uno recupera solo lo suyo.
+    const usage = await this.prisma.photo.groupBy({
+      by: ['photographerWorkspaceId'],
+      where: { eventId: id },
+      _sum: { originalBytes: true, derivedBytes: true },
+    });
+
+    await this.prisma.$transaction(
+      async tx => {
+        // Las fotografías se borran explícitamente: la clave ajena de `photos`
+        // hacia `events` es RESTRICT, así que borrar el evento sin ellas falla.
+        await tx.photo.deleteMany({ where: { eventId: id } });
+        await tx.event.delete({ where: { id } });
+
+        // Dentro de la transacción para que el medidor no pueda quedarse
+        // inflado si algo falla a mitad.
+        for (const row of usage) {
+          await this.billingService.releaseStorage(
+            row.photographerWorkspaceId,
+            (row._sum.originalBytes ?? 0) + (row._sum.derivedBytes ?? 0),
+            tx,
+          );
+        }
+      },
+      // Un evento grande son miles de filas con sus cascadas; los 5 s por
+      // defecto de Prisma se quedan cortos.
+      { timeout: 120_000, maxWait: 10_000 },
+    );
+
+    // La base ya está limpia. Si el barrido del almacenamiento falla, queda
+    // anotado para repasarlo, pero no se le devuelve un error al fotógrafo por
+    // algo que ya está hecho.
+    const objects = await this.storageService.deleteEventObjects(id);
+    if (objects.failed > 0) {
+      await this.prisma.auditLog
+        .create({
+          data: {
+            userId,
+            action: 'EVENT_STORAGE_CLEANUP_REQUIRED',
+            data: { eventId: id, eventName: event.name, failed: objects.failed },
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    this.logger.log(
+      `Evento ${id} eliminado: ${objects.deleted} objeto(s) borrado(s) del almacenamiento`,
+    );
+
+    return { message: 'Evento eliminado', deletedObjects: objects.deleted };
   }
 
   async restore(id: string, userId: string, userRole: UserRole) {

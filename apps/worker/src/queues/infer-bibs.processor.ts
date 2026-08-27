@@ -16,6 +16,20 @@ import { Prisma } from '@prisma/client';
 export class InferBibsProcessor extends WorkerHost {
   private readonly logger = new Logger(InferBibsProcessor.name);
 
+  /**
+   * Firmas del evento en curso.
+   *
+   * Se releían enteras por cada fotografía. Con 284 firmas de 512 dimensiones
+   * eso son ~1,2 MB por lectura, y un repaso de 1.800 fotografías arrastraba
+   * más de 2 GB desde la base para traer siempre exactamente lo mismo: en una
+   * base que factura por tráfico, la factura la genera esto, no los registros.
+   *
+   * Se guarda una sola entrada, la del evento que se está procesando, y se
+   * descarta en cuanto una firma cambia — que ocurre dentro del propio repaso,
+   * así que cachear sin invalidar daría resultados obsoletos.
+   */
+  private signatureCache: { eventId: string; rows: any[] } | null = null;
+
   constructor(
     private prisma: PrismaService,
     private pythonFaceApiService: PythonFaceApiService,
@@ -38,7 +52,8 @@ export class InferBibsProcessor extends WorkerHost {
   }
 
   /** Inferencia para una sola fotografía. La usan el flujo normal y el repaso. */
-  private async inferForPhoto(photoId: string, eventId: string): Promise<void> {
+  /** Devuelve cuántos dorsales se dedujeron, para que quien llame no tenga que contarlos con otra consulta. */
+  private async inferForPhoto(photoId: string, eventId: string): Promise<number> {
     const startTime = Date.now();
     this.logger.log(`🔍 [INFERENCE-START] Photo ${photoId} in event ${eventId}`);
 
@@ -63,12 +78,12 @@ export class InferBibsProcessor extends WorkerHost {
 
       if (faces.length === 0) {
         this.logger.log(`   ⏭️  No faces found in FaceEmbedding table - nothing to infer`);
-        return;
+        return 0;
       }
 
       // Log each face for debugging
       faces.forEach((f, i) => {
-        this.logger.log(`      Face ${i}: id=${f.id}, hasAssociations=${(f.faceBibAssociations?.length || 0) > 0}, embeddingLength=${f.embedding?.length || 0}`);
+        this.logger.debug(`      Face ${i}: id=${f.id}, hasAssociations=${(f.faceBibAssociations?.length || 0) > 0}, embeddingLength=${f.embedding?.length || 0}`);
       });
 
       // Filtrar: solo inferimos para caras que NO tienen dorsal asociado en esta foto
@@ -78,7 +93,7 @@ export class InferBibsProcessor extends WorkerHost {
 
       if (facesNeedingInference.length === 0) {
         this.logger.log(`   ✅ All faces already have associations - nothing to infer`);
-        return;
+        return 0;
       }
 
       // ═══════════════════════════════════════════════════════
@@ -117,6 +132,7 @@ export class InferBibsProcessor extends WorkerHost {
         );
       }
 
+      return totalInferred;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -130,6 +146,7 @@ export class InferBibsProcessor extends WorkerHost {
       // Don't throw - inference failures shouldn't fail the job
       // Photos are still searchable by direct bib detection
       this.logger.warn(`Continuing without inferred bibs for photo ${photoId}`);
+      return 0;
     }
   }
 
@@ -164,10 +181,10 @@ export class InferBibsProcessor extends WorkerHost {
     for (let index = 0; index < orphanPhotos.length; index++) {
       const { photoId } = orphanPhotos[index];
       try {
-        const before = await this.prisma.faceBibAssociation.count({ where: { photoId } });
-        await this.inferForPhoto(photoId, eventId);
-        const after = await this.prisma.faceBibAssociation.count({ where: { photoId } });
-        if (after > before) resolved++;
+        // Antes se contaban las asociaciones antes y después de cada
+        // fotografía: dos consultas por foto solo para saber si había cambiado
+        // algo, cuando la propia inferencia ya lo sabe.
+        if ((await this.inferForPhoto(photoId, eventId)) > 0) resolved++;
       } catch (error) {
         // Una fotografía problemática no debe detener el repaso del evento.
         this.logger.warn(
@@ -313,6 +330,15 @@ export class InferBibsProcessor extends WorkerHost {
     return { inferredCount, remainingFaces };
   }
 
+  /** Firmas del evento, releídas solo cuando alguna ha cambiado. */
+  private async loadSignatures(eventId: string): Promise<any[]> {
+    if (this.signatureCache?.eventId === eventId) return this.signatureCache.rows;
+
+    const rows = await this.prisma.athleteSignature.findMany({ where: { eventId } });
+    this.signatureCache = { eventId, rows };
+    return rows;
+  }
+
   private async applySignatureFallback(
     eventId: string,
     photoId: string,
@@ -323,15 +349,15 @@ export class InferBibsProcessor extends WorkerHost {
     );
     this.logger.log(`   📋 Signature thresholds: MIN_SAMPLES=${FACE_BIB_LINKING.MIN_SIGNATURE_SAMPLES}, MIN_CONFIDENCE=${FACE_BIB_LINKING.MIN_SIGNATURE_CONFIDENCE}, INFERENCE_THRESHOLD=${FACE_BIB_LINKING.INFERENCE_THRESHOLD}`);
 
-    const allSignatures = await this.prisma.athleteSignature.findMany({
-      where: { eventId },
-    });
+    const allSignatures = await this.loadSignatures(eventId);
 
     this.logger.log(`   📊 Total signatures in event: ${allSignatures.length}`);
 
-    // Log all signatures for debugging
+    // Una línea por firma y por fotografía llenaba la consola con decenas de
+    // miles de líneas por trabajo, tapando lo que sí hay que leer. Queda
+    // disponible bajando el nivel de registro.
     allSignatures.forEach((sig, i) => {
-      this.logger.log(`      Signature ${i}: bib="${sig.bib}", samples=${sig.sampleCount}, confidence=${Number(sig.confidence).toFixed(3)}, embeddingLength=${sig.faceSignature?.length || 0}`);
+      this.logger.debug(`      Signature ${i}: bib="${sig.bib}", samples=${sig.sampleCount}, confidence=${Number(sig.confidence).toFixed(3)}, embeddingLength=${sig.faceSignature?.length || 0}`);
     });
 
     const signatures = this.athleteSignatureService.filterReliableSignatures(allSignatures);
@@ -349,7 +375,7 @@ export class InferBibsProcessor extends WorkerHost {
 
     for (let index = 0; index < faces.length; index++) {
       const face = faces[index];
-      this.logger.log(
+      this.logger.debug(
         `   🎭 [FALLBACK FACE ${index + 1}/${faces.length}] Comparing face ${face.id} against signatures`
       );
 
@@ -360,7 +386,7 @@ export class InferBibsProcessor extends WorkerHost {
         signatureId: null as string | null,
       };
 
-      this.logger.log(`      🔍 Comparing against ${signatures.length} signature(s)...`);
+      this.logger.debug(`      🔍 Comparing against ${signatures.length} signature(s)...`);
 
       for (const signature of signatures) {
         const distance = this.pythonFaceApiService.calculateDistance(
@@ -368,7 +394,7 @@ export class InferBibsProcessor extends WorkerHost {
           signature.faceSignature
         );
 
-        this.logger.log(`         vs bib="${signature.bib}": distance=${distance.toFixed(4)} (threshold=${FACE_BIB_LINKING.INFERENCE_THRESHOLD})`);
+        this.logger.debug(`         vs bib="${signature.bib}": distance=${distance.toFixed(4)} (threshold=${FACE_BIB_LINKING.INFERENCE_THRESHOLD})`);
 
         if (
           distance < FACE_BIB_LINKING.INFERENCE_THRESHOLD &&
@@ -380,7 +406,7 @@ export class InferBibsProcessor extends WorkerHost {
             confidence: 1 - distance,
             signatureId: signature.id,
           };
-          this.logger.log(`         🎯 New best match: bib="${signature.bib}"`);
+          this.logger.debug(`         🎯 New best match: bib="${signature.bib}"`);
         }
       }
 
@@ -435,6 +461,8 @@ export class InferBibsProcessor extends WorkerHost {
           face.embedding,
           undefined
         );
+        // La firma que acabamos de comparar ya no es la que hay guardada.
+        this.signatureCache = null;
       }
     }
 

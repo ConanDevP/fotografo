@@ -104,6 +104,12 @@ export class StorageService {
     return this.r2Service.headPhoto(key);
   }
 
+  /** Borra todos los objetos de un evento: originales, derivadas y portada. */
+  async deleteEventObjects(eventId: string): Promise<{ deleted: number; failed: number }> {
+    if (this.provider !== 'r2') return { deleted: 0, failed: 0 };
+    return this.r2Service.deletePrefix(`events/${eventId}/`);
+  }
+
   async readUploadedHead(key: string, bytes = 16) {
     this.assertDirectUploadSupported();
     return this.r2Service.readHead(key, bytes);

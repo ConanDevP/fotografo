@@ -64,7 +64,12 @@ export class PaymentsController {
   }
 
   @Get('orders/:orderId')
-  @Throttle(30, 60)
+  // Generoso a propósito: tras pagar, la página consulta este pedido varias
+  // veces esperando al webhook, y en desarrollo React duplica cada efecto. Con
+  // 30 se agotaba el cupo y la pantalla se quedaba en "confirmando" para
+  // siempre, culpando a Stripe de un cobro que ya estaba hecho. Es una lectura
+  // de un pedido propio protegida por token, así que el riesgo es bajo.
+  @Throttle(120, 60)
   @UseGuards(OptionalJwtAuthGuard)
   async getOrder(
     @Param('orderId') orderId: string,
@@ -75,6 +80,23 @@ export class PaymentsController {
     // Allow both authenticated and guest access
     const userId = req.user?.id;
     const result = await this.paymentsService.getOrder(orderId, userId, headerToken || token);
+    return { data: result };
+  }
+
+  @Post('orders/:orderId/confirm')
+  // Le pregunta a la pasarela por el cobro en lugar de esperar al webhook. Es
+  // lo que se llama al volver de pagar, así que la entrega deja de depender de
+  // que el webhook gane la carrera al navegador.
+  @Throttle(20, 60)
+  @UseGuards(OptionalJwtAuthGuard)
+  async confirmOrder(
+    @Param('orderId') orderId: string,
+    @Query('token') token: string | undefined,
+    @Headers('x-order-access-token') headerToken: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    const userId = req.user?.id;
+    const result = await this.paymentsService.confirmOrder(orderId, userId, headerToken || token);
     return { data: result };
   }
 

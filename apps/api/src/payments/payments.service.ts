@@ -203,6 +203,15 @@ export class PaymentsService {
         throw new BadRequestException('El paquete contiene fotos inválidas o no publicadas');
       }
 
+      // `allPhotos` significa "todas las fotos de un dorsal", pero no se estaba
+      // comprobando: aceptaba cualquier cantidad de fotografías sueltas al
+      // precio del lote completo. Con 7,99 $ la unidad y 95,88 $ el lote, cien
+      // fotografías cualesquiera costaban 95,88 en vez de 799. Cualquiera que
+      // llamara a la API directamente pagaba una novena parte.
+      if (packageType === 'allPhotos') {
+        await this.assertCoversWholeSet(eventId, photoIds);
+      }
+
       const packagePrice = packagePrices[packageType];
       const basePrice = Math.floor(packagePrice / photos.length);
       const remainder = packagePrice - basePrice * photos.length;
@@ -434,6 +443,32 @@ export class PaymentsService {
         } : null,
       })),
     };
+  }
+
+  /**
+   * Confirma el pedido en el momento en que el comprador vuelve de la pasarela.
+   *
+   * Antes esta pantalla solo sabía leer el pedido y esperaba a que llegase el
+   * webhook, preguntando una y otra vez. Eso hacía depender la entrega de una
+   * carrera que no controlamos: si el webhook tardaba, el comprador veía
+   * "confirmando" sobre un cobro ya hecho.
+   *
+   * Aquí se le pregunta a la pasarela por la sesión, que es la fuente de
+   * verdad, y se liquida igual que lo haría el webhook. El webhook sigue
+   * siendo imprescindible como red: cubre a quien cierra la pestaña al pagar.
+   *
+   * La sesión se toma del propio pedido, nunca de la URL: así nadie puede
+   * presentar la sesión de otro para que se le confirme este.
+   */
+  async confirmOrder(orderId: string, userId?: string, accessToken?: string) {
+    const order = await this.getOrderWithStorage(orderId, userId, accessToken);
+
+    const settled = ['PAID', 'CANCELLED', 'REFUNDED'].includes(order.status);
+    if (!settled && order.paymentGateway === PaymentGateway.STRIPE && order.stripeSessionId) {
+      await this.confirmPaymentFromWebhook(order.stripeSessionId, PaymentGateway.STRIPE);
+    }
+
+    return this.getOrder(orderId, userId, accessToken);
   }
 
   private async getOrderWithStorage(orderId: string, userId?: string, accessToken?: string) {
@@ -1749,6 +1784,52 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * El lote completo tiene que serlo de verdad: o todas las fotografías de un
+   * dorsal, o todas las del evento. Cualquier otra cosa es comprar sueltas al
+   * precio del lote.
+   */
+  private async assertCoversWholeSet(eventId: string, photoIds: string[]): Promise<void> {
+    const selected = new Set(photoIds);
+
+    // Caso 1: son todas las del evento.
+    const eventTotal = await this.prisma.photo.count({
+      where: { eventId, status: 'PROCESSED', publicationStatus: 'APPROVED' },
+    });
+    if (eventTotal > 0 && selected.size === eventTotal) return;
+
+    // Caso 2: son todas las de algún dorsal presente en la selección. Se busca
+    // entre los dorsales de las fotografías elegidas, no entre todos los del
+    // evento, para no recorrer una carrera entera por cada pedido.
+    const bibs = await this.prisma.photoBib.findMany({
+      where: { eventId, photoId: { in: photoIds } },
+      select: { bib: true },
+      distinct: ['bib'],
+      take: 20,
+    });
+
+    for (const { bib } of bibs) {
+      const forBib = await this.prisma.photoBib.findMany({
+        where: {
+          bib,
+          eventId,
+          photo: { status: 'PROCESSED', publicationStatus: 'APPROVED' },
+        },
+        select: { photoId: true },
+        distinct: ['photoId'],
+      });
+      if (forBib.length === 0) continue;
+      const covered = forBib.every(entry => selected.has(entry.photoId));
+      if (covered && forBib.length === selected.size) return;
+    }
+
+    throw new BadRequestException({
+      code: 'PACKAGE_NOT_COMPLETE',
+      message:
+        'El precio de "todas las fotografías" solo se aplica al conjunto completo de un dorsal o del evento. Selecciona todas o compra por unidad.',
+    });
+  }
+
   private async settleStripeOrder(orderId: string) {
     const staleProcessing = new Date(Date.now() - 10 * 60_000);
     const claim = await this.prisma.order.updateMany({
@@ -1822,11 +1903,14 @@ export class PaymentsService {
           || !recipient.stripeChargesEnabled
           || !recipient.stripePayoutsEnabled
         ) {
-          const reason = `El espacio ${entry.workspaceId || 'desconocido'} todavía no tiene Stripe Connect habilitado`;
-          unavailable.push(reason);
+          // Dos mensajes distintos a propósito. El del pedido lo leemos
+          // nosotros para diagnosticar, así que lleva el identificador. El del
+          // asiento lo lee el fotógrafo en su facturación: un UUID interno no
+          // le dice nada ni le indica qué tiene que hacer.
+          unavailable.push(`El espacio ${entry.workspaceId || 'desconocido'} todavía no tiene Stripe Connect habilitado`);
           await this.prisma.ledgerEntry.update({
             where: { id: entry.id },
-            data: { failureReason: reason },
+            data: { failureReason: 'Falta completar tu alta de cobros para poder transferirte.' },
           });
           continue;
         }

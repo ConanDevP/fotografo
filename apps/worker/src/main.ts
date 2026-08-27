@@ -2,11 +2,19 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 import { NestFactory } from '@nestjs/core';
-import { Logger } from '@nestjs/common';
+import { Logger, LogLevel } from '@nestjs/common';
 import { WorkerModule } from './worker.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(WorkerModule);
+  // Nest imprime `debug` y `verbose` por defecto. Las trazas por firma y por
+  // comparación sirven para depurar el reconocimiento, pero en marcha normal
+  // son decenas de miles de líneas por trabajo y tapan lo único que hay que
+  // leer. Se recuperan arrancando con LOG_LEVEL=debug.
+  const levels: LogLevel[] = process.env.LOG_LEVEL === 'debug'
+    ? ['error', 'warn', 'log', 'debug', 'verbose']
+    : ['error', 'warn', 'log'];
+
+  const app = await NestFactory.create(WorkerModule, { logger: levels });
   const logger = new Logger('WorkerBootstrap');
 
   // Graceful shutdown

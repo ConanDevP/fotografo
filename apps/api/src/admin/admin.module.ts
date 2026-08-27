@@ -18,8 +18,13 @@ import { AdminSystemController } from './admin-system.controller';
 import { PrismaService } from '../common/services/prisma.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { QueueService } from '../common/services/queue.service';
+import { EventsModule } from '../events/events.module';
 
 @Module({
+  // El borrado permanente de eventos reutiliza el del panel del fotógrafo, que
+  // es el que libera cuota y limpia el almacenamiento. Tener dos borrados
+  // distintos era justamente lo que dejaba uno de ellos roto y con fugas.
+  imports: [EventsModule],
   controllers: [
     AdminController,
     AdminUsersController,

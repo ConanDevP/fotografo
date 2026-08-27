@@ -178,11 +178,45 @@ describe('BillingService', () => {
   });
 
   describe('ingresos', () => {
-    const givenLedger = (rows: Array<{ type: string; status: string; total: number }>) => {
+    /**
+     * Los asientos de comisión no llevan `workspaceId`: son de la plataforma.
+     * El mock lo respeta, porque asumir lo contrario es exactamente lo que
+     * escondía el fallo — las comisiones salían en cero y el reparto que veía
+     * el fotógrafo no sumaba el total vendido.
+     */
+    const givenLedger = (
+      propios: Array<{ type: string; status: string; total: number }>,
+      pedidos: Array<{ orderId: string; type: string; total: number }> = [],
+      // Parte de ESTE espacio en cada pedido. Si se omite, es el único
+      // beneficiario y le corresponde todo lo repartido.
+      miParte?: Array<{ orderId: string; total: number }>,
+    ) => {
+      const porPedido = (tipos: string[]) => {
+        if (miParte) return miParte.map(row => ({ orderId: row.orderId, _sum: { amountCents: row.total } }));
+        const acumulado = new Map<string, number>();
+        pedidos
+          .filter(row => tipos.includes(row.type))
+          .forEach(row => acumulado.set(row.orderId, (acumulado.get(row.orderId) || 0) + row.total));
+        return [...acumulado].map(([orderId, total]) => ({ orderId, _sum: { amountCents: total } }));
+      };
+
       prisma.ledgerEntry = {
-        groupBy: jest.fn().mockResolvedValue(
-          rows.map(row => ({ type: row.type, status: row.status, _sum: { amountCents: row.total }, _count: 1 })),
-        ),
+        groupBy: jest.fn().mockImplementation(({ by, where }: any) => {
+          // Resumen por tipo y estado, ya filtrado por espacio.
+          if (by.includes('status')) {
+            return Promise.resolve(
+              propios.map(row => ({ type: row.type, status: row.status, _sum: { amountCents: row.total }, _count: 1 })),
+            );
+          }
+          // Parte de este espacio en cada pedido.
+          if (by.length === 1) {
+            return Promise.resolve(porPedido(where.type.in));
+          }
+          // Todos los asientos del pedido, incluidos los de la plataforma.
+          return Promise.resolve(
+            pedidos.map(row => ({ orderId: row.orderId, type: row.type, _sum: { amountCents: row.total } })),
+          );
+        }),
         findMany: jest.fn().mockResolvedValue([]),
       };
     };
@@ -201,12 +235,15 @@ describe('BillingService', () => {
 
     it('no suma al fotógrafo las comisiones de plataforma ni pasarela', async () => {
       // Si se sumaran, vería como suyo un dinero que nunca va a recibir.
-      givenLedger([
-        { type: 'PHOTOGRAPHER_EARNING', status: 'PAID_OUT', total: 7390 },
-        { type: 'PLATFORM_FEE', status: 'PAID_OUT', total: -1200 },
-        { type: 'PROCESSOR_FEE', status: 'PAID_OUT', total: -590 },
-        { type: 'GROSS_SALE', status: 'PAID_OUT', total: 10000 },
-      ]);
+      givenLedger(
+        [{ type: 'PHOTOGRAPHER_EARNING', status: 'PAID_OUT', total: 7390 }],
+        [
+          { orderId: 'ord-1', type: 'GROSS_SALE', total: 10000 },
+          { orderId: 'ord-1', type: 'PHOTOGRAPHER_EARNING', total: 7390 },
+          { orderId: 'ord-1', type: 'PLATFORM_FEE', total: -1200 },
+          { orderId: 'ord-1', type: 'PROCESSOR_FEE', total: -590 },
+        ],
+      );
 
       const result = await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
 
@@ -215,6 +252,47 @@ describe('BillingService', () => {
       expect(result.summary.platformFeeCents).toBe(1200);
       expect(result.summary.processorFeeCents).toBe(590);
       expect(result.summary.grossCents).toBe(10000);
+    });
+
+    it('el reparto que ve el fotógrafo suma exactamente lo vendido', async () => {
+      // Es la comprobación que faltaba: antes salían las dos comisiones a cero
+      // sobre una venta real, y el dinero que faltaba no se explicaba en
+      // ninguna parte de la pantalla.
+      givenLedger(
+        [{ type: 'PHOTOGRAPHER_EARNING', status: 'AVAILABLE', total: 1788 }],
+        [
+          { orderId: 'ord-1', type: 'GROSS_SALE', total: 2397 },
+          { orderId: 'ord-1', type: 'PHOTOGRAPHER_EARNING', total: 1788 },
+          { orderId: 'ord-1', type: 'PLATFORM_FEE', total: -360 },
+          { orderId: 'ord-1', type: 'PROCESSOR_FEE', total: -249 },
+        ],
+      );
+
+      const { summary } = await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
+
+      expect(summary.pendingCents + summary.platformFeeCents + summary.processorFeeCents)
+        .toBe(summary.grossCents);
+    });
+
+    it('a cada fotógrafo de un evento compartido le toca solo su parte de la comisión', async () => {
+      // Este espacio se llevó 1000 de los 2000 repartidos: le corresponde la
+      // mitad de la comisión, no la de su compañero.
+      givenLedger(
+        [{ type: 'PHOTOGRAPHER_EARNING', status: 'AVAILABLE', total: 1000 }],
+        [
+          { orderId: 'ord-1', type: 'GROSS_SALE', total: 2600 },
+          { orderId: 'ord-1', type: 'PHOTOGRAPHER_EARNING', total: 2000 },
+          { orderId: 'ord-1', type: 'PLATFORM_FEE', total: -400 },
+          { orderId: 'ord-1', type: 'PROCESSOR_FEE', total: -200 },
+        ],
+        [{ orderId: 'ord-1', total: 1000 }],
+      );
+
+      const { summary } = await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
+
+      expect(summary.platformFeeCents).toBe(200);
+      expect(summary.processorFeeCents).toBe(100);
+      expect(summary.grossCents).toBe(1300);
     });
 
     it('cuenta aparte lo retenido por un contracargo', async () => {
