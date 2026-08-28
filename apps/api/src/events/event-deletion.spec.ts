@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 import { EventsService } from './events.service';
 import { PrismaService } from '../common/services/prisma.service';
@@ -48,7 +48,58 @@ describe('Borrado de un evento', () => {
 
     service = module.get<EventsService>(EventsService);
     jest.spyOn(service as any, 'findOne').mockResolvedValue({ id: EVENT, name: 'Media maratón' });
-    jest.spyOn(service as any, 'assertCanManageEvent').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'assertCanDeleteEvent').mockResolvedValue(undefined);
+  });
+
+  /**
+   * Quién puede borrar. Se prueba contra la comprobación real, sin sustituirla:
+   * un colaborador invitado pasa `assertCanManageEvent` — puede revisar fotos e
+   * invitar a otros — y eso no debe alcanzar para destruir el trabajo de todos.
+   */
+  describe('quién tiene permiso', () => {
+    // El `beforeEach` de arriba sustituye la comprobación para poder probar el
+    // borrado; aquí hace falta la de verdad, que es lo que se está probando.
+    beforeEach(() => {
+      (service as any).assertCanDeleteEvent.mockRestore();
+    });
+
+    const conEvento = (event: any) => {
+      prisma.event.findFirst = jest.fn().mockResolvedValue(event);
+    };
+
+    it('un colaborador EDITOR no puede borrar el evento', async () => {
+      // Pasaría `assertCanManageEvent`, que es justo el peligro: mientras el
+      // borrado solo ocultaba daba igual; ahora destruye ficheros.
+      conEvento({ id: EVENT, ownerId: 'otro-usuario', workspace: { members: [] } });
+
+      await expect(
+        (service as any).assertCanDeleteEvent(EVENT, 'colaborador-1', UserRole.PHOTOGRAPHER),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('el dueño del evento sí puede', async () => {
+      conEvento({ id: EVENT, ownerId: 'user-1', workspace: { members: [] } });
+
+      await expect(
+        (service as any).assertCanDeleteEvent(EVENT, 'user-1', UserRole.PHOTOGRAPHER),
+      ).resolves.toBeDefined();
+    });
+
+    it('quien manda en el espacio sí puede', async () => {
+      conEvento({ id: EVENT, ownerId: 'otro', workspace: { members: [{ role: 'OWNER' }] } });
+
+      await expect(
+        (service as any).assertCanDeleteEvent(EVENT, 'user-1', UserRole.PHOTOGRAPHER),
+      ).resolves.toBeDefined();
+    });
+
+    it('un miembro del espacio sin mando no puede', async () => {
+      conEvento({ id: EVENT, ownerId: 'otro', workspace: { members: [{ role: 'PHOTOGRAPHER' }] } });
+
+      await expect(
+        (service as any).assertCanDeleteEvent(EVENT, 'user-1', UserRole.PHOTOGRAPHER),
+      ).rejects.toThrow(ForbiddenException);
+    });
   });
 
   it('no borra un evento del que alguien ya compró fotografías', async () => {

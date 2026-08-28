@@ -31,6 +31,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
     }
 
+    // Una cuenta cerrada conserva su fila para sostener la contabilidad, pero
+    // no debe poder entrar. Sin esta comprobación, los tokens emitidos antes
+    // del cierre seguirían siendo válidos hasta caducar.
+    if (user.deletedAt) {
+      throw new UnauthorizedException({
+        code: ERROR_CODES.UNAUTHORIZED,
+        message: 'Esta cuenta está cerrada',
+      });
+    }
+
     return {
       id: user.id,
       email: user.email,

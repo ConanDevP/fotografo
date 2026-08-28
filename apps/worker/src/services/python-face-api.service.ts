@@ -19,8 +19,37 @@ export class PythonFaceApiService {
   private readonly logger = new Logger(PythonFaceApiService.name);
   private readonly pythonApiUrl: string;
 
+  private readonly faceApiKey: string;
+
   constructor(private configService: ConfigService) {
     this.pythonApiUrl = this.configService.get('PYTHON_FACE_API_URL', 'http://localhost:8000');
+    this.faceApiKey = (this.configService.get<string>('FACE_API_KEY') || '').trim();
+
+    if (!this.faceApiKey) {
+      // La validación de entorno solo corre con NODE_ENV=production, así que
+      // fuera de ahí una clave ausente pasaba sin aviso. Se detectaba mucho más
+      // tarde, como un 401 por fotografía, indistinguible de una clave errónea.
+      this.logger.error(
+        'FACE_API_KEY no está configurada: el reconocimiento facial fallará con 401 en cada fotografía',
+      );
+    }
+  }
+
+  /**
+   * Cabeceras de la llamada.
+   *
+   * Sin clave se corta aquí en vez de mandar una vacía. El servicio Python
+   * responde a ambos casos con el mismo "Invalid face API credentials", así que
+   * enviarla vacía convertía "no hay clave" en "la clave está mal" y mandaba a
+   * buscar en el sitio equivocado.
+   */
+  private authHeaders(): Record<string, string> {
+    if (!this.faceApiKey) {
+      throw new Error(
+        'FACE_API_KEY no está configurada en este servicio. El reconocimiento facial no puede autenticarse.',
+      );
+    }
+    return { 'Content-Type': 'application/json', 'X-Face-API-Key': this.faceApiKey };
   }
 
   async detectAllFaces(imageUrl: string, maxFaces = 10, minConfidence = 0.5): Promise<FaceDetectionResult[]> {
@@ -29,10 +58,7 @@ export class PythonFaceApiService {
 
       const response = await fetch(`${this.pythonApiUrl}/extract-faces`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Face-API-Key': this.configService.get('FACE_API_KEY', ''),
-        },
+        headers: this.authHeaders(),
         body: JSON.stringify({
           image_url: imageUrl, // Send signed URL directly
           max_faces: maxFaces,
@@ -95,10 +121,7 @@ export class PythonFaceApiService {
       
       const response = await fetch(`${this.pythonApiUrl}/extract-faces`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Face-API-Key': this.configService.get('FACE_API_KEY', ''),
-        },
+        headers: this.authHeaders(),
         body: JSON.stringify(requestPayload),
         signal: AbortSignal.timeout(60_000),
       });
@@ -177,9 +200,9 @@ export class PythonFaceApiService {
     try {
       const response = await fetch(`${this.pythonApiUrl}/health`, {
         method: 'GET',
-        headers: {
-          'X-Face-API-Key': this.configService.get('FACE_API_KEY', ''),
-        },
+        // Sin `authHeaders()` a propósito: /health no pide autenticación y esta
+        // comprobación debe poder responder "no está listo" en vez de lanzar.
+        headers: this.faceApiKey ? { 'X-Face-API-Key': this.faceApiKey } : {},
         signal: AbortSignal.timeout(5000),
       });
 

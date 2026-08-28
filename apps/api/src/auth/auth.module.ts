@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthService } from './auth.service';
 import { PasswordResetService } from './password-reset.service';
+import { AccountDeletionService } from './account-deletion.service';
 import { MailerService } from '../common/services/mailer.service';
 import { AuthController } from './auth.controller';
 import { RedisService } from './redis.service';
@@ -37,7 +38,7 @@ import { normalizePem } from '../common/config/validate-environment';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, RedisService, JwtStrategy, LocalStrategy, R2Service, CloudinaryService, SharpTransformService, StorageService, PrismaService, PasswordResetService, MailerService],
+  providers: [AuthService, RedisService, JwtStrategy, LocalStrategy, R2Service, CloudinaryService, SharpTransformService, StorageService, PrismaService, PasswordResetService, AccountDeletionService, MailerService],
   controllers: [AuthController],
   exports: [AuthService],
 })

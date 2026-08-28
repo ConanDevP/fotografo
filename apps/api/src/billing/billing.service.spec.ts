@@ -17,6 +17,7 @@ const planSubscriptions = {
     currentPeriodEnd: null,
     status: 'ACTIVE',
   }),
+  createPortalSession: jest.fn().mockResolvedValue({ url: 'https://billing.stripe.com/p/session' }),
 };
 
 const GB = BigInt(1024) * BigInt(1024) * BigInt(1024);
@@ -82,6 +83,49 @@ describe('BillingService', () => {
     }).compile();
 
     service = module.get<BillingService>(BillingService);
+  });
+
+  /**
+   * Cancelar un plan. Se delega en el portal de Stripe, así que lo que hay que
+   * fijar aquí es quién puede abrirlo y a dónde vuelve.
+   */
+  describe('portal de facturación', () => {
+    it('exige ser dueño del espacio, igual que contratar', async () => {
+      // Pedir más permiso para darse de baja que para suscribirse sería una
+      // trampa: quien puede comprometer al espacio a pagar debe poder sacarlo.
+      const workspaces = { assertAccess: jest.fn() };
+      const module = await Test.createTestingModule({
+        providers: [
+          BillingService,
+          { provide: PrismaService, useValue: prisma },
+          { provide: WorkspacesService, useValue: workspaces },
+          { provide: PlanSubscriptionsService, useValue: planSubscriptions },
+          { provide: ConfigService, useValue: { get: (_: string, f?: any) => f } },
+        ],
+      }).compile();
+
+      await module.get<BillingService>(BillingService).openBillingPortal(
+        WORKSPACE,
+        'user-1',
+        UserRole.PHOTOGRAPHER,
+      );
+
+      expect(workspaces.assertAccess).toHaveBeenCalledWith(WORKSPACE, 'user-1', ['OWNER']);
+    });
+
+    it('ignora una url de retorno que apunte fuera del sitio', async () => {
+      // El destino se lo damos a Stripe tal cual; aceptar cualquier cosa
+      // convertiría la baja en un salto a un dominio ajeno.
+      await service.openBillingPortal(
+        WORKSPACE,
+        'user-1',
+        UserRole.PHOTOGRAPHER,
+        'https://sitio-que-no-es-nuestro.example/gracias',
+      );
+
+      const destino = planSubscriptions.createPortalSession.mock.calls.at(-1)?.[1];
+      expect(destino).toBe('http://localhost:3000/dashboard/billing');
+    });
   });
 
   describe('plan efectivo', () => {

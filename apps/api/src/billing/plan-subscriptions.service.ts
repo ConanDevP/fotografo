@@ -134,6 +134,49 @@ export class PlanSubscriptionsService {
   }
 
   /**
+   * Portal de cliente de Stripe: donde el fotógrafo cancela su plan, cambia de
+   * tarjeta y descarga sus facturas.
+   *
+   * Hasta ahora se podía contratar pero no darse de baja desde el producto, que
+   * es justo lo que persiguen los reguladores como práctica desleal — y, más
+   * simple: cobrarle a alguien todos los meses sin enseñarle la salida está mal.
+   *
+   * Se usa el portal de Stripe en vez de una pantalla propia porque la
+   * cancelación queda registrada en la pasarela, que es la que cobra, y el
+   * webhook `customer.subscription.deleted` ya baja el espacio al plan gratuito.
+   */
+  async createPortalSession(workspaceId: string, returnUrl: string): Promise<{ url: string }> {
+    if (!this.stripe) {
+      throw new BadRequestException({
+        code: 'BILLING_NOT_CONFIGURED',
+        message: 'La facturación no está configurada.',
+      });
+    }
+
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { stripeCustomerId: true },
+    });
+    if (!workspace) throw new NotFoundException('Espacio no encontrado');
+
+    // Sin cliente en Stripe nunca hubo cobro, así que no hay nada que gestionar.
+    // Decirlo claro evita que el fotógrafo crea que la baja falló.
+    if (!workspace.stripeCustomerId) {
+      throw new BadRequestException({
+        code: 'NO_BILLING_HISTORY',
+        message: 'Este espacio todavía no tiene un plan de pago que gestionar.',
+      });
+    }
+
+    const session = await this.stripe.billingPortal.sessions.create({
+      customer: workspace.stripeCustomerId,
+      return_url: returnUrl,
+    });
+
+    return { url: session.url };
+  }
+
+  /**
    * Sesión de Checkout alojada por Stripe para contratar un plan.
    *
    * Se prefiere a pedir la tarjeta dentro del panel: el comprador ve el dominio

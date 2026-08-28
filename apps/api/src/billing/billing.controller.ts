@@ -89,6 +89,24 @@ export class BillingController {
     };
   }
 
+  /** Portal de Stripe donde el fotógrafo cancela su plan y ve sus facturas. */
+  @Post('workspaces/:workspaceId/billing/portal')
+  @UseGuards(AuthGuard('jwt'))
+  async billingPortal(
+    @Param('workspaceId') workspaceId: string,
+    @Body() dto: { returnUrl?: string },
+    @Req() req: any,
+  ): Promise<ApiResponse> {
+    return {
+      data: await this.billing.openBillingPortal(
+        workspaceId,
+        req.user.id,
+        req.user.role,
+        dto?.returnUrl,
+      ),
+    };
+  }
+
   /** Devuelve la dirección de Stripe donde el fotógrafo paga su plan. */
   @Post('workspaces/:workspaceId/billing/checkout')
   @UseGuards(AuthGuard('jwt'))

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, Res, HttpCode, HttpStatus, Put, Get, UploadedFile, UseInterceptors, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Res, HttpCode, HttpStatus, Put, Get, Delete, UploadedFile, UseInterceptors, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
@@ -15,6 +15,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { ForgotPasswordDto, ResetPasswordWithTokenDto } from './dto/password-reset.dto';
 import { PasswordResetService } from './password-reset.service';
+import { AccountDeletionService } from './account-deletion.service';
 import { ApiResponse } from '@shared/types';
 
 @Controller('auth')
@@ -24,6 +25,7 @@ export class AuthController {
     private readonly usersService: UsersService,
     private readonly storageService: StorageService,
     private readonly passwordReset: PasswordResetService,
+    private readonly accountDeletion: AccountDeletionService,
   ) {}
 
   @Post('register')
@@ -86,6 +88,23 @@ export class AuthController {
     const refreshToken = refreshTokenDto.refreshToken || this.readRefreshCookie(req);
     if (refreshToken) await this.authService.logout(refreshToken);
     res.clearCookie('lucilamon_refresh', this.refreshCookieOptions());
+  }
+
+  /**
+   * Cierre de cuenta a petición del titular.
+   *
+   * Pide la contraseña porque no tiene vuelta atrás: una sesión abierta en un
+   * ordenador ajeno no debería bastar para cerrar la cuenta de alguien.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Delete('me')
+  @Throttle(3, 60)
+  async closeOwnAccount(
+    @Req() req: any,
+    @Body() body: { password?: string },
+  ): Promise<ApiResponse> {
+    if (!body?.password) throw new BadRequestException('Confirma tu contraseña para cerrar la cuenta');
+    return { data: await this.accountDeletion.deleteOwnAccount(req.user.id, body.password) };
   }
 
   @UseGuards(AuthGuard('jwt'))

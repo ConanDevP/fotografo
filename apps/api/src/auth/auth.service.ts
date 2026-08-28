@@ -110,6 +110,11 @@ export class AuthService {
   async validateUser(email: string, password: string): Promise<any> {
     const user = await this.usersService.findByEmail(email.trim().toLowerCase());
     
+    // El cierre de cuenta deja `passwordHash` en null, así que esto ya fallaría
+    // solo. Se comprueba aparte para que la regla esté escrita y no dependa de
+    // un efecto colateral que alguien podría deshacer sin darse cuenta.
+    if (user?.deletedAt) return null;
+
     if (user && user.passwordHash && await argon2.verify(user.passwordHash, password)) {
       const { passwordHash, ...result } = user;
       return result;

@@ -318,7 +318,7 @@ export class EventsService {
    */
   async remove(id: string, userId: string, userRole: UserRole) {
     const event = await this.findOne(id);
-    await this.assertCanManageEvent(id, userId, userRole);
+    await this.assertCanDeleteEvent(id, userId, userRole);
 
     const paidOrders = await this.prisma.order.count({
       where: { eventId: id, status: { in: ['PAID', 'REFUNDED', 'DISPUTED'] } },
@@ -994,6 +994,39 @@ export class EventsService {
         reviewedById: userId,
       },
     });
+  }
+
+  /**
+   * Quién puede destruir un evento.
+   *
+   * Más estricto que `assertCanManageEvent` a propósito. Aquella deja pasar a
+   * colaboradores invitados con rol EDITOR o EVENT_MANAGER, lo cual es correcto
+   * para revisar fotografías o invitar a alguien más, pero no para borrar sin
+   * vuelta atrás el trabajo de todos los demás fotógrafos del evento.
+   *
+   * Mientras el borrado solo ocultaba, la diferencia daba igual. Desde que
+   * destruye ficheros, no.
+   */
+  private async assertCanDeleteEvent(eventId: string, userId: string, userRole: UserRole) {
+    const event = await this.prisma.event.findFirst({
+      where: { id: eventId, deletedAt: null },
+      include: {
+        workspace: { include: { members: { where: { userId, status: 'ACTIVE' } } } },
+      },
+    });
+    if (!event) throw new NotFoundException('Evento no encontrado');
+
+    const workspaceRole = event.workspace?.members[0]?.role;
+    const mandanEnElEspacio: WorkspaceRole[] = [WorkspaceRole.OWNER, WorkspaceRole.ADMIN];
+    const puede =
+      userRole === UserRole.ADMIN
+      || event.ownerId === userId
+      || (!!workspaceRole && mandanEnElEspacio.includes(workspaceRole));
+
+    if (!puede) {
+      throw new ForbiddenException('Solo quien es dueño del evento puede eliminarlo');
+    }
+    return event;
   }
 
   async assertCanManageEvent(eventId: string, userId: string, userRole: UserRole) {

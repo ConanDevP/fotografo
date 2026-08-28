@@ -29,6 +29,9 @@ model User {
   portfolioUrl              String?            @map("portfolio_url")
   isFeatured                Boolean            @default(false) @map("is_featured")
   isVerified                Boolean            @default(false) @map("is_verified")
+  /// Cierre de cuenta. La fila se conserva anonimizada porque los apuntes
+  /// contables y los pedidos apuntan aquí; esta marca cierra el acceso.
+  deletedAt                 DateTime?          @map("deleted_at") @db.Timestamptz(6)
   paypalMerchantId          String?            @unique @map("paypal_merchant_id")
   paypalMerchantIdInPayPal  String?            @map("paypal_merchant_id_in_paypal")
   paypalEmail               String?            @map("paypal_email")

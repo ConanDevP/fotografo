@@ -650,6 +650,29 @@ export class BillingService {
    * webhook. Concederlo antes dejaría planes activos sin pagar cada vez que
    * alguien abandona el checkout.
    */
+  /**
+   * Abre el portal donde el fotógrafo gestiona y cancela su plan.
+   *
+   * Mismo permiso que contratar: quien puede comprometer al espacio a pagar
+   * debe poder sacarlo. Un permiso más estricto para cancelar que para
+   * suscribirse sería una trampa.
+   */
+  async openBillingPortal(
+    workspaceId: string,
+    userId: string,
+    userRole: UserRole,
+    returnUrl?: string,
+  ) {
+    if (userRole !== UserRole.ADMIN) {
+      await this.workspaces.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER]);
+    }
+
+    const base = this.config.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+    const destino = returnUrl?.startsWith(base) ? returnUrl : `${base}/dashboard/billing`;
+
+    return this.planSubscriptions.createPortalSession(workspaceId, destino);
+  }
+
   async startPlanCheckout(
     workspaceId: string,
     planSlug: string,
