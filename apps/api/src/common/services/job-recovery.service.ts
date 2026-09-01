@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from './prisma.service';
 import { QueueService } from './queue.service';
+import { StorageService } from './storage.service';
 
 @Injectable()
 export class JobRecoveryService {
@@ -10,7 +11,48 @@ export class JobRecoveryService {
   constructor(
     private prisma: PrismaService,
     private queueService: QueueService,
+    private storageService: StorageService,
   ) {}
+
+  /**
+   * Una foto "PENDING" hace rato pudo quedarse así por dos motivos muy
+   * distintos: el job de proceso se perdió de la cola (el objeto SÍ está en
+   * R2, re-encolar la arregla), o el chunk de subida falló a medias y
+   * `/uploads/batch/:id/complete` nunca llegó a confirmarla (el objeto NO
+   * existe en R2, y re-encolarla solo la manda derecho a FAILED).
+   *
+   * Sin esta comprobación, este mismo recovery era el que convertía subidas
+   * fallidas en fotografías fantasma con badge de error en el dashboard.
+   */
+  private async recoverOrDiscard(
+    photo: { id: string; eventId: string; cloudinaryId: string },
+    priority: number,
+    context: string,
+  ): Promise<'recovered' | 'discarded' | 'error'> {
+    try {
+      const head = await this.storageService.headUploadedPhoto(photo.cloudinaryId).catch(() => null);
+      if (!head || head.size <= 0) {
+        // Nunca llegó a subirse: no hay nada que procesar. Se borra en vez de
+        // dejarla en PENDING para siempre o mandarla a fallar en el worker.
+        await this.prisma.photo.delete({ where: { id: photo.id } }).catch(() => undefined);
+        this.logger.warn(
+          `${context}: foto ${photo.id} no tiene objeto en almacenamiento (${photo.cloudinaryId}), descartada`,
+        );
+        return 'discarded';
+      }
+
+      await this.queueService.addProcessPhotoJob(
+        { photoId: photo.id, eventId: photo.eventId, objectKey: photo.cloudinaryId },
+        priority,
+      );
+      this.logger.log(`${context}: foto ${photo.id} re-encolada (objeto verificado en almacenamiento)`);
+      return 'recovered';
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`${context}: error verificando/re-encolando foto ${photo.id}: ${errorMsg}`);
+      return 'error';
+    }
+  }
 
   // Ejecutar cada 2 minutos para detectar jobs stuck
   @Cron('*/2 * * * *')
@@ -48,28 +90,19 @@ export class JobRecoveryService {
       this.logger.warn(`Encontradas ${stuckPhotos.length} fotos stuck, iniciando recovery`);
 
       let recoveredCount = 0;
+      let discardedCount = 0;
       const errors: string[] = [];
 
       for (const photo of stuckPhotos) {
-        try {
-          // Re-encolar job con alta prioridad
-          await this.queueService.addProcessPhotoJob({
-            photoId: photo.id,
-            eventId: photo.eventId,
-            objectKey: photo.cloudinaryId,
-          }, 20); // Alta prioridad para recovery
-
-          recoveredCount++;
-          this.logger.log(`Recovery: Re-encolado job para foto ${photo.id} (stuck desde ${photo.createdAt})`);
-
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          errors.push(`${photo.id}: ${errorMsg}`);
-          this.logger.error(`Error en recovery para foto ${photo.id}: ${errorMsg}`);
-        }
+        const outcome = await this.recoverOrDiscard(photo, 20, 'Recovery'); // Alta prioridad
+        if (outcome === 'recovered') recoveredCount++;
+        else if (outcome === 'discarded') discardedCount++;
+        else errors.push(photo.id);
       }
 
-      this.logger.log(`Recovery completado: ${recoveredCount} fotos re-encoladas, ${errors.length} errores`);
+      this.logger.log(
+        `Recovery completado: ${recoveredCount} fotos re-encoladas, ${discardedCount} descartadas (nunca subidas), ${errors.length} errores`,
+      );
 
       if (errors.length > 0) {
         this.logger.warn(`Errores en recovery: ${errors.slice(0, 5).join(', ')}${errors.length > 5 ? '...' : ''}`);
@@ -134,20 +167,13 @@ export class JobRecoveryService {
           continue;
         }
 
-        // Re-encolar fotos pendientes
+        // Re-encolar fotos pendientes (o descartar las que nunca llegaron a subirse)
         let reEnqueued = 0;
+        let discarded = 0;
         for (const photo of pendingPhotos) {
-          try {
-            await this.queueService.addProcessPhotoJob({
-              photoId: photo.id,
-              eventId: photo.eventId,
-              objectKey: photo.cloudinaryId,
-            }, 15); // Prioridad alta para batch recovery
-
-            reEnqueued++;
-          } catch (error) {
-            this.logger.error(`Error re-encolando foto ${photo.id} del batch ${batchJob.id}`);
-          }
+          const outcome = await this.recoverOrDiscard(photo, 15, `BatchJob ${batchJob.id}`); // Prioridad alta
+          if (outcome === 'recovered') reEnqueued++;
+          else if (outcome === 'discarded') discarded++;
         }
 
         // Actualizar timestamp del batch job
@@ -156,7 +182,9 @@ export class JobRecoveryService {
           data: { updatedAt: new Date() }
         });
 
-        this.logger.log(`BatchJob ${batchJob.id}: Re-encoladas ${reEnqueued}/${pendingPhotos.length} fotos pendientes`);
+        this.logger.log(
+          `BatchJob ${batchJob.id}: ${reEnqueued}/${pendingPhotos.length} fotos re-encoladas, ${discarded} descartadas`,
+        );
       }
 
     } catch (error) {
