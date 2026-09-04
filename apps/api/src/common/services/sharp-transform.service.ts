@@ -134,8 +134,19 @@ export class SharpTransformService implements OnModuleInit {
     // La franja se mide contra el ANCHO, no el alto: es lo que la cruza y lo que
     // ordena los logos. Con el alto, una foto vertical de 6000px se llevaba una
     // banda de 780px casi vacía, y la misma escena en horizontal una de 520px.
-    const panelHeight = Math.max(90, Math.round(imageWidth * 0.09));
-    const logoHeight = Math.max(36, Math.round(panelHeight * 0.62));
+    // `maxHeightPercent` se expresa contra el alto final de la fotografía. El
+    // valor existía en dashboard/API pero antes no participaba en el render y
+    // todas las descargas salían con el mismo tamaño. La franja conserva como
+    // mínimo su geometría histórica y crece cuando el usuario pide un logo mayor.
+    const requestedLogoHeight = Math.round(
+      imageHeight * Math.min(20, Math.max(2, options.maxHeightPercent ?? 8)) / 100,
+    );
+    const panelHeight = Math.max(
+      90,
+      Math.round(imageWidth * 0.09),
+      Math.ceil(requestedLogoHeight / 0.62),
+    );
+    const logoHeight = Math.max(24, requestedLogoHeight);
     const gap = Math.max(18, Math.round(imageWidth * 0.015));
     const logoCount = Math.min(6, logoBuffers.length);
     const maxLogoWidth = Math.max(40, Math.floor((imageWidth - gap * (logoCount + 1)) / logoCount));
@@ -174,8 +185,9 @@ export class SharpTransformService implements OnModuleInit {
     // El rótulo también escala: a tamaño fijo era ilegible en una foto de 4000px.
     const captionSize = Math.max(12, Math.round(panelHeight * 0.14));
     const captionY = Math.round(captionSize * 1.6);
+    const panelOpacity = Math.min(1, Math.max(0.35, options.opacity ?? 0.82));
     const panel = Buffer.from(
-      `<svg width="${imageWidth}" height="${panelHeight}"><rect width="100%" height="100%" fill="rgba(0,0,0,${Math.min(1, Math.max(0.35, options.opacity || 0.82))})"/><text x="${gap}" y="${captionY}" fill="white" font-family="Arial" font-size="${captionSize}" letter-spacing="${Math.round(captionSize * 0.12)}" opacity="0.75">PATROCINADO POR</text></svg>`,
+      `<svg width="${imageWidth}" height="${panelHeight}"><rect width="100%" height="100%" fill="rgba(0,0,0,${panelOpacity})"/><text x="${gap}" y="${captionY}" fill="white" font-family="Arial" font-size="${captionSize}" letter-spacing="${Math.round(captionSize * 0.12)}" opacity="0.75">PATROCINADO POR</text></svg>`,
     );
     const composites: sharp.OverlayOptions[] = [{ input: panel, left: 0, top }];
     for (let index = 0; index < preparedLogos.length; index++) {

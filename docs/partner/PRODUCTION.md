@@ -3,64 +3,81 @@
 ## Credenciales
 
 - Una clave por sistema y ambiente.
-- Solo scopes necesarios.
-- Secretos en Vault/KMS/Secrets Manager.
-- Rotación ensayada y responsable asignado.
-- Revocación inmediata ante exposición.
+- Solo los scopes estrictamente necesarios.
+- Secretos fuera del código, navegador, app móvil y logs.
+- Rotación y revocación ensayadas con responsable asignado.
 - Nunca compartir una clave entre empresas o workspaces.
 
-## Integración HTTP
+## Cliente HTTP
 
-- Timeout de conexión y respuesta configurado.
-- Reintentos solo en `429`, `5xx` y fallos de red.
-- Backoff exponencial con jitter.
-- Misma `Idempotency-Key` en cada reintento lógico.
-- Validación del esquema de respuesta.
-- Logs sin API keys, selfies ni URLs firmadas.
+- Timeouts de conexión y respuesta explícitos.
+- Reintentos acotados solo ante fallos de red, `409` en curso, `429` y `5xx`.
+- Backoff exponencial con jitter y respeto de `Retry-After`.
+- Misma `Idempotency-Key` para cada reintento de una operación lógica.
+- Validación de códigos HTTP y del esquema de respuesta.
+- Tolerancia a campos JSON adicionales.
+- Logs sin claves, selfies, cuerpos sensibles ni URLs temporales.
 
 ## Upload
 
-- SHA-256 calculado sobre los bytes enviados.
-- `Content-Type` del PUT idéntico al firmado.
+- SHA-256 calculado sobre los bytes exactos enviados.
+- `Content-Type` del PUT idéntico al solicitado.
 - `clientFileId` estable y único dentro del lote.
-- Confirmar únicamente después de un PUT exitoso.
-- Reconciliar contra el estado final del lote.
-- Manejar duplicados como éxito idempotente.
+- Confirmación solo después de un PUT exitoso.
+- Reconciliación contra el estado final del lote.
+- Duplicados idempotentes tratados como éxito.
+- Manejo de archivos corruptos, demasiado grandes y tipos no admitidos.
 
-## Entrega de imágenes
+## Imágenes y descargas
 
-- Mostrar `watermarkThumbnail` en cuadrículas y resultados.
-- Mostrar `watermark` en la vista previa ampliada.
-- No utilizar `thumbnail` limpio en una galería pública.
-- Solicitar el original solo desde un backend con `photos:download`.
-- Entregar la URL firmada inmediatamente; nunca persistirla como URL del activo.
-- No registrar URLs firmadas porque contienen autorización temporal.
-- Tratar `ready: false` como procesamiento pendiente y esperar webhook o consultar el lote.
+- `watermarkThumbnail` en cuadrículas y resultados públicos.
+- `watermark` en preview ampliado.
+- `thumbnail` limpio solo en sistemas internos autorizados.
+- Original solicitado únicamente desde backend con `photos:download`.
+- Autorización de pedido completada antes de `/download-url`.
+- `/download-free` usado cuando apliquen reglas de galería y sponsors.
+- URL temporal entregada inmediatamente y nunca persistida como URL del activo.
+- `ready:false` tratado como pendiente; esperar webhook o consultar lote.
 
 ## Webhooks
 
-- HTTPS público sin redirecciones.
-- Verificar HMAC sobre el body crudo.
-- Ventana máxima de timestamp: cinco minutos.
+- Endpoint HTTPS público sin redirecciones.
+- HMAC verificado sobre el body crudo.
+- Ventana de timestamp máxima de cinco minutos.
 - Deduplicación persistente por event ID.
-- Respuesta `2xx` antes de trabajo pesado.
-- Alertas sobre entregas `FAILED`.
-- Procedimiento documentado para rotar `whsec_`.
+- Respuesta `2xx` rápida y procesamiento posterior asíncrono.
+- Alertas sobre entregas fallidas.
+- Reconciliación periódica de lotes aunque existan webhooks.
+- Rotación del secreto probada.
 
-## Privacidad biométrica
+## Privacidad y datos biométricos
 
-El cliente debe contar con base legal, avisos y consentimiento aplicables para
-enviar selfies o fotografías a reconocimiento facial. Debe definir retención,
-eliminación y atención de derechos. LucilaMon procesa los datos técnicos; no
-autoriza por sí mismo su recopilación ni venta.
+El cliente debe contar con base legal, avisos y consentimientos aplicables antes
+de enviar selfies o imágenes a búsqueda facial. También debe definir retención,
+eliminación, acceso restringido y atención de derechos. No debe conservar la
+selfie más tiempo del necesario ni incluirla en telemetría.
 
-## Go-live
+## Pruebas obligatorias antes del go-live
 
 1. Integrar primero en un workspace no productivo.
-2. Probar archivos válidos, corruptos, repetidos y máximos.
-3. Probar aislamiento con IDs ajenos: debe responder `404`.
-4. Simular timeout y comprobar idempotencia.
-5. Probar firma inválida, replay y duplicado de webhook.
-6. Rotar API key y secreto webhook en ensayo.
-7. Confirmar alertas, responsable y canal de incidentes.
-8. Ejecutar prueba de capacidad acordada.
+2. Probar archivo válido, corrupto, repetido, límite de tamaño y tipo inválido.
+3. Probar IDs inexistentes y ajenos; deben responder `404` sin revelar datos.
+4. Simular timeout y verificar que la idempotencia evita duplicados.
+5. Probar `401`, scope faltante, límite `429` y recuperación ante `5xx`.
+6. Probar firma inválida, timestamp vencido, replay y webhook duplicado.
+7. Rotar API key y secreto webhook sin interrupción prolongada.
+8. Probar descarga original y, si aplica, gratuita limpia y patrocinada.
+9. Validar exportaciones con caracteres especiales y campos vacíos.
+10. Ejecutar la prueba de capacidad acordada y confirmar alertas.
+
+## Operación
+
+- Métricas por endpoint, latencia, código HTTP y reintentos, sin datos sensibles.
+- Alertas por errores sostenidos, lotes fallidos y webhooks fallidos.
+- Responsable y canal de incidentes definidos.
+- Procedimiento para revocar credenciales expuestas.
+- Procedimiento para reconciliar eventos, lotes y entregas.
+- Versión de OpenAPI fijada en generación de clientes y revisión controlada de cambios.
+
+Cumplir esta lista valida la integración del cliente; los compromisos de
+disponibilidad, soporte y capacidad son los definidos en su contrato comercial.

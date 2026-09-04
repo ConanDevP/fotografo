@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LucilaMon Partner API
-  version: 1.1.0
+  version: 1.2.0
   description: API servidor-a-servidor para eventos y cargas de fotografías.
 servers:
   - url: https://api.lucilamon.com/v1/partner
@@ -44,9 +44,22 @@ paths:
       responses:
         '200': { description: Evento actualizado }
         '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Archivar y despublicar un evento
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /events/{eventId}/upload-batches:
     parameters:
       - $ref: '#/components/parameters/EventId'
+    get:
+      summary: Listar lotes de carga del evento
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Status' }
+      responses:
+        '200': { $ref: '#/components/responses/Paginated' }
     post:
       summary: Crear lote de carga
       requestBody:
@@ -141,7 +154,14 @@ paths:
                 threshold: { type: number, minimum: 0.3, maximum: 0.95 }
       responses:
         '200': { description: Coincidencias faciales y por grafo dorsal-rostro }
+  /events/{eventId}/search/face/stats:
+    get:
+      summary: Consultar cobertura facial del evento
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
   /photos/{photoId}:
+    parameters: [{ $ref: '#/components/parameters/PhotoId' }]
     get:
       summary: Consultar fotografía y detecciones
       responses:
@@ -151,17 +171,39 @@ paths:
       responses:
         '200': { description: Fotografía eliminada }
   /photos/{photoId}/process:
+    parameters: [{ $ref: '#/components/parameters/PhotoId' }]
     post:
       summary: Reintentar el procesamiento de una fotografía
       responses:
         '201': { description: Procesamiento encolado }
+  /photos/{photoId}/bibs:
+    parameters: [{ $ref: '#/components/parameters/PhotoId' }]
+    post:
+      summary: Agregar un dorsal manual
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddBibInput' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /photos/{photoId}/bibs/{bibId}:
+    parameters:
+      - { $ref: '#/components/parameters/PhotoId' }
+      - { $ref: '#/components/parameters/BibId' }
+    delete:
+      summary: Eliminar una asociación de dorsal
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
   /photos/{photoId}/assets:
+    parameters: [{ $ref: '#/components/parameters/PhotoId' }]
     get:
       summary: Obtener variantes derivadas de la fotografía
       description: Devuelve miniatura, marca de agua y miniatura marcada. No expone el original.
       responses:
         '200': { description: Variantes y estado de derivados }
   /photos/{photoId}/download-url:
+    parameters: [{ $ref: '#/components/parameters/PhotoId' }]
     post:
       summary: Generar URL privada temporal del original
       requestBody:
@@ -196,6 +238,7 @@ paths:
       responses:
         '201': { description: Endpoint y signingSecret mostrado una sola vez }
   /webhooks/{endpointId}:
+    parameters: [{ $ref: '#/components/parameters/EndpointId' }]
     patch:
       summary: Cambiar URL, eventos o estado de una suscripción
       responses:
@@ -205,16 +248,19 @@ paths:
       responses:
         '200': { description: Suscripción eliminada }
   /webhooks/{endpointId}/rotate-secret:
+    parameters: [{ $ref: '#/components/parameters/EndpointId' }]
     post:
       summary: Rotar el secreto HMAC
       responses:
         '201': { description: Nuevo signingSecret mostrado una sola vez }
   /webhooks/{endpointId}/deliveries:
+    parameters: [{ $ref: '#/components/parameters/EndpointId' }]
     get:
       summary: Consultar las últimas 100 entregas
       responses:
         '200': { description: Historial de entregas }
   /webhooks/deliveries/{deliveryId}/retry:
+    parameters: [{ $ref: '#/components/parameters/DeliveryId' }]
     post:
       summary: Reintentar manualmente una entrega
       responses:
@@ -244,7 +290,25 @@ paths:
       responses: { '200': { description: Configuracion publica } }
     patch:
       summary: Actualizar configuracion de galeria
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GalleryInput' }
       responses: { '200': { description: Configuracion actualizada } }
+  /events/{eventId}/photos/{photoId}/review:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+      - { $ref: '#/components/parameters/PhotoId' }
+    patch:
+      summary: Revisar el estado de publicación de una foto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
   /events/{eventId}/bibs/low-confidence:
     get:
       summary: Listar dorsales de baja confianza
@@ -269,39 +333,103 @@ paths:
       responses: { '200': { description: Colaborador revocado } }
   /sponsors:
     get: { summary: Listar patrocinadores, responses: { '200': { description: Patrocinadores } } }
-    post: { summary: Crear patrocinador, responses: { '201': { description: Patrocinador creado } } }
+    post:
+      summary: Crear patrocinador
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SponsorInput' } } }
+      responses: { '201': { description: Patrocinador creado } }
   /sponsors/{sponsorId}:
     patch:
       summary: Actualizar patrocinador
       parameters: [{ name: sponsorId, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SponsorInput' } } }
       responses: { '200': { description: Patrocinador actualizado } }
+    delete:
+      summary: Desactivar patrocinador
+      parameters: [{ $ref: '#/components/parameters/SponsorId' }]
+      responses: { '200': { $ref: '#/components/responses/Success' } }
   /events/{eventId}/sponsors:
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
     get: { summary: Listar overlays del evento, responses: { '200': { description: Overlays } } }
-    post: { summary: Vincular patrocinador y configurar overlay, responses: { '201': { description: Overlay vinculado } } }
+    post:
+      summary: Vincular patrocinador y configurar overlay
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EventSponsorInput' } } }
+      responses: { '201': { description: Overlay vinculado } }
+  /events/{eventId}/sponsors/{sponsorId}:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+      - { $ref: '#/components/parameters/SponsorId' }
+    delete:
+      summary: Desvincular patrocinador del evento
+      responses: { '200': { $ref: '#/components/responses/Success' } }
   /events/{eventId}/photos/{photoId}/download-free:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+      - { $ref: '#/components/parameters/PhotoId' }
     post:
       summary: Descarga gratuita limpia o patrocinada
       description: Reutiliza limites, captura de audiencia, metricas y generacion SPONSORED del flujo publico.
+      requestBody:
+        content: { application/json: { schema: { $ref: '#/components/schemas/FreeDownloadInput' } } }
       responses: { '201': { description: URL temporal y variante aplicada } }
   /events/{eventId}/photos/bulk/review:
-    post: { summary: Revisar hasta 100 fotos, responses: { '201': { description: Resultado masivo } } }
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
+    post:
+      summary: Revisar hasta 100 fotos
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BulkReviewInput' } } }
+      responses: { '201': { description: Resultado masivo } }
   /events/{eventId}/photos/bulk/process:
-    post: { summary: Reprocesar hasta 100 fotos, responses: { '201': { description: Resultado por foto } } }
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
+    post:
+      summary: Reprocesar hasta 100 fotos
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BulkPhotoIdsInput' } } } }
+      responses: { '201': { description: Resultado por foto } }
   /events/{eventId}/photos/bulk/delete:
-    post: { summary: Eliminar hasta 100 fotos, responses: { '201': { description: Resultado por foto } } }
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
+    post:
+      summary: Eliminar hasta 100 fotos
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BulkPhotoIdsInput' } } } }
+      responses: { '201': { description: Resultado por foto } }
   /events/{eventId}/photos/bulk/download-urls:
-    post: { summary: Generar hasta 100 URLs temporales, responses: { '201': { description: URLs temporales } } }
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
+    post:
+      summary: Generar hasta 100 URLs temporales
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BulkDownloadInput' } } } }
+      responses: { '201': { description: URLs temporales } }
   /events/{eventId}/analytics:
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
     get: { summary: Analytics del evento, responses: { '200': { description: Metricas consolidadas } } }
   /events/{eventId}/exports/photos:
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
     get: { summary: Exportar inventario CSV, responses: { '200': { description: CSV en data.content } } }
   /events/{eventId}/exports/audience:
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
     get: { summary: Exportar audiencia CSV, responses: { '200': { description: CSV en data.content } } }
   /workspace:
     get: { summary: Consultar white-label, responses: { '200': { description: Workspace y branding } } }
-    patch: { summary: Actualizar white-label, responses: { '200': { description: Workspace actualizado } } }
+    patch:
+      summary: Actualizar white-label
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WorkspaceInput' } } }
+      responses: { '200': { description: Workspace actualizado } }
   /workspace/assets/{kind}:
-    post: { summary: Cargar logo o portada, responses: { '201': { description: Activo actualizado } } }
+    parameters: [{ $ref: '#/components/parameters/AssetKind' }]
+    post:
+      summary: Cargar logo o portada
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [image], properties: { image: { type: string, format: binary } } }
+      responses: { '201': { description: Activo actualizado } }
     delete: { summary: Eliminar logo o portada, responses: { '200': { description: Activo eliminado } } }
   /workspace/domain/verify:
     post: { summary: Verificar DNS del dominio white-label, responses: { '201': { description: Estado de verificacion } } }
@@ -322,6 +450,48 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    PhotoId:
+      name: photoId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BibId:
+      name: bibId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SponsorId:
+      name: sponsorId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EndpointId:
+      name: endpointId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DeliveryId:
+      name: deliveryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AssetKind:
+      name: kind
+      in: path
+      required: true
+      schema: { type: string, enum: [logo, cover] }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Status:
+      name: status
+      in: query
+      schema: { type: string, maxLength: 40 }
   schemas:
     EventInput:
       type: object
@@ -343,7 +513,127 @@ components:
         contentType: { type: string, enum: [image/jpeg, image/png] }
         sizeBytes: { type: integer, minimum: 1 }
         contentHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+    GalleryInput:
+      type: object
+      additionalProperties: false
+      properties:
+        isPublished: { type: boolean }
+        commerceMode: { type: string, enum: [PAID, FREE] }
+        isFreeDownload: { type: boolean }
+        freeDownloadUntil: { type: string, format: date-time, nullable: true }
+        requireEmailForFree: { type: boolean }
+        freeDownloadLimit: { type: integer, minimum: 1, maximum: 1000, nullable: true }
+        sponsorOverlayEnabled: { type: boolean }
+        requiresPhotoApproval: { type: boolean }
+    AddBibInput:
+      type: object
+      required: [bibNumber]
+      properties:
+        bibNumber: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+    ReviewInput:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [APPROVED, REJECTED, PENDING_REVIEW] }
+        note: { type: string, maxLength: 500 }
+    PhotoIds:
+      type: array
+      minItems: 1
+      maxItems: 100
+      uniqueItems: true
+      items: { type: string, format: uuid }
+    BulkPhotoIdsInput:
+      type: object
+      required: [photoIds]
+      properties:
+        photoIds: { $ref: '#/components/schemas/PhotoIds' }
+    BulkReviewInput:
+      allOf:
+        - { $ref: '#/components/schemas/BulkPhotoIdsInput' }
+        - type: object
+          required: [status]
+          properties:
+            status: { type: string, enum: [APPROVED, REJECTED, PENDING_REVIEW] }
+            note: { type: string, maxLength: 500 }
+    BulkDownloadInput:
+      allOf:
+        - { $ref: '#/components/schemas/BulkPhotoIdsInput' }
+        - type: object
+          properties:
+            expiresIn: { type: integer, minimum: 60, maximum: 900, default: 300 }
+    FreeDownloadInput:
+      type: object
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        name: { type: string, maxLength: 120 }
+        phone: { type: string, maxLength: 40 }
+        bibNumber: { type: string, maxLength: 40 }
+    SponsorInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        logoUrl: { type: string, format: uri }
+        websiteUrl: { type: string, format: uri }
+        isActive: { type: boolean }
+    EventSponsorInput:
+      type: object
+      required: [sponsorId]
+      properties:
+        sponsorId: { type: string, format: uuid }
+        priority: { type: integer, minimum: 0, maximum: 100 }
+        requiredOnFreeDownloads: { type: boolean }
+        placement:
+          type: object
+          properties:
+            position: { type: string, enum: [top, bottom] }
+            opacity: { type: number, minimum: 0.35, maximum: 1 }
+            maxHeightPercent: { type: number, minimum: 2, maximum: 20 }
+    WorkspaceInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2, maxLength: 100 }
+        slug: { type: string, maxLength: 80, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+        description: { type: string, maxLength: 800 }
+        logoUrl: { type: string, format: uri, nullable: true }
+        coverUrl: { type: string, format: uri, nullable: true }
+        customDomain: { type: string, nullable: true }
+        contactEmail: { type: string, format: email }
+        website: { type: string, format: uri, nullable: true }
+        instagram: { type: string, format: uri, nullable: true }
+        facebook: { type: string, format: uri, nullable: true }
+        isPublished: { type: boolean }
+        brand: { type: object, additionalProperties: true }
+    SuccessEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: {}
+        meta: { type: object, additionalProperties: true }
+    ErrorEnvelope:
+      type: object
+      required: [error, timestamp, path]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+        timestamp: { type: string, format: date-time }
+        path: { type: string }
   responses:
+    Success:
+      description: Operación completada
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+    Paginated:
+      description: Lista paginada
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SuccessEnvelope' }
     Unauthorized:
       description: Credencial ausente, inválida, expirada o revocada
     Forbidden:

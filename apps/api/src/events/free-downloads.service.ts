@@ -67,7 +67,9 @@ export class FreeDownloadsService {
             OR: [{ startsAt: null }, { startsAt: { lte: new Date() } }],
             AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: new Date() } }] }],
           },
-          orderBy: { priority: 'desc' },
+          // El orden forma parte de la imagen y de su firma de caché. Resolver
+          // empates evita variantes distintas para la misma campaña.
+          orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
           include: { sponsor: true },
         },
       },
@@ -120,7 +122,9 @@ export class FreeDownloadsService {
     const referer = req.headers['referer'] || req.headers['referrer'];
 
     const activeSponsors = event.sponsorOverlayEnabled
-      ? event.eventSponsors.filter(item => item.requiredOnFreeDownloads)
+      // El compositor admite seis logos. Mantener aquí el mismo límite evita
+      // reportar exposiciones de sponsors que no aparecieron en la imagen.
+      ? event.eventSponsors.filter(item => item.requiredOnFreeDownloads).slice(0, 6)
       : [];
     let assetKey = photo.cloudinaryId;
     let variant: 'CLEAN' | 'SPONSORED' = 'CLEAN';

@@ -1,165 +1,209 @@
-# Referencia y operación
+# Referencia funcional
+
+## Autenticación y aislamiento
+
+Cada API key pertenece a un workspace y solo puede acceder a recursos de ese
+workspace. Un identificador válido de otra cuenta responde `404`. La clave debe
+usarse exclusivamente desde servidores del cliente.
 
 ## Scopes
 
-| Scope | Operaciones |
+| Scope | Autoriza |
 |---|---|
-| `events:read` | Listar y consultar eventos |
-| `events:write` | Crear, editar y eliminar eventos |
-| `events:publish` | Publicar mediante create/update |
-| `events:analytics` | Metricas y analytics del evento |
-| `events:contributors` | Invitaciones y colaboradores |
-| `events:sponsors` | Patrocinadores y overlays |
-| `photos:read` | Fotos, lotes y progreso |
-| `photos:upload` | Crear lotes, firmar y confirmar archivos |
-| `photos:review` | Aprobar/rechazar y corregir dorsales |
-| `photos:process` | Reintentar procesamiento |
-| `photos:delete` | Eliminar fotos |
-| `photos:download` | Emitir URL temporal del original |
-| `photos:bulk` | Operaciones masivas junto al scope especifico de la accion |
-| `exports:read` | Exportaciones CSV de fotos y audiencia |
-| `workspace:read` | Consultar configuracion white-label |
-| `workspace:write` | Modificar branding y activos white-label |
+| `events:read` | Consultar eventos y galería |
+| `events:write` | Crear, modificar, archivar, restaurar, portada y galería |
+| `events:publish` | Publicar eventos cuando la operación lo requiera |
+| `events:analytics` | Métricas del evento |
+| `events:contributors` | Listar, invitar y revocar colaboradores |
+| `events:sponsors` | Catálogo de patrocinadores y overlays |
+| `photos:read` | Fotografías, activos y lotes |
+| `photos:upload` | Crear lotes, solicitar carga y confirmar archivos |
+| `photos:review` | Cola de revisión, estado de publicación y dorsales manuales |
+| `photos:process` | Solicitar reprocesamiento |
+| `photos:delete` | Eliminar fotografías |
+| `photos:download` | Descargas originales, gratuitas o patrocinadas |
+| `photos:bulk` | Operaciones masivas; exige además el scope de la acción |
+| `exports:read` | Exportaciones de fotos y audiencia |
+| `workspace:read` | Consultar configuración de marca blanca |
+| `workspace:write` | Modificar marca, activos y verificar dominio |
 | `search:bib` | Buscar por dorsal |
-| `search:face` | Buscar por selfie y consultar estadísticas |
-| `webhooks:manage` | Administrar destinos y entregas |
+| `search:face` | Buscar por rostro y consultar cobertura |
+| `webhooks:manage` | Suscripciones, secretos, entregas y reintentos |
 
-## Endpoints
+## Catálogo completo de endpoints
 
-| Método y ruta | Scope | Notas |
-|---|---|---|
-| `GET /events` | `events:read` | `page`, `limit` (máx. 100) |
-| `POST /events` | `events:write` | Requiere `Idempotency-Key` |
-| `GET /events/{eventId}` | `events:read` | Incluye configuración |
-| `PATCH /events/{eventId}` | `events:write` | `events:publish` si publica |
-| `DELETE /events/{eventId}` | `events:write` | Eliminación controlada existente |
-| `GET /events/{eventId}/upload-batches` | `photos:read` | Lista paginada |
-| `POST /events/{eventId}/upload-batches` | `photos:upload` | 1–5,000; idempotente |
-| `POST /upload-batches/{batchId}/files` | `photos:upload` | 1–50 archivos |
-| `POST /upload-batches/{batchId}/complete` | `photos:upload` | 1–50 IDs |
-| `GET /upload-batches/{batchId}` | `photos:read` | Progreso y fallos |
-| `GET /events/{eventId}/photos` | `photos:read` | Filtros `status`, `publicationStatus` |
-| `GET /photos/{photoId}` | `photos:read` | Metadatos, dorsales y rostros |
-| `GET /photos/{photoId}/assets` | `photos:read` | Miniatura limpia, marca completa y miniatura marcada |
-| `POST /photos/{photoId}/process` | `photos:process` | Solo pendiente/fallida |
-| `POST /photos/{photoId}/bibs` | `photos:review` | Dorsal manual |
-| `DELETE /photos/{photoId}/bibs/{bibId}` | `photos:review` | Quita asociación |
-| `PATCH /events/{eventId}/photos/{photoId}/review` | `photos:review` | `APPROVED`, `REJECTED`, `PENDING_REVIEW` |
-| `DELETE /photos/{photoId}` | `photos:delete` | También libera almacenamiento contabilizado |
-| `GET /events/{eventId}/search/bib` | `search:bib` | Cursor, límite máx. 100 |
-| `POST /events/{eventId}/search/face` | `search:face` | Data URL JPEG/PNG/WEBP, máx. 6 MB decodificados |
-| `GET /events/{eventId}/search/face/stats` | `search:face` | Cobertura facial |
-| `POST /photos/{photoId}/download-url` | `photos:download` | Expiración 60–900 s |
+Las rutas son relativas a `/v1/partner`.
 
-## Variantes de imagen
+### Eventos y galería
 
-## Paridad empresarial adicional
+| Método | Ruta | Scope | Función |
+|---|---|---|---|
+| `GET` | `/events` | `events:read` | Lista eventos; filtros `page`, `limit`, `status`, `archived` |
+| `POST` | `/events` | `events:write` | Crea evento; requiere `Idempotency-Key` |
+| `GET` | `/events/{eventId}` | `events:read` | Obtiene evento y configuración |
+| `PATCH` | `/events/{eventId}` | `events:write` | Actualiza campos enviados |
+| `DELETE` | `/events/{eventId}` | `events:write` | Archiva y despublica de forma reversible |
+| `POST` | `/events/{eventId}/restore` | `events:write` | Restaura; no republica automáticamente |
+| `POST` | `/events/{eventId}/cover` | `events:write` | Sube `image` multipart, máximo 5 MB |
+| `DELETE` | `/events/{eventId}/cover` | `events:write` | Elimina portada |
+| `GET` | `/events/{eventId}/gallery` | `events:read` | Obtiene configuración pública |
+| `PATCH` | `/events/{eventId}/gallery` | `events:write` | Publicación, modo, límites, sponsor y revisión |
 
-| Metodo y ruta | Scope | Notas |
-|---|---|---|
-| `POST/DELETE /events/{eventId}/cover` | `events:write` | Portada multipart `image`, JPG/PNG, maximo 5 MB |
-| `GET/PATCH /events/{eventId}/gallery` | `events:read` / `events:write` | Publicacion, descarga gratuita, sponsors y revision |
-| `POST /events/{eventId}/restore` | `events:write` | Restaura un evento archivado; no lo republica |
-| `GET /events/{eventId}/bibs/low-confidence` | `photos:review` | Cola paginada con `threshold` |
-| `GET/POST/DELETE /events/{eventId}/contributors...` | `events:contributors` | Lista, invita y revoca colaboradores |
-| `GET/POST/PATCH /sponsors...` | `events:sponsors` | Catalogo de sponsors del workspace |
-| `GET/POST/DELETE /events/{eventId}/sponsors...` | `events:sponsors` | Configura overlays del evento |
-| `POST /events/{eventId}/photos/{photoId}/download-free` | `photos:download` | Flujo publico real, variante `CLEAN` o `SPONSORED` |
-| `POST /events/{eventId}/photos/bulk/{review|process|delete|download-urls}` | `photos:bulk` y scope de accion | Maximo 100 fotos |
-| `GET /events/{eventId}/analytics` | `events:analytics` | Procesamiento, publicacion, metricas y descargas |
-| `GET /events/{eventId}/exports/{photos|audience}` | `exports:read` | CSV en `data.content` |
-| `GET/PATCH /workspace` | `workspace:read` / `workspace:write` | Configuracion white-label |
-| `POST/DELETE /workspace/assets/{logo|cover}` | `workspace:write` | Activos de marca multipart |
-| `POST /workspace/domain/verify` | `workspace:write` | Verifica la configuracion DNS del dominio |
+`PATCH /gallery` acepta `isPublished`, `commerceMode` (`PAID` o `FREE`),
+`isFreeDownload`, `freeDownloadUntil`, `requireEmailForFree`,
+`freeDownloadLimit`, `sponsorOverlayEnabled` y `requiresPhotoApproval`.
 
-`DELETE /events/{eventId}` en Partner API archiva y despublica el evento. Es reversible con `/restore`.
+### Carga y fotografías
 
-### Descarga original frente a gratuita/patrocinada
+| Método | Ruta | Scope | Función |
+|---|---|---|---|
+| `GET` | `/events/{eventId}/upload-batches` | `photos:read` | Lista lotes paginados |
+| `POST` | `/events/{eventId}/upload-batches` | `photos:upload` | Crea lote de 1–5,000; idempotente |
+| `POST` | `/upload-batches/{batchId}/files` | `photos:upload` | Solicita carga para 1–50 archivos |
+| `POST` | `/upload-batches/{batchId}/complete` | `photos:upload` | Confirma 1–50 archivos ya enviados |
+| `GET` | `/upload-batches/{batchId}` | `photos:read` | Obtiene progreso, conteos y fallos |
+| `GET` | `/events/{eventId}/photos` | `photos:read` | Lista fotos; filtros `status`, `publicationStatus` |
+| `GET` | `/photos/{photoId}` | `photos:read` | Metadatos, estado y detecciones |
+| `GET` | `/photos/{photoId}/assets` | `photos:read` | Previews; nunca incluye el original |
+| `POST` | `/photos/{photoId}/process` | `photos:process` | Solicita reprocesamiento permitido |
+| `POST` | `/photos/{photoId}/bibs` | `photos:review` | Agrega dorsal manual |
+| `DELETE` | `/photos/{photoId}/bibs/{bibId}` | `photos:review` | Elimina asociación de dorsal |
+| `PATCH` | `/events/{eventId}/photos/{photoId}/review` | `photos:review` | `APPROVED`, `REJECTED` o `PENDING_REVIEW` |
+| `DELETE` | `/photos/{photoId}` | `photos:delete` | Elimina foto y sus activos |
+| `GET` | `/events/{eventId}/bibs/low-confidence` | `photos:review` | Cola paginada; `threshold` entre 0 y 1 |
 
-- `/photos/{photoId}/download-url` autoriza acceso servidor-a-servidor al original; no aplica limites de audiencia ni sponsors.
-- `/events/{eventId}/photos/{photoId}/download-free` reutiliza `FreeDownloadsService`: exige evento publicado `FREE`, valida email y limites, registra audiencia y metricas, y genera/cachea `SPONSORED` cuando existen overlays obligatorios activos.
-- No se debe usar `/download-url` para sustituir el flujo publico gratuito: tienen finalidades distintas.
+Para firmar un archivo envía `clientFileId`, `fileName`, `contentType`,
+`sizeBytes` y `contentHash` SHA-256 hexadecimal. Se admiten JPEG y PNG. El PUT
+debe conservar el tipo de contenido firmado.
 
-### Operaciones masivas
+### Búsqueda y descargas
 
-Los IDs deben ser unicos y pertenecer al mismo evento. Revision es atomica; procesar y eliminar devuelven resultado individual. Descarga entrega URLs temporales, no un ZIP persistente.
+| Método | Ruta | Scope | Función |
+|---|---|---|---|
+| `GET` | `/events/{eventId}/search/bib` | `search:bib` | Busca `bib`; cursor y límite máximo 100 |
+| `POST` | `/events/{eventId}/search/face` | `search:face` | Data URL JPEG/PNG/WEBP y `threshold` 0.3–0.95 |
+| `GET` | `/events/{eventId}/search/face/stats` | `search:face` | Cobertura de búsqueda facial |
+| `POST` | `/photos/{photoId}/download-url` | `photos:download` | URL temporal del original, 60–900 s |
+| `POST` | `/events/{eventId}/photos/{photoId}/download-free` | `photos:download` | Flujo gratuito limpio o patrocinado |
 
-`GET /photos/{photoId}/assets` devuelve:
+`/download-url` es para una autorización comercial realizada por el cliente.
+`/download-free` aplica la configuración pública: vigencia, correo obligatorio,
+límite, registro de audiencia, métricas y overlay patrocinado cuando corresponda.
 
-```json
-{
-  "data": {
-    "photoId": "uuid",
-    "ready": true,
-    "assets": {
-      "thumbnail": "https://...",
-      "watermark": "https://...",
-      "watermarkThumbnail": "https://..."
-    }
-  }
-}
-```
+`/assets` devuelve `thumbnail`, `watermark` y `watermarkThumbnail`. Para una
+galería pública usa solo las variantes con marca de agua.
 
-- `watermarkThumbnail`: recomendada para cuadrículas y resultados de búsqueda.
-- `watermark`: vista previa grande protegida.
-- `thumbnail`: derivado limpio para sistemas internos autorizados.
-- El original nunca aparece aquí ni en el detalle; requiere
-  `photos:download` y `/download-url`.
+### Operaciones masivas, métricas y exportaciones
+
+| Método | Ruta | Scopes | Función |
+|---|---|---|---|
+| `POST` | `/events/{eventId}/photos/bulk/review` | `photos:bulk` + `photos:review` | Revisa hasta 100 IDs |
+| `POST` | `/events/{eventId}/photos/bulk/process` | `photos:bulk` + `photos:process` | Reprocesa hasta 100 IDs |
+| `POST` | `/events/{eventId}/photos/bulk/delete` | `photos:bulk` + `photos:delete` | Elimina hasta 100 IDs |
+| `POST` | `/events/{eventId}/photos/bulk/download-urls` | `photos:bulk` + `photos:download` | Genera hasta 100 URLs temporales |
+| `GET` | `/events/{eventId}/analytics` | `events:analytics` | Conteos de procesamiento, publicación y descargas |
+| `GET` | `/events/{eventId}/exports/photos` | `exports:read` | CSV en `data.content` |
+| `GET` | `/events/{eventId}/exports/audience` | `exports:read` | CSV en `data.content` |
+
+Los IDs masivos deben ser UUID únicos del mismo evento. Revisión es atómica;
+procesamiento, eliminación y descarga informan el resultado por fotografía.
+
+### Colaboradores y patrocinadores
+
+| Método | Ruta | Scope | Función |
+|---|---|---|---|
+| `GET` | `/events/{eventId}/contributors` | `events:contributors` | Lista colaboradores e invitaciones |
+| `POST` | `/events/{eventId}/contributors/invitations` | `events:contributors` | Invita colaborador |
+| `DELETE` | `/events/{eventId}/contributors/{contributorId}` | `events:contributors` | Revoca acceso |
+| `GET` | `/sponsors` | `events:sponsors` | Lista catálogo del workspace |
+| `POST` | `/sponsors` | `events:sponsors` | Crea patrocinador |
+| `PATCH` | `/sponsors/{sponsorId}` | `events:sponsors` | Actualiza patrocinador |
+| `DELETE` | `/sponsors/{sponsorId}` | `events:sponsors` | Desactiva patrocinador |
+| `GET` | `/events/{eventId}/sponsors` | `events:sponsors` | Lista overlays del evento |
+| `POST` | `/events/{eventId}/sponsors` | `events:sponsors` | Vincula sponsor y placement |
+| `DELETE` | `/events/{eventId}/sponsors/{sponsorId}` | `events:sponsors` | Desvincula sponsor |
+
+El placement acepta posición `top`/`bottom`, opacidad 0.35–1, altura 2–20%,
+prioridad 0–100 y si es obligatorio en descargas gratuitas.
+
+### Marca blanca
+
+| Método | Ruta | Scope | Función |
+|---|---|---|---|
+| `GET` | `/workspace` | `workspace:read` | Configuración y estado público |
+| `PATCH` | `/workspace` | `workspace:write` | Nombre, slug, dominio, contacto, redes y tema |
+| `POST` | `/workspace/assets/{kind}` | `workspace:write` | Sube `logo` o `cover`, máximo 5 MB |
+| `DELETE` | `/workspace/assets/{kind}` | `workspace:write` | Elimina activo de marca |
+| `POST` | `/workspace/domain/verify` | `workspace:write` | Comprueba la configuración del dominio |
+
+### Webhooks
+
+| Método | Ruta | Scope | Función |
+|---|---|---|---|
+| `GET` | `/webhooks` | `webhooks:manage` | Lista suscripciones sin secretos |
+| `POST` | `/webhooks` | `webhooks:manage` | Crea suscripción HTTPS |
+| `PATCH` | `/webhooks/{endpointId}` | `webhooks:manage` | Cambia URL, eventos o estado |
+| `DELETE` | `/webhooks/{endpointId}` | `webhooks:manage` | Elimina suscripción |
+| `POST` | `/webhooks/{endpointId}/rotate-secret` | `webhooks:manage` | Rota y muestra el secreto una vez |
+| `GET` | `/webhooks/{endpointId}/deliveries` | `webhooks:manage` | Últimas 100 entregas |
+| `POST` | `/webhooks/deliveries/{deliveryId}/retry` | `webhooks:manage` | Reprograma entrega fallida |
 
 ## Idempotencia
 
-`POST /events` y creación de lotes exigen una clave de 8–200 caracteres:
+`POST /events` y `POST /events/{eventId}/upload-batches` requieren
+`Idempotency-Key` de 8–200 caracteres. Durante 24 horas:
 
-```http
-Idempotency-Key: tenant-42-event-2026-11-08
-```
+- misma operación, clave y contenido: reproduce la respuesta;
+- misma clave con contenido u operación diferente: `409`;
+- primera solicitud aún en curso: `409`, reintenta con backoff y la misma clave.
 
-- El registro vive 24 horas.
-- Misma clave y mismo contenido: se reproduce la respuesta.
-- Misma clave y contenido/operación diferente: `409`.
-- Solicitud original aún ejecutándose: `409`; reintentar con backoff.
-- No reutilizar claves entre operaciones lógicas.
+## Paginación y cursores
 
-Los archivos usan `clientFileId` y `contentHash`. Un hash diferente no debe
-reutilizar el mismo identificador.
-
-## Paginación
+Los listados aceptan `page` desde 1 y `limit` de 1–100:
 
 ```json
 {"meta":{"pagination":{"page":1,"limit":50,"total":240,"pages":5}}}
 ```
 
-La búsqueda por dorsal usa `meta.cursor`; omitirlo en la primera llamada y
-enviarlo sin modificar en la siguiente.
+La búsqueda por dorsal usa `meta.cursor`. Envíalo sin modificar en la siguiente
+petición y termina cuando sea nulo o no esté presente.
 
-## Errores
+## Errores y reintentos
 
 ```json
 {
-  "error": {"code":"VALIDATION_ERROR","message":"...","details":{}},
+  "error":{"code":"VALIDATION_ERROR","message":"Solicitud inválida","details":{}},
   "timestamp":"2026-09-03T12:00:00.000Z",
-  "path":"/v1/partner/..."
+  "path":"/v1/partner/events"
 }
 ```
 
-| HTTP | Acción del cliente |
-|---|---|
-| `400` | Corregir DTO, imagen, cursor o idempotencia ausente |
-| `401` | Revisar/rotar credencial; no reintentar automáticamente |
-| `403` | Solicitar scope; no reintentar |
-| `404` | ID inexistente o perteneciente a otro workspace |
-| `409` | Resolver uso de idempotencia; reintentar solo si sigue en proceso |
-| `429` | Respetar `Retry-After` y aplicar jitter |
-| `5xx` | Reintentar con backoff exponencial y la misma idempotency key |
+| HTTP | Significado | Acción |
+|---|---|---|
+| `400` | Validación o estado no permitido | Corregir; no repetir igual |
+| `401` | Clave ausente, inválida, expirada o revocada | Rotar/revisar clave |
+| `403` | Scope o capacidad del plan insuficiente | Ajustar permisos o plan |
+| `404` | Recurso inexistente o fuera del workspace | Revisar ID |
+| `409` | Conflicto o idempotencia en curso/reutilizada | Resolver o reintentar con la misma clave |
+| `413` | Cuerpo o archivo excede el máximo | Reducir tamaño |
+| `429` | Límite temporal | Respetar `Retry-After`, backoff con jitter |
+| `5xx` | Fallo temporal del servicio | Reintentar de forma acotada |
 
-## Límites vigentes
+No reintentes automáticamente `400`, `401`, `403` ni `404`. En operaciones
+idempotentes conserva la misma clave durante reintentos de red, `409` en curso,
+`429` y `5xx`.
 
-- General: 600 solicitudes/minuto por credencial.
-- Firma y confirmación: 300/minuto.
-- URLs de descarga: 120/minuto.
-- Búsqueda facial: 30/minuto.
+## Límites técnicos
+
+- General: 600 solicitudes por minuto por credencial.
+- Solicitud y confirmación de uploads: 300 por minuto.
+- Descargas: 120 por minuto.
+- Búsqueda facial: 30 por minuto.
 - Listados: máximo 100 elementos por página.
-- Una selfie: máximo 6 MB decodificados y 20 megapíxeles.
+- Lotes: máximo 5,000 fotos; grupos de upload: máximo 50.
+- Operaciones masivas: máximo 100 fotos.
+- Portada/logo: máximo 5 MB.
+- Selfie: Data URL de hasta 8,000,000 caracteres; máximo operativo documentado: 6 MB decodificados.
 
-Los límites protegen infraestructura y no representan una cuota comercial
-garantizada. Un contrato Enterprise puede definir capacidad y SLA separados.
+Los límites pueden variar por contrato. No constituyen por sí solos una garantía
+de capacidad ni SLA.
