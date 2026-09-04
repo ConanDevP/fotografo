@@ -15,6 +15,8 @@ import { AdminSubscriptionsService } from './admin-subscriptions.service';
 import { AdminSubscriptionsController } from './admin-subscriptions.controller';
 import { AdminSystemService } from './admin-system.service';
 import { AdminSystemController } from './admin-system.controller';
+import { AdminIntegrationsService } from './admin-integrations.service';
+import { AdminIntegrationsController } from './admin-integrations.controller';
 import { PrismaService } from '../common/services/prisma.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { QueueService } from '../common/services/queue.service';
@@ -34,6 +36,7 @@ import { EventsModule } from '../events/events.module';
     AdminBatchJobsController,
     AdminSubscriptionsController,
     AdminSystemController,
+    AdminIntegrationsController,
   ],
   providers: [
     AdminService,
@@ -44,6 +47,7 @@ import { EventsModule } from '../events/events.module';
     AdminBatchJobsService,
     AdminSubscriptionsService,
     AdminSystemService,
+    AdminIntegrationsService,
     PrismaService,
     CloudinaryService,
     QueueService,
@@ -57,6 +61,7 @@ import { EventsModule } from '../events/events.module';
     AdminBatchJobsService,
     AdminSubscriptionsService,
     AdminSystemService,
+    AdminIntegrationsService,
   ],
 })
 export class AdminModule {}

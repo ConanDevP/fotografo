@@ -41,11 +41,11 @@ export class UploadsService {
     return job;
   }
 
-  async getBatchUploadStatusDetailed(jobId: string, userId: string): Promise<BatchStatusDetailed> {
+  async getBatchUploadStatusDetailed(jobId: string, userId: string, authorizedWorkspaceId?: string): Promise<BatchStatusDetailed> {
     const job = await this.prisma.batchUploadJob.findUnique({
       where: { id: jobId },
       include: {
-        event: { select: { name: true } },
+        event: { select: { name: true, workspaceId: true } },
         photos: {
           select: {
             id: true,
@@ -64,7 +64,7 @@ export class UploadsService {
       });
     }
 
-    if (job.ownerId !== userId) {
+    if (job.ownerId !== userId && job.event.workspaceId !== authorizedWorkspaceId) {
       throw new ForbiddenException({
         code: ERROR_CODES.FORBIDDEN,
         message: 'No tienes permisos para ver el estado de este lote',
@@ -1047,10 +1047,13 @@ export class UploadsService {
     requested: Array<{ clientFileId: string; fileName: string; contentType: string; sizeBytes: number; contentHash: string }>,
     userId: string,
     userRole: UserRole,
+    authorizedWorkspaceId?: string,
   ) {
-    const job = await this.assertOwnedJob(jobId, userId);
+    const job = await this.assertOwnedJob(jobId, userId, authorizedWorkspaceId);
     const event = await this.eventsService.assertCanUploadToEvent(job.eventId, userId, userRole);
-    const workspace = await this.resolvePhotographerWorkspace(event, userId);
+    const workspace = authorizedWorkspaceId
+      ? { id: authorizedWorkspaceId }
+      : await this.resolvePhotographerWorkspace(event, userId);
 
     const declaredBytes = requested.reduce((sum, item) => sum + item.sizeBytes, 0);
     // Comprobación previa con el tamaño declarado: evita firmar URLs para
@@ -1122,8 +1125,8 @@ export class UploadsService {
     );
   }
 
-  async completeBatchFiles(jobId: string, clientFileIds: string[], userId: string) {
-    await this.assertOwnedJob(jobId, userId);
+  async completeBatchFiles(jobId: string, clientFileIds: string[], userId: string, authorizedWorkspaceId?: string) {
+    await this.assertOwnedJob(jobId, userId, authorizedWorkspaceId);
 
     const items = await this.prisma.batchUploadItem.findMany({
       where: { batchJobId: jobId, clientFileId: { in: clientFileIds } },
@@ -1251,12 +1254,15 @@ export class UploadsService {
     return isJpeg || isPng;
   }
 
-  private async assertOwnedJob(jobId: string, userId: string) {
-    const job = await this.prisma.batchUploadJob.findUnique({ where: { id: jobId } });
+  private async assertOwnedJob(jobId: string, userId: string, authorizedWorkspaceId?: string) {
+    const job = await this.prisma.batchUploadJob.findUnique({
+      where: { id: jobId },
+      include: { event: { select: { workspaceId: true } } },
+    });
     if (!job) {
       throw new NotFoundException({ code: ERROR_CODES.JOB_NOT_FOUND, message: 'Lote de subida no encontrado' });
     }
-    if (job.ownerId !== userId) {
+    if (job.ownerId !== userId && job.event.workspaceId !== authorizedWorkspaceId) {
       throw new ForbiddenException({ code: ERROR_CODES.FORBIDDEN, message: 'No tienes permisos sobre este lote' });
     }
     return job;

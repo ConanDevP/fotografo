@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { InferBibsJob } from '@shared/types';
 import { JOBS, QUEUES } from '@shared/constants';
+import { PartnerWebhooksService } from '../../../api/src/partner-api/partner-webhooks.service';
 
 @Injectable()
 export class BatchProgressService {
@@ -13,6 +14,7 @@ export class BatchProgressService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(QUEUES.INFER_BIBS) private readonly inferQueue: Queue<InferBibsJob>,
+    private readonly partnerWebhooks: PartnerWebhooksService,
   ) {}
 
   async reconcileForPhoto(photoId: string): Promise<void> {
@@ -38,7 +40,7 @@ export class BatchProgressService {
   async reconcile(batchJobId: string): Promise<void> {
     const job = await this.prisma.batchUploadJob.findUnique({
       where: { id: batchJobId },
-      select: { totalFiles: true, status: true, eventId: true },
+      select: { totalFiles: true, status: true, eventId: true, event: { select: { workspaceId: true } } },
     });
     if (!job) return;
 
@@ -107,6 +109,11 @@ export class BatchProgressService {
     // que enseña rostro y dorsal juntos. Es el momento de repasar las caras que
     // se quedaron sin número porque su puente aún no existía.
     if (wasRunning && (status === 'COMPLETED' || status === 'FAILED')) {
+      await this.partnerWebhooks.emit(
+        job.event.workspaceId,
+        status === 'COMPLETED' ? 'upload.batch.completed' : 'upload.batch.failed',
+        { batchId: batchJobId, eventId: job.eventId, status, totalFiles: job.totalFiles, processedFiles, failedItems },
+      ).catch(error => this.logger.warn(`No se pudo registrar webhook del lote ${batchJobId}: ${error?.message}`));
       await this.enqueueEventSweep(job.eventId, batchJobId);
     }
   }

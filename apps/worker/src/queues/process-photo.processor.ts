@@ -8,6 +8,7 @@ import { ImagesService } from '../services/images.service';
 import { BatchProgressService } from '../services/batch-progress.service';
 import { InferBibsJob, ProcessFaceJob, ProcessPhotoJob, SendBibEmailJob } from '@shared/types';
 import { JOBS, QUEUES } from '@shared/constants';
+import { PartnerWebhooksService } from '../../../api/src/partner-api/partner-webhooks.service';
 
 @Processor(QUEUES.PROCESS_PHOTO, {
   concurrency: parseInt(process.env.WORKER_CONCURRENCY || '8'),
@@ -20,6 +21,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
     private readonly ocrService: OcrGeminiService,
     private readonly imagesService: ImagesService,
     private readonly batchProgress: BatchProgressService,
+    private readonly partnerWebhooks: PartnerWebhooksService,
     @InjectQueue(QUEUES.PROCESS_FACE) private readonly faceQueue: Queue<ProcessFaceJob>,
     @InjectQueue(QUEUES.INFER_BIBS) private readonly inferQueue: Queue<InferBibsJob>,
     @InjectQueue(QUEUES.SEND_BIB_EMAIL) private readonly emailQueue: Queue<SendBibEmailJob>,
@@ -242,6 +244,9 @@ export class ProcessPhotoProcessor extends WorkerHost {
       });
 
       await this.batchProgress.reconcileForPhoto(photoId);
+      await this.partnerWebhooks.emit(photo.photographerWorkspaceId, 'photo.processing.completed', {
+        photoId, eventId, status: 'PROCESSED', processingCompletedAt: completedAt,
+      }).catch(error => this.logger.warn(`No se pudo registrar webhook de foto ${photoId}: ${error?.message}`));
       await job.updateProgress(100);
       this.logger.log(`[Job ${job.id}] Foto ${photoId} procesada en ${Date.now() - startedAt}ms`);
     } catch (error) {
@@ -259,6 +264,12 @@ export class ProcessPhotoProcessor extends WorkerHost {
             data: { status: 'FAILED', error: errorMessage.slice(0, 1000) },
           }),
         ]).catch(() => undefined);
+        const failedPhoto = await this.prisma.photo.findUnique({ where: { id: photoId }, select: { photographerWorkspaceId: true } }).catch(() => null);
+        if (failedPhoto?.photographerWorkspaceId) {
+          await this.partnerWebhooks.emit(failedPhoto.photographerWorkspaceId, 'photo.processing.failed', {
+            photoId, eventId, status: 'FAILED', error: errorMessage.slice(0, 500),
+          }).catch(() => undefined);
+        }
       }
       await this.batchProgress.reconcileForPhoto(photoId).catch(() => undefined);
       throw error;

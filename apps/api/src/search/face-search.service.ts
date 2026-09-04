@@ -28,13 +28,14 @@ export class FaceSearchService {
   async searchPhotosByFace(
     eventId: string,
     searchRequest: FaceSearchRequest,
+    allowUnpublished = false,
   ): Promise<FaceSearchResponse> {
     const startTime = Date.now();
 
     try {
       // ── Verify event ──
       const event = await this.prisma.event.findUnique({
-        where: { id: eventId, deletedAt: null, isPublished: true },
+        where: { id: eventId, deletedAt: null, ...(allowUnpublished ? {} : { isPublished: true }) },
         select: { id: true, name: true },
       });
       if (!event) {
@@ -289,14 +290,14 @@ export class FaceSearchService {
     }
   }
 
-  async getEventFaceStats(eventId: string): Promise<{
+  async getEventFaceStats(eventId: string, allowUnpublished = false): Promise<{
     totalPhotos: number;
     photosWithFaces: number;
     totalFacesDetected: number;
     averageFacesPerPhoto: number;
   }> {
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId, deletedAt: null, isPublished: true },
+      where: { id: eventId, deletedAt: null, ...(allowUnpublished ? {} : { isPublished: true }) },
       select: { id: true },
     });
     if (!event) throw new NotFoundException('Evento no encontrado');

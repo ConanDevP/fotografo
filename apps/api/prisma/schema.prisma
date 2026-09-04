@@ -103,10 +103,91 @@ model Workspace {
   metricEvents                  MetricEvent[]
   orderItems                    OrderItem[]
   shareUsageCharges             ShareUsageCharge[]
+  apiClients                    ApiClient[]
 
   @@index([ownerId])
   @@index([isPublished])
   @@map("workspaces")
+}
+
+/// Credencial servidor-a-servidor para integraciones de clientes. El secreto
+/// completo nunca se persiste: solo un prefijo identificable y su hash.
+model ApiClient {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  createdById String    @map("created_by_id") @db.Uuid
+  name        String
+  keyPrefix   String    @unique @map("key_prefix") @db.VarChar(32)
+  secretHash  String    @map("secret_hash") @db.VarChar(64)
+  scopes      String[]  @default([])
+  environment String    @default("LIVE") @db.VarChar(16)
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt  DateTime? @map("last_used_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, revokedAt])
+  @@index([createdById])
+  @@map("api_clients")
+}
+
+/// Respuesta persistida de una escritura Partner API para que un reintento de
+/// red con la misma clave nunca duplique recursos.
+model PartnerIdempotencyRecord {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  apiClientId String   @map("api_client_id") @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  key         String   @db.VarChar(200)
+  operation   String   @db.VarChar(80)
+  requestHash String   @map("request_hash") @db.VarChar(64)
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([apiClientId, key])
+  @@index([expiresAt])
+  @@map("partner_idempotency_records")
+}
+
+model PartnerWebhookEndpoint {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  apiClientId     String   @map("api_client_id") @db.Uuid
+  url             String   @db.VarChar(2048)
+  secretEncrypted String   @map("secret_encrypted") @db.Text
+  events          String[]
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deliveries      PartnerWebhookDelivery[]
+
+  @@index([workspaceId, active])
+  @@map("partner_webhook_endpoints")
+}
+
+model PartnerWebhookDelivery {
+  id             String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  endpointId     String                 @map("endpoint_id") @db.Uuid
+  workspaceId    String                 @map("workspace_id") @db.Uuid
+  eventId        String                 @map("event_id") @db.Uuid
+  eventType      String                 @map("event_type") @db.VarChar(100)
+  payload        Json
+  status         String                 @default("PENDING") @db.VarChar(20)
+  attempts       Int                    @default(0)
+  nextAttemptAt  DateTime               @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  responseStatus Int?                   @map("response_status")
+  lastError      String?                @map("last_error") @db.VarChar(1000)
+  deliveredAt    DateTime?              @map("delivered_at") @db.Timestamptz(6)
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  endpoint       PartnerWebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, eventId])
+  @@index([status, nextAttemptAt])
+  @@index([workspaceId, createdAt])
+  @@map("partner_webhook_deliveries")
 }
 
 model BrandTheme {

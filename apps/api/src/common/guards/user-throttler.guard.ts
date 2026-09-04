@@ -13,6 +13,18 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 export class UserThrottlerGuard extends ThrottlerGuard {
   protected getTracker(req: Record<string, any>): string {
     const userId = req?.user?.id;
-    return userId ? `user:${userId}` : `ip:${req.ip}`;
+    if (userId) return `user:${userId}`;
+
+    // El throttler global corre antes que el guard de Partner API, de modo que
+    // todavía no existe req.partner. El prefijo público identifica la clave sin
+    // copiar el secreto al tracker ni a Redis y evita que integraciones detrás
+    // de la misma NAT compartan accidentalmente el cupo.
+    const authorization = String(req?.headers?.authorization || '');
+    const apiKeyMatch = /(?:^Bearer\s+)?lm_live_([a-f0-9]{16})_/i.exec(authorization);
+    if (apiKeyMatch) return `api:${apiKeyMatch[1].toLowerCase()}`;
+    const headerKeyMatch = /^lm_live_([a-f0-9]{16})_/i.exec(String(req?.headers?.['x-api-key'] || ''));
+    if (headerKeyMatch) return `api:${headerKeyMatch[1].toLowerCase()}`;
+
+    return `ip:${req.ip}`;
   }
 }

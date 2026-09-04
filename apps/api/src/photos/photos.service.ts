@@ -298,13 +298,13 @@ export class PhotosService {
     return { message: 'Foto eliminada' };
   }
 
-  async generateSecureDownloadUrl(photoId: string, userId: string, userRole: UserRole) {
+  async generateSecureDownloadUrl(photoId: string, userId: string, userRole: UserRole, expiresIn = 300) {
     const photo = await this.findOne(photoId, userId, userRole);
     
     // Generate secure download URL
     const downloadUrl = await this.storageService.generateSecureDownloadUrl(
       photo.cloudinaryId,
-      300, // 5 minutes
+      Math.min(900, Math.max(60, expiresIn)),
     );
 
     return { downloadUrl };

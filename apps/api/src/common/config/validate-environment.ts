@@ -32,9 +32,15 @@ export function validateEnvironment(config: Record<string, unknown>) {
   requireUrl('REDIS_URL', ['redis:', 'rediss:']);
   requireUrl('FRONTEND_URL', ['https:']);
   requireUrl('API_URL', ['https:']);
+  // Base de los enlaces que van por correo (recuperar contraseña, etc.). Sin
+  // este chequeo, faltar la variable no rompe el arranque: solo manda enlaces
+  // a localhost en silencio, y nadie lo nota hasta que un cliente real se
+  // queda sin poder entrar.
+  requireUrl('APP_URL', ['https:']);
   requireSecret('ORDER_ACCESS_SECRET');
   requireSecret('METRICS_HASH_SECRET');
   requireSecret('FACE_API_KEY');
+  requireSecret('PARTNER_WEBHOOK_ENCRYPTION_KEY');
   requireValue('GEMINI_API_KEY');
 
   const privateKey = normalizePem(config.JWT_PRIVATE_KEY);

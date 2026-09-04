@@ -27,6 +27,7 @@ import { FaceKnnService } from './services/face-knn.service';
 import { RescueJobsService } from './services/rescue-jobs.service';
 import { BatchProgressService } from './services/batch-progress.service';
 import { validateEnvironment } from '../../api/src/common/config/validate-environment';
+import { PartnerWebhooksService } from '../../api/src/partner-api/partner-webhooks.service';
 
 import { QUEUES } from '@shared/constants';
 
@@ -83,6 +84,7 @@ import { QUEUES } from '@shared/constants';
     FaceKnnService,
     RescueJobsService,
     BatchProgressService,
+    PartnerWebhooksService,
   ],
 })
 export class WorkerModule {}

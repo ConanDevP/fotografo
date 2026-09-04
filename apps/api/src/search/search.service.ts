@@ -21,10 +21,11 @@ export class SearchService {
     bib: string,
     limit: number = PAGINATION.DEFAULT_LIMIT,
     cursor?: string,
+    allowUnpublished = false,
   ): Promise<SearchResponse> {
     // Validate event exists
     const event = await this.prisma.event.findUnique({
-      where: { id: eventId, deletedAt: null, isPublished: true },
+      where: { id: eventId, deletedAt: null, ...(allowUnpublished ? {} : { isPublished: true }) },
       select: { id: true, name: true },
     });
 

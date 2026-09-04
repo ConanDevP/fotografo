@@ -1,0 +1,352 @@
+openapi: 3.0.3
+info:
+  title: LucilaMon Partner API
+  version: 1.1.0
+  description: API servidor-a-servidor para eventos y cargas de fotografías.
+servers:
+  - url: https://api.lucilamon.com/v1/partner
+security:
+  - PartnerApiKey: []
+paths:
+  /events:
+    get:
+      summary: Listar eventos del workspace
+      responses:
+        '200': { description: Lista paginada }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      summary: Crear un evento
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventInput' }
+      responses:
+        '201': { description: Evento creado }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /events/{eventId}:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+    get:
+      summary: Consultar un evento
+      responses:
+        '200': { description: Evento }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Actualizar un evento
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventInput' }
+      responses:
+        '200': { description: Evento actualizado }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /events/{eventId}/upload-batches:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+    post:
+      summary: Crear lote de carga
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [totalFiles]
+              properties:
+                totalFiles: { type: integer, minimum: 1, maximum: 5000 }
+      responses:
+        '201': { description: Lote creado }
+  /upload-batches/{batchId}/files:
+    post:
+      summary: Crear URLs firmadas para hasta 50 archivos
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { $ref: '#/components/schemas/UploadFile' }
+      responses:
+        '201': { description: URLs firmadas }
+  /upload-batches/{batchId}/complete:
+    post:
+      summary: Confirmar archivos subidos
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientFileIds]
+              properties:
+                clientFileIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: Resultado de confirmación }
+  /upload-batches/{batchId}:
+    get:
+      summary: Consultar estado detallado del lote
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      responses:
+        '200': { description: Estado del lote }
+  /events/{eventId}/photos:
+    get:
+      summary: Listar fotografías del evento
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200': { description: Lista paginada }
+  /events/{eventId}/search/bib:
+    get:
+      summary: Buscar fotografías procesadas por dorsal
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - { name: bib, in: query, required: true, schema: { type: string, pattern: '^\\d{1,20}$' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string, maxLength: 512 } }
+      responses:
+        '200': { description: Coincidencias y cursor siguiente }
+  /events/{eventId}/search/face:
+    post:
+      summary: Buscar fotografías mediante una selfie
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userImageBase64]
+              properties:
+                userImageBase64: { type: string, format: byte }
+                threshold: { type: number, minimum: 0.3, maximum: 0.95 }
+      responses:
+        '200': { description: Coincidencias faciales y por grafo dorsal-rostro }
+  /photos/{photoId}:
+    get:
+      summary: Consultar fotografía y detecciones
+      responses:
+        '200': { description: Fotografía }
+    delete:
+      summary: Eliminar fotografía y liberar almacenamiento
+      responses:
+        '200': { description: Fotografía eliminada }
+  /photos/{photoId}/process:
+    post:
+      summary: Reintentar el procesamiento de una fotografía
+      responses:
+        '201': { description: Procesamiento encolado }
+  /photos/{photoId}/assets:
+    get:
+      summary: Obtener variantes derivadas de la fotografía
+      description: Devuelve miniatura, marca de agua y miniatura marcada. No expone el original.
+      responses:
+        '200': { description: Variantes y estado de derivados }
+  /photos/{photoId}/download-url:
+    post:
+      summary: Generar URL privada temporal del original
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expiresIn: { type: integer, minimum: 60, maximum: 900, default: 300 }
+      responses:
+        '201': { description: URL firmada temporal }
+  /webhooks:
+    get:
+      summary: Listar suscripciones webhook
+      responses:
+        '200': { description: Endpoints del workspace sin secretos }
+    post:
+      summary: Suscribir un endpoint HTTPS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri }
+                events:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        '201': { description: Endpoint y signingSecret mostrado una sola vez }
+  /webhooks/{endpointId}:
+    patch:
+      summary: Cambiar URL, eventos o estado de una suscripción
+      responses:
+        '200': { description: Suscripción actualizada }
+    delete:
+      summary: Eliminar una suscripción
+      responses:
+        '200': { description: Suscripción eliminada }
+  /webhooks/{endpointId}/rotate-secret:
+    post:
+      summary: Rotar el secreto HMAC
+      responses:
+        '201': { description: Nuevo signingSecret mostrado una sola vez }
+  /webhooks/{endpointId}/deliveries:
+    get:
+      summary: Consultar las últimas 100 entregas
+      responses:
+        '200': { description: Historial de entregas }
+  /webhooks/deliveries/{deliveryId}/retry:
+    post:
+      summary: Reintentar manualmente una entrega
+      responses:
+        '201': { description: Entrega reprogramada }
+  /events/{eventId}/cover:
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
+    post:
+      summary: Cargar portada del evento
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [image], properties: { image: { type: string, format: binary } } }
+      responses: { '201': { description: Portada actualizada } }
+    delete:
+      summary: Eliminar portada del evento
+      responses: { '200': { description: Portada eliminada } }
+  /events/{eventId}/restore:
+    post:
+      summary: Restaurar evento archivado
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      responses: { '201': { description: Evento restaurado } }
+  /events/{eventId}/gallery:
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
+    get:
+      summary: Consultar configuracion de galeria
+      responses: { '200': { description: Configuracion publica } }
+    patch:
+      summary: Actualizar configuracion de galeria
+      responses: { '200': { description: Configuracion actualizada } }
+  /events/{eventId}/bibs/low-confidence:
+    get:
+      summary: Listar dorsales de baja confianza
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      responses: { '200': { description: Cola paginada } }
+  /events/{eventId}/contributors:
+    get:
+      summary: Listar colaboradores
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      responses: { '200': { description: Colaboradores } }
+  /events/{eventId}/contributors/invitations:
+    post:
+      summary: Invitar colaborador
+      parameters: [{ $ref: '#/components/parameters/EventId' }]
+      responses: { '201': { description: Invitacion creada } }
+  /events/{eventId}/contributors/{contributorId}:
+    delete:
+      summary: Revocar colaborador
+      parameters:
+        - { $ref: '#/components/parameters/EventId' }
+        - { name: contributorId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Colaborador revocado } }
+  /sponsors:
+    get: { summary: Listar patrocinadores, responses: { '200': { description: Patrocinadores } } }
+    post: { summary: Crear patrocinador, responses: { '201': { description: Patrocinador creado } } }
+  /sponsors/{sponsorId}:
+    patch:
+      summary: Actualizar patrocinador
+      parameters: [{ name: sponsorId, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Patrocinador actualizado } }
+  /events/{eventId}/sponsors:
+    get: { summary: Listar overlays del evento, responses: { '200': { description: Overlays } } }
+    post: { summary: Vincular patrocinador y configurar overlay, responses: { '201': { description: Overlay vinculado } } }
+  /events/{eventId}/photos/{photoId}/download-free:
+    post:
+      summary: Descarga gratuita limpia o patrocinada
+      description: Reutiliza limites, captura de audiencia, metricas y generacion SPONSORED del flujo publico.
+      responses: { '201': { description: URL temporal y variante aplicada } }
+  /events/{eventId}/photos/bulk/review:
+    post: { summary: Revisar hasta 100 fotos, responses: { '201': { description: Resultado masivo } } }
+  /events/{eventId}/photos/bulk/process:
+    post: { summary: Reprocesar hasta 100 fotos, responses: { '201': { description: Resultado por foto } } }
+  /events/{eventId}/photos/bulk/delete:
+    post: { summary: Eliminar hasta 100 fotos, responses: { '201': { description: Resultado por foto } } }
+  /events/{eventId}/photos/bulk/download-urls:
+    post: { summary: Generar hasta 100 URLs temporales, responses: { '201': { description: URLs temporales } } }
+  /events/{eventId}/analytics:
+    get: { summary: Analytics del evento, responses: { '200': { description: Metricas consolidadas } } }
+  /events/{eventId}/exports/photos:
+    get: { summary: Exportar inventario CSV, responses: { '200': { description: CSV en data.content } } }
+  /events/{eventId}/exports/audience:
+    get: { summary: Exportar audiencia CSV, responses: { '200': { description: CSV en data.content } } }
+  /workspace:
+    get: { summary: Consultar white-label, responses: { '200': { description: Workspace y branding } } }
+    patch: { summary: Actualizar white-label, responses: { '200': { description: Workspace actualizado } } }
+  /workspace/assets/{kind}:
+    post: { summary: Cargar logo o portada, responses: { '201': { description: Activo actualizado } } }
+    delete: { summary: Eliminar logo o portada, responses: { '200': { description: Activo eliminado } } }
+  /workspace/domain/verify:
+    post: { summary: Verificar DNS del dominio white-label, responses: { '201': { description: Estado de verificacion } } }
+components:
+  securitySchemes:
+    PartnerApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: lm_live
+  parameters:
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    EventInput:
+      type: object
+      required: [name, date]
+      properties:
+        name: { type: string, minLength: 3, maxLength: 160 }
+        date: { type: string, format: date-time }
+        location: { type: string, maxLength: 240 }
+        commerceMode: { type: string, enum: [PAID, FREE] }
+        isPublished: { type: boolean }
+        bibRules: { type: object, additionalProperties: true }
+        pricing: { type: object, additionalProperties: true }
+    UploadFile:
+      type: object
+      required: [clientFileId, fileName, contentType, sizeBytes, contentHash]
+      properties:
+        clientFileId: { type: string, maxLength: 200 }
+        fileName: { type: string, maxLength: 255 }
+        contentType: { type: string, enum: [image/jpeg, image/png] }
+        sizeBytes: { type: integer, minimum: 1 }
+        contentHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+  responses:
+    Unauthorized:
+      description: Credencial ausente, inválida, expirada o revocada
+    Forbidden:
+      description: La credencial no posee el scope requerido
+    NotFound:
+      description: Recurso no encontrado dentro del workspace
