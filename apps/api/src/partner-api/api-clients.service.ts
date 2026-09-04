@@ -4,12 +4,15 @@ import { WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../common/services/prisma.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { CreateApiClientDto, RotateApiClientDto } from './dto/api-client.dto';
+import { EnterpriseAccessService } from './enterprise-access.service';
+import { PartnerApiScope } from './partner-api.scopes';
 
 @Injectable()
 export class ApiClientsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService,
+    private readonly enterpriseAccess: EnterpriseAccessService,
   ) {}
 
   async list(workspaceId: string, userId: string) {
@@ -33,6 +36,7 @@ export class ApiClientsService {
 
   async create(workspaceId: string, userId: string, dto: CreateApiClientDto) {
     await this.assertCanManage(workspaceId, userId);
+    await this.enterpriseAccess.assertCanCreateClient(workspaceId, dto.scopes as PartnerApiScope[]);
     const expiry = this.validateExpiry(dto.expiresAt);
     const credential = this.generateCredential();
     const client = await this.prisma.apiClient.create({
@@ -61,7 +65,8 @@ export class ApiClientsService {
 
   async rotate(workspaceId: string, clientId: string, userId: string, dto: RotateApiClientDto) {
     await this.assertCanManage(workspaceId, userId);
-    await this.findClient(workspaceId, clientId);
+    const existing = await this.findClient(workspaceId, clientId);
+    await this.enterpriseAccess.assertCanRotateClient(workspaceId, existing.scopes as PartnerApiScope[]);
     const expiry = dto.expiresAt === undefined ? undefined : this.validateExpiry(dto.expiresAt);
     const credential = this.generateCredential();
     const client = await this.prisma.apiClient.update({

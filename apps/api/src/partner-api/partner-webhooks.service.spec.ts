@@ -14,7 +14,8 @@ describe('PartnerWebhooksService', () => {
       partnerWebhookDelivery: { createMany: jest.fn(), findMany: jest.fn(), findFirst: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     };
     const config: any = { get: jest.fn().mockReturnValue('a'.repeat(64)) };
-    return { service: new PartnerWebhooksService(prisma, config), prisma };
+    const enterpriseAccess = { assertCanCreateWebhook: jest.fn() } as any;
+    return { service: new PartnerWebhooksService(prisma, config, enterpriseAccess), prisma };
   }
 
   it('crea un secreto de firma que solo se devuelve al crearlo', async () => {

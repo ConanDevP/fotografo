@@ -4,10 +4,11 @@ import { createHash, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../common/services/prisma.service';
 import { PARTNER_SCOPES_METADATA } from './require-partner-scopes.decorator';
 import { PartnerApiScope } from './partner-api.scopes';
+import { EnterpriseAccessService } from './enterprise-access.service';
 
 @Injectable()
 export class PartnerApiKeyGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService, private readonly reflector: Reflector) {}
+  constructor(private readonly prisma: PrismaService, private readonly reflector: Reflector, private readonly enterpriseAccess: EnterpriseAccessService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<any>();
@@ -59,6 +60,7 @@ export class PartnerApiKeyGuard implements CanActivate {
     const granted = new Set(client.scopes);
     const missing = required.filter(scope => !granted.has(scope));
     if (missing.length) throw new ForbiddenException(`Falta el permiso API: ${missing.join(', ')}`);
+    await this.enterpriseAccess.authorizeExistingClient(client.workspaceId, client.scopes as PartnerApiScope[], required);
 
     request.partner = {
       apiClientId: client.id,

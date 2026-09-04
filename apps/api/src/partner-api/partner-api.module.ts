@@ -14,11 +14,13 @@ import { PartnerWebhooksService } from './partner-webhooks.service';
 import { WorkspaceWebhooksController } from './workspace-webhooks.controller';
 import { SponsorsModule } from '../sponsors/sponsors.module';
 import { MetricsModule } from '../metrics/metrics.module';
+import { EnterpriseAccessService } from './enterprise-access.service';
+import { EnterpriseAccessController } from './enterprise-access.controller';
 
 @Module({
   imports: [WorkspacesModule, EventsModule, UploadsModule, PhotosModule, SearchModule, SponsorsModule, MetricsModule],
-  controllers: [ApiClientsController, PartnerApiController, WorkspaceWebhooksController],
-  providers: [PrismaService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService],
-  exports: [PartnerWebhooksService],
+  controllers: [ApiClientsController, PartnerApiController, WorkspaceWebhooksController, EnterpriseAccessController],
+  providers: [PrismaService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService],
+  exports: [PartnerWebhooksService, EnterpriseAccessService],
 })
 export class PartnerApiModule {}

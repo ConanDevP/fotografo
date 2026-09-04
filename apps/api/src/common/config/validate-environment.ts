@@ -37,6 +37,8 @@ export function validateEnvironment(config: Record<string, unknown>) {
   // a localhost en silencio, y nadie lo nota hasta que un cliente real se
   // queda sin poder entrar.
   requireUrl('APP_URL', ['https:']);
+  requireValue('EMAIL_FROM');
+  requireValue('RESEND_API_KEY');
   requireSecret('ORDER_ACCESS_SECRET');
   requireSecret('METRICS_HASH_SECRET');
   requireSecret('FACE_API_KEY');

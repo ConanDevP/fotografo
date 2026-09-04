@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Plan, PlanAudience, Prisma, Subscription, WorkspaceRole } from '@prisma/client';
+import { EnterpriseAccount, Plan, PlanAudience, Prisma, Subscription, WorkspaceRole } from '@prisma/client';
 import Stripe from 'stripe';
 
 import { PrismaService } from '../common/services/prisma.service';
@@ -24,6 +24,7 @@ export interface EffectivePlan {
   storageUsedBytes: bigint;
   storageAvailableBytes: bigint;
   commissionPercent: number;
+  enterprise: EnterpriseAccount | null;
 }
 
 @Injectable()
@@ -106,6 +107,7 @@ export class BillingService {
       select: {
         storageBytesUsed: true,
         subscription: { include: { plan: true } },
+        enterpriseAccount: true,
       },
     });
     if (!workspace) throw new NotFoundException('Espacio no encontrado');
@@ -113,13 +115,18 @@ export class BillingService {
     const subscription = workspace.subscription;
     // Una suscripción cancelada o impagada degrada al plan gratuito en vez de
     // bloquear el espacio: las fotos ya vendidas siguen siendo accesibles.
-    const active = subscription && subscription.status === 'ACTIVE' ? subscription : null;
+    const grantIsCurrent = !subscription?.adminGrantedUntil || subscription.adminGrantedUntil > new Date();
+    const active = subscription && subscription.status === 'ACTIVE' && grantIsCurrent ? subscription : null;
     const plan = active ? active.plan : await this.defaultPlan();
 
     const blockBytes = plan.extraStorageBlockBytes ?? BigInt(0);
     const extraBytes = blockBytes * BigInt(active?.extraStorageBlocks ?? 0);
     const allowance = plan.includedStorageBytes + extraBytes;
     const used = workspace.storageBytesUsed;
+    const enterprise = workspace.enterpriseAccount;
+    const enterpriseActive = Boolean(enterprise && ['PILOT', 'ACTIVE'].includes(enterprise.status)
+      && (!enterprise.contractStart || enterprise.contractStart <= new Date())
+      && (!enterprise.contractEnd || enterprise.contractEnd > new Date()));
 
     return {
       plan,
@@ -128,6 +135,7 @@ export class BillingService {
       storageUsedBytes: used,
       storageAvailableBytes: allowance > used ? allowance - used : BigInt(0),
       commissionPercent: Number(plan.commissionPercent),
+      enterprise: enterpriseActive ? enterprise : null,
     };
   }
 
@@ -169,8 +177,13 @@ export class BillingService {
     workspaceId: string,
     feature: 'allowsCustomDomain' | 'allowsSponsors' | 'allowsAdvancedMetrics',
   ): Promise<void> {
-    const { plan } = await this.resolveForWorkspace(workspaceId);
-    if (plan[feature]) return;
+    const { plan, enterprise } = await this.resolveForWorkspace(workspaceId);
+    const enterpriseFeature = {
+      allowsCustomDomain: enterprise?.customDomainEnabled,
+      allowsSponsors: enterprise?.sponsorsEnabled,
+      allowsAdvancedMetrics: enterprise?.advancedAnalyticsEnabled,
+    }[feature];
+    if (plan[feature] || enterpriseFeature) return;
 
     const names: Record<typeof feature, string> = {
       allowsCustomDomain: 'usar un dominio propio',
@@ -194,8 +207,8 @@ export class BillingService {
 
   /** Administradores que admite el plan. Nulo significa sin límite. */
   async maxAdminsFor(workspaceId: string): Promise<number | null> {
-    const { plan } = await this.resolveForWorkspace(workspaceId);
-    return plan.maxAdmins ?? null;
+    const { plan, enterprise } = await this.resolveForWorkspace(workspaceId);
+    return enterprise?.maxAdmins ?? plan.maxAdmins ?? null;
   }
 
   async assertStorageAvailable(workspaceId: string | null | undefined, bytes: number): Promise<void> {
@@ -603,11 +616,11 @@ export class BillingService {
         currency: effective.plan.currency,
         commissionPercent: effective.commissionPercent,
         sharePhotoCents: Number(effective.plan.sharePhotoCents),
-        allowsCustomDomain: effective.plan.allowsCustomDomain,
-        allowsSponsors: effective.plan.allowsSponsors,
-        allowsAdvancedMetrics: effective.plan.allowsAdvancedMetrics,
+        allowsCustomDomain: effective.plan.allowsCustomDomain || Boolean(effective.enterprise?.customDomainEnabled),
+        allowsSponsors: effective.plan.allowsSponsors || Boolean(effective.enterprise?.sponsorsEnabled),
+        allowsAdvancedMetrics: effective.plan.allowsAdvancedMetrics || Boolean(effective.enterprise?.advancedAnalyticsEnabled),
         sponsoredEventFeeCents: effective.plan.sponsoredEventFeeCents,
-        maxAdmins: effective.plan.maxAdmins,
+        maxAdmins: effective.enterprise?.maxAdmins ?? effective.plan.maxAdmins,
       },
       // Modo compartir acumulado desde la última factura.
       shareMode: {

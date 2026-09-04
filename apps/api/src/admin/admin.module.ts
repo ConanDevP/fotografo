@@ -17,6 +17,10 @@ import { AdminSystemService } from './admin-system.service';
 import { AdminSystemController } from './admin-system.controller';
 import { AdminIntegrationsService } from './admin-integrations.service';
 import { AdminIntegrationsController } from './admin-integrations.controller';
+import { AdminPlanAccessController } from './admin-plan-access.controller';
+import { AdminPlanAccessService } from './admin-plan-access.service';
+import { AdminEnterpriseController } from './admin-enterprise.controller';
+import { AdminEnterpriseService } from './admin-enterprise.service';
 import { PrismaService } from '../common/services/prisma.service';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { QueueService } from '../common/services/queue.service';
@@ -37,6 +41,8 @@ import { EventsModule } from '../events/events.module';
     AdminSubscriptionsController,
     AdminSystemController,
     AdminIntegrationsController,
+    AdminPlanAccessController,
+    AdminEnterpriseController,
   ],
   providers: [
     AdminService,
@@ -48,6 +54,8 @@ import { EventsModule } from '../events/events.module';
     AdminSubscriptionsService,
     AdminSystemService,
     AdminIntegrationsService,
+    AdminPlanAccessService,
+    AdminEnterpriseService,
     PrismaService,
     CloudinaryService,
     QueueService,

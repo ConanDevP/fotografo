@@ -28,6 +28,7 @@ import { RescueJobsService } from './services/rescue-jobs.service';
 import { BatchProgressService } from './services/batch-progress.service';
 import { validateEnvironment } from '../../api/src/common/config/validate-environment';
 import { PartnerWebhooksService } from '../../api/src/partner-api/partner-webhooks.service';
+import { EnterpriseAccessService } from '../../api/src/partner-api/enterprise-access.service';
 
 import { QUEUES } from '@shared/constants';
 
@@ -46,7 +47,10 @@ import { QUEUES } from '@shared/constants';
         const config = {
           host: url.hostname,
           port: parseInt(url.port) || 6379,
+          username: url.username || undefined,
           password: url.password || undefined,
+          db: url.pathname && url.pathname !== '/' ? Number(url.pathname.slice(1)) : undefined,
+          tls: url.protocol === 'rediss:' ? {} : undefined,
         };
         return config;
       })(),
@@ -85,6 +89,7 @@ import { QUEUES } from '@shared/constants';
     RescueJobsService,
     BatchProgressService,
     PartnerWebhooksService,
+    EnterpriseAccessService,
   ],
 })
 export class WorkerModule {}

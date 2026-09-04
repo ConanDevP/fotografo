@@ -8,13 +8,14 @@ import { PrismaService } from '../common/services/prisma.service';
 import { PartnerPrincipal } from './partner-api.types';
 import { CreatePartnerWebhookDto, UpdatePartnerWebhookDto } from './dto/partner-webhook.dto';
 import { PartnerWebhookEvent } from './partner-webhook.events';
+import { EnterpriseAccessService } from './enterprise-access.service';
 
 @Injectable()
 export class PartnerWebhooksService {
   private readonly logger = new Logger(PartnerWebhooksService.name);
   private readonly key: Buffer;
 
-  constructor(private readonly prisma: PrismaService, config: ConfigService) {
+  constructor(private readonly prisma: PrismaService, config: ConfigService, private readonly enterpriseAccess: EnterpriseAccessService) {
     this.key = createHash('sha256').update(config.get<string>('PARTNER_WEBHOOK_ENCRYPTION_KEY') || 'development-only-webhook-key').digest();
   }
 
@@ -27,6 +28,7 @@ export class PartnerWebhooksService {
   }
 
   async create(principal: PartnerPrincipal, dto: CreatePartnerWebhookDto) {
+    await this.enterpriseAccess.assertCanCreateWebhook(principal.workspaceId);
     await this.assertPublicHttps(dto.url);
     const secret = `whsec_${randomBytes(32).toString('base64url')}`;
     const endpoint = await this.prisma.partnerWebhookEndpoint.create({

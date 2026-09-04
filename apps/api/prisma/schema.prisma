@@ -8,53 +8,53 @@ datasource db {
 }
 
 model User {
-  id                        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email                     String             @unique
-  passwordHash              String?            @map("password_hash")
-  name                      String?            @map("name")
-  phone                     String?            @map("phone")
-  profileImageUrl           String?            @map("profile_image_url")
-  address                   String?            @map("address")
+  id                        String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                     String               @unique
+  passwordHash              String?              @map("password_hash")
+  name                      String?              @map("name")
+  phone                     String?              @map("phone")
+  profileImageUrl           String?              @map("profile_image_url")
+  address                   String?              @map("address")
   role                      UserRole
-  createdAt                 DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  slug                      String?            @unique
+  createdAt                 DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  slug                      String?              @unique
   bio                       String?
   website                   String?
   instagram                 String?
   facebook                  String?
   specialties               String[]
-  experienceYears           Int?               @map("experience_years")
+  experienceYears           Int?                 @map("experience_years")
   location                  String?
-  portfolioUrl              String?            @map("portfolio_url")
-  isFeatured                Boolean            @default(false) @map("is_featured")
-  isVerified                Boolean            @default(false) @map("is_verified")
+  portfolioUrl              String?              @map("portfolio_url")
+  isFeatured                Boolean              @default(false) @map("is_featured")
+  isVerified                Boolean              @default(false) @map("is_verified")
   /// Cierre de cuenta. La fila se conserva anonimizada porque los apuntes
   /// contables y los pedidos apuntan aquí; esta marca cierra el acceso.
-  deletedAt                 DateTime?          @map("deleted_at") @db.Timestamptz(6)
-  paypalMerchantId          String?            @unique @map("paypal_merchant_id")
-  paypalMerchantIdInPayPal  String?            @map("paypal_merchant_id_in_paypal")
-  paypalEmail               String?            @map("paypal_email")
-  paypalOnboardingCompleted Boolean            @default(false) @map("paypal_onboarding_completed")
-  paypalPermissionsGranted  Boolean            @default(false) @map("paypal_permissions_granted")
-  paypalTrackingId          String?            @map("paypal_tracking_id")
-  paypalOnboardedAt         DateTime?          @map("paypal_onboarded_at") @db.Timestamptz(6)
-  stripeAccountId           String?            @unique @map("stripe_account_id")
-  stripeAccountStatus       String?            @map("stripe_account_status")
-  stripeOnboardingCompleted Boolean            @default(false) @map("stripe_onboarding_completed")
-  stripeChargesEnabled      Boolean            @default(false) @map("stripe_charges_enabled")
-  stripePayoutsEnabled      Boolean            @default(false) @map("stripe_payouts_enabled")
-  stripeOnboardedAt         DateTime?          @map("stripe_onboarded_at") @db.Timestamptz(6)
+  deletedAt                 DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  paypalMerchantId          String?              @unique @map("paypal_merchant_id")
+  paypalMerchantIdInPayPal  String?              @map("paypal_merchant_id_in_paypal")
+  paypalEmail               String?              @map("paypal_email")
+  paypalOnboardingCompleted Boolean              @default(false) @map("paypal_onboarding_completed")
+  paypalPermissionsGranted  Boolean              @default(false) @map("paypal_permissions_granted")
+  paypalTrackingId          String?              @map("paypal_tracking_id")
+  paypalOnboardedAt         DateTime?            @map("paypal_onboarded_at") @db.Timestamptz(6)
+  stripeAccountId           String?              @unique @map("stripe_account_id")
+  stripeAccountStatus       String?              @map("stripe_account_status")
+  stripeOnboardingCompleted Boolean              @default(false) @map("stripe_onboarding_completed")
+  stripeChargesEnabled      Boolean              @default(false) @map("stripe_charges_enabled")
+  stripePayoutsEnabled      Boolean              @default(false) @map("stripe_payouts_enabled")
+  stripeOnboardedAt         DateTime?            @map("stripe_onboarded_at") @db.Timestamptz(6)
   auditLogs                 AuditLog[]
   BatchUploadJob            BatchUploadJob[]
-  ownedEvents               Event[]            @relation("EventOwner")
+  ownedEvents               Event[]              @relation("EventOwner")
   orders                    Order[]
-  photographedPhotos        Photo[]            @relation("PhotoPhotographer")
-  ownedWorkspaces           Workspace[]        @relation("WorkspaceOwner")
+  photographedPhotos        Photo[]              @relation("PhotoPhotographer")
+  ownedWorkspaces           Workspace[]          @relation("WorkspaceOwner")
   workspaceMemberships      WorkspaceMember[]
-  eventContributions        EventContributor[] @relation("ContributorUser")
-  sentEventInvitations      EventContributor[] @relation("ContributorInviter")
-  beneficiaryLedgerEntries  LedgerEntry[]      @relation("LedgerBeneficiary")
+  eventContributions        EventContributor[]   @relation("ContributorUser")
+  sentEventInvitations      EventContributor[]   @relation("ContributorInviter")
+  beneficiaryLedgerEntries  LedgerEntry[]        @relation("LedgerBeneficiary")
   metricEvents              MetricEvent[]
   passwordResetTokens       PasswordResetToken[]
 
@@ -104,6 +104,8 @@ model Workspace {
   orderItems                    OrderItem[]
   shareUsageCharges             ShareUsageCharge[]
   apiClients                    ApiClient[]
+  enterpriseAccount             EnterpriseAccount?
+  partnerApiUsage               PartnerApiUsage[]
 
   @@index([ownerId])
   @@index([isPublished])
@@ -133,6 +135,65 @@ model ApiClient {
   @@map("api_clients")
 }
 
+/// Contrato empresarial del workspace. No sustituye los roles humanos: define
+/// qué producto compró la empresa y los límites máximos de sus integraciones.
+model EnterpriseAccount {
+  id                        String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId               String                  @unique @map("workspace_id") @db.Uuid
+  status                    EnterpriseAccountStatus @default(PROSPECT)
+  contractStart             DateTime?               @map("contract_start") @db.Timestamptz(6)
+  contractEnd               DateTime?               @map("contract_end") @db.Timestamptz(6)
+  annualPriceCents          Int?                    @map("annual_price_cents")
+  currency                  String                  @default("USD") @db.VarChar(3)
+  contractReference         String?                 @map("contract_reference")
+  legalName                 String?                 @map("legal_name")
+  accountManager            String?                 @map("account_manager")
+  businessContactEmail      String?                 @map("business_contact_email")
+  technicalContactEmail     String?                 @map("technical_contact_email")
+  billingContactEmail       String?                 @map("billing_contact_email")
+  securityContactEmail      String?                 @map("security_contact_email")
+  internalNotes             String?                 @map("internal_notes")
+  partnerApiEnabled         Boolean                 @default(false) @map("partner_api_enabled")
+  webhooksEnabled           Boolean                 @default(false) @map("webhooks_enabled")
+  faceSearchEnabled         Boolean                 @default(false) @map("face_search_enabled")
+  sponsorsEnabled           Boolean                 @default(false) @map("sponsors_enabled")
+  customDomainEnabled       Boolean                 @default(false) @map("custom_domain_enabled")
+  advancedAnalyticsEnabled  Boolean                 @default(false) @map("advanced_analytics_enabled")
+  exportsEnabled            Boolean                 @default(false) @map("exports_enabled")
+  originalDownloadsEnabled  Boolean                 @default(false) @map("original_downloads_enabled")
+  sponsoredDownloadsEnabled Boolean                 @default(false) @map("sponsored_downloads_enabled")
+  priorityProcessingEnabled Boolean                 @default(false) @map("priority_processing_enabled")
+  annualPhotoLimit          Int?                    @map("annual_photo_limit")
+  annualEventLimit          Int?                    @map("annual_event_limit")
+  monthlyApiRequestLimit    Int?                    @map("monthly_api_request_limit")
+  monthlyFaceSearchLimit    Int?                    @map("monthly_face_search_limit")
+  maxApiClients             Int?                    @map("max_api_clients")
+  maxWebhookEndpoints       Int?                    @map("max_webhook_endpoints")
+  maxAdmins                 Int?                    @map("max_admins")
+  retentionDays             Int?                    @map("retention_days")
+  createdById               String?                 @map("created_by_id") @db.Uuid
+  updatedById               String?                 @map("updated_by_id") @db.Uuid
+  createdAt                 DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace                 Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([status, contractEnd])
+  @@map("enterprise_accounts")
+}
+
+model PartnerApiUsage {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  period          String    @db.VarChar(7)
+  requestCount    BigInt    @default(0) @map("request_count")
+  faceSearchCount BigInt    @default(0) @map("face_search_count")
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, period])
+  @@map("partner_api_usage")
+}
+
 /// Respuesta persistida de una escritura Partner API para que un reintento de
 /// red con la misma clave nunca duplique recursos.
 model PartnerIdempotencyRecord {
@@ -152,15 +213,15 @@ model PartnerIdempotencyRecord {
 }
 
 model PartnerWebhookEndpoint {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId     String   @map("workspace_id") @db.Uuid
-  apiClientId     String   @map("api_client_id") @db.Uuid
-  url             String   @db.VarChar(2048)
-  secretEncrypted String   @map("secret_encrypted") @db.Text
+  id              String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String                   @map("workspace_id") @db.Uuid
+  apiClientId     String                   @map("api_client_id") @db.Uuid
+  url             String                   @db.VarChar(2048)
+  secretEncrypted String                   @map("secret_encrypted") @db.Text
   events          String[]
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  active          Boolean                  @default(true)
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
   deliveries      PartnerWebhookDelivery[]
 
   @@index([workspaceId, active])
@@ -366,42 +427,42 @@ model BibSubscription {
 }
 
 model Order {
-  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId               String?               @map("user_id") @db.Uuid
-  eventId              String?               @map("event_id") @db.Uuid
-  amountCents          Int                   @map("amount_cents")
-  currency             String                @default("USD")
-  status               OrderStatus
-  stripeSessionId      String?               @map("stripe_session_id")
-  paymentGateway       String?               @map("payment_gateway")
-  paymentId            String?               @unique @map("payment_id")
-  guestEmail           String?               @map("guest_email")
-  accessTokenHash      String?               @map("access_token_hash")
-  accessTokenExpiresAt DateTime?             @map("access_token_expires_at") @db.Timestamptz(6)
-  idempotencyKey       String?               @unique @map("idempotency_key")
-  paidAt               DateTime?             @map("paid_at") @db.Timestamptz(6)
-  refundedAt           DateTime?             @map("refunded_at") @db.Timestamptz(6)
-  stripeTransferGroup  String?               @map("stripe_transfer_group")
-  settlementStatus     OrderSettlementStatus @default(PENDING) @map("settlement_status")
-  settlementError      String?               @map("settlement_error")
-  settledAt            DateTime?             @map("settled_at") @db.Timestamptz(6)
-  stripeRefundId       String?               @unique @map("stripe_refund_id")
-  refundRequestedAt    DateTime?             @map("refund_requested_at") @db.Timestamptz(6)
-  refundError          String?               @map("refund_error")
+  id                     String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String?               @map("user_id") @db.Uuid
+  eventId                String?               @map("event_id") @db.Uuid
+  amountCents            Int                   @map("amount_cents")
+  currency               String                @default("USD")
+  status                 OrderStatus
+  stripeSessionId        String?               @map("stripe_session_id")
+  paymentGateway         String?               @map("payment_gateway")
+  paymentId              String?               @unique @map("payment_id")
+  guestEmail             String?               @map("guest_email")
+  accessTokenHash        String?               @map("access_token_hash")
+  accessTokenExpiresAt   DateTime?             @map("access_token_expires_at") @db.Timestamptz(6)
+  idempotencyKey         String?               @unique @map("idempotency_key")
+  paidAt                 DateTime?             @map("paid_at") @db.Timestamptz(6)
+  refundedAt             DateTime?             @map("refunded_at") @db.Timestamptz(6)
+  stripeTransferGroup    String?               @map("stripe_transfer_group")
+  settlementStatus       OrderSettlementStatus @default(PENDING) @map("settlement_status")
+  settlementError        String?               @map("settlement_error")
+  settledAt              DateTime?             @map("settled_at") @db.Timestamptz(6)
+  stripeRefundId         String?               @unique @map("stripe_refund_id")
+  refundRequestedAt      DateTime?             @map("refund_requested_at") @db.Timestamptz(6)
+  refundError            String?               @map("refund_error")
   /// Contracargo abierto por el banco del comprador.
-  stripeDisputeId      String?               @unique @map("stripe_dispute_id")
-  disputedAt           DateTime?             @map("disputed_at") @db.Timestamptz(6)
-  disputeOutcome       String?               @map("dispute_outcome")
+  stripeDisputeId        String?               @unique @map("stripe_dispute_id")
+  disputedAt             DateTime?             @map("disputed_at") @db.Timestamptz(6)
+  disputeOutcome         String?               @map("dispute_outcome")
   /// Momento en que el comprador aceptó que son archivos digitales sin
   /// devolución tras la descarga. Es la evidencia que más pesa en una disputa.
-  refundPolicyAcceptedAt DateTime?           @map("refund_policy_accepted_at") @db.Timestamptz(6)
-  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
-  items                OrderItem[]
-  event                Event?                @relation(fields: [eventId], references: [id])
-  user                 User?                 @relation(fields: [userId], references: [id])
-  ledgerEntries        LedgerEntry[]
-  metricEvents         MetricEvent[]
+  refundPolicyAcceptedAt DateTime?             @map("refund_policy_accepted_at") @db.Timestamptz(6)
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  items                  OrderItem[]
+  event                  Event?                @relation(fields: [eventId], references: [id])
+  user                   User?                 @relation(fields: [userId], references: [id])
+  ledgerEntries          LedgerEntry[]
+  metricEvents           MetricEvent[]
 
   @@index([settlementStatus])
   @@map("orders")
@@ -777,6 +838,14 @@ enum WorkspaceRole {
   SUPPORT
 }
 
+enum EnterpriseAccountStatus {
+  PROSPECT
+  PILOT
+  ACTIVE
+  SUSPENDED
+  ENDED
+}
+
 enum MembershipStatus {
   ACTIVE
   SUSPENDED
@@ -976,12 +1045,17 @@ model Subscription {
   /// Líneas de la suscripción en Stripe: la del plan y la del almacenamiento.
   stripePlanItemId     String?            @map("stripe_plan_item_id")
   stripeStorageItemId  String?            @map("stripe_storage_item_id")
+  /// Acceso comercial concedido por soporte sin crear ni modificar un cobro.
+  adminGrantedUntil    DateTime?          @map("admin_granted_until") @db.Timestamptz(6)
+  adminGrantReason     String?            @map("admin_grant_reason")
+  adminGrantedById     String?            @map("admin_granted_by_id") @db.Uuid
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   plan                 Plan               @relation(fields: [planId], references: [id])
 
   @@index([planId, status])
+  @@index([adminGrantedUntil])
   @@map("subscriptions")
 }
 

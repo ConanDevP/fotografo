@@ -890,6 +890,7 @@ export class EventsService {
     const acceptanceUrlObject = new URL('/invitations/events', process.env.FRONTEND_URL || 'http://localhost:3000');
     acceptanceUrlObject.hash = new URLSearchParams({ token: invitationToken }).toString();
     const acceptanceUrl = acceptanceUrlObject.toString();
+    let emailQueued = false;
     try {
       await this.queueService.addSendEmailJob({
         kind: 'EVENT_INVITATION',
@@ -902,7 +903,8 @@ export class EventsService {
         organizerCommissionPercent: Number(data.organizerCommissionPercent),
         rightsTerms: data.rightsTerms,
       });
-    } catch {
+      emailQueued = true;
+    } catch (error) {
       this.logger.warn(`La invitación ${invitation.id} fue creada, pero el correo quedó pendiente por indisponibilidad de la cola`);
     }
 
@@ -911,6 +913,7 @@ export class EventsService {
       invitation: safeInvitation,
       invitationToken,
       acceptanceUrl,
+      emailQueued,
     };
   }
 
