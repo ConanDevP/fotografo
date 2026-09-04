@@ -44,13 +44,16 @@ export class OcrGeminiService {
     strategy: 'flash' | 'pro' = 'flash',
   ): Promise<GeminiOCRResponse> {
     try {
-      const model = this.genAI.getGenerativeModel({ 
-        model: strategy === 'pro' ? GEMINI_MODELS.PRO : GEMINI_MODELS.FLASH,
+      const modelName = strategy === 'pro'
+        ? this.configService.get<string>('GEMINI_PRO_MODEL', GEMINI_MODELS.PRO)
+        : this.configService.get<string>('GEMINI_FLASH_MODEL', GEMINI_MODELS.FLASH);
+      const model = this.genAI.getGenerativeModel({
+        model: modelName,
       });
 
       const prompt = this.buildPrompt(bibRules);
       
-      this.logger.log(`Iniciando OCR con ${strategy} para imagen: ${imageUrl}`);
+      this.logger.log(`Iniciando OCR con ${strategy} (${modelName}) para imagen: ${this.safeImageReference(imageUrl)}`);
 
       const imagePayload = await this.fetchImageAsBase64(imageUrl);
       const result = await model.generateContent([
@@ -151,6 +154,15 @@ Responde SOLO en formato JSON:
     }
 
     return prompt;
+  }
+
+  private safeImageReference(rawUrl: string): string {
+    try {
+      const url = new URL(rawUrl);
+      return `${url.hostname}${url.pathname}`;
+    } catch {
+      return '[imagen no identificable]';
+    }
   }
 
   private processBibs(bibs: DetectedBib[], bibRules?: BibRules): DetectedBib[] {

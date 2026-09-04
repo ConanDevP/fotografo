@@ -108,12 +108,16 @@ export class PartnerApiService {
   async updateGalleryConfig(principal: PartnerPrincipal, eventId: string, dto: any) {
     await this.assertEventInWorkspace(principal.workspaceId, eventId);
     this.assertPublishScope(principal, dto.isPublished);
-    const current = await this.prisma.event.findUnique({ where: { id: eventId }, select: { isPublished: true } });
-    const data: any = { ...dto };
-    if (dto.isPublished === true && !current?.isPublished) data.publishedAt = new Date();
-    if (dto.isPublished === false) data.publishedAt = null;
-    if (dto.freeDownloadUntil) data.freeDownloadUntil = new Date(dto.freeDownloadUntil);
-    const result = await this.prisma.event.update({ where: { id: eventId }, data });
+    const { isFreeDownload, freeDownloadUntil, requireEmailForFree, freeDownloadLimit, ...managed } = dto;
+    const audienceData: Prisma.EventUpdateInput = {};
+    if (isFreeDownload !== undefined) audienceData.isFreeDownload = isFreeDownload;
+    if (freeDownloadUntil !== undefined) audienceData.freeDownloadUntil = freeDownloadUntil ? new Date(freeDownloadUntil) : null;
+    if (requireEmailForFree !== undefined) audienceData.requireEmailForFree = requireEmailForFree;
+    if (freeDownloadLimit !== undefined) audienceData.freeDownloadLimit = freeDownloadLimit;
+    if (Object.keys(audienceData).length) await this.prisma.event.update({ where: { id: eventId }, data: audienceData });
+    const result = Object.keys(managed).length
+      ? await this.events.update(eventId, managed, principal.actorUserId, principal.actorRole as UserRole)
+      : await this.prisma.event.findUnique({ where: { id: eventId } });
     await this.emit(principal.workspaceId, 'event.gallery.updated', { eventId, config: dto });
     return result;
   }

@@ -175,7 +175,10 @@ export class FreeDownloadsService {
           ...(normalizedEmail ? [`${eventId}:email:${normalizedEmail}`] : []),
         ].sort();
         for (const lockKey of lockKeys) {
-          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+          // La función devuelve `void`. `$queryRaw` intenta deserializar esa
+          // columna y algunos adaptadores/versions de Prisma fallan con P2010.
+          // `$executeRaw` conserva el bloqueo transaccional sin materializarla.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
         }
         const downloadCount = await tx.freeDownload.count({
           where: {

@@ -76,7 +76,7 @@ export class FaceApiService implements OnModuleInit {
     }
 
     try {
-      this.logger.debug(`Detecting faces in image: ${imageUrl}`);
+      this.logger.debug(`Detecting faces in image: ${this.safeImageReference(imageUrl)}`);
       
       // Load image from URL
       const img = await loadImage(imageUrl);
@@ -185,12 +185,21 @@ export class FaceApiService implements OnModuleInit {
         results.set(imageUrl, faces);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.error(`Failed to process ${imageUrl}: ${errorMessage}`);
+        this.logger.error(`Failed to process ${this.safeImageReference(imageUrl)}: ${errorMessage}`);
         results.set(imageUrl, []);
       }
     }
     
     return results;
+  }
+
+  private safeImageReference(rawUrl: string): string {
+    try {
+      const url = new URL(rawUrl);
+      return `${url.hostname}${url.pathname}`;
+    } catch {
+      return '[imagen no identificable]';
+    }
   }
 
   // Health check method

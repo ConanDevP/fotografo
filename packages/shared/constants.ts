@@ -93,7 +93,7 @@ export const IMAGE_SIZES = {
 // Gemini
 export const GEMINI_MODELS = {
   FLASH: 'gemini-2.5-flash-lite',
-  PRO: 'gemini-1.5-pro',
+  PRO: 'gemini-2.5-pro',
 } as const;
 
 // Rate limits (per minute)

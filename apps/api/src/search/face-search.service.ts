@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, HttpException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { StorageService } from '../common/services/storage.service';
 import { PythonFaceApiService } from '../../../worker/src/services/python-face-api.service';
@@ -286,6 +286,10 @@ export class FaceSearchService {
       };
     } catch (error) {
       this.logger.error(`Error in face search for event ${eventId}: ${getErrorMessage(error)}`);
+      if (error instanceof HttpException) throw error;
+      if (/Python API returned|Face API|fetch failed|timeout/i.test(getErrorMessage(error))) {
+        throw new ServiceUnavailableException('El reconocimiento facial no está disponible temporalmente');
+      }
       throw error;
     }
   }
