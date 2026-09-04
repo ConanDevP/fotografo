@@ -141,13 +141,10 @@ export class SharpTransformService implements OnModuleInit {
     const requestedLogoHeight = Math.round(
       imageHeight * Math.min(20, Math.max(2, options.maxHeightPercent ?? 8)) / 100,
     );
-    const panelHeight = Math.max(
-      90,
-      Math.round(imageWidth * 0.09),
-      Math.ceil(requestedLogoHeight / 0.62),
-    );
-    const logoHeight = Math.max(24, requestedLogoHeight);
-    const gap = Math.max(18, Math.round(imageWidth * 0.015));
+    const logoHeight = Math.max(12, requestedLogoHeight);
+    const verticalPadding = Math.max(6, Math.round(imageHeight * 0.018));
+    const panelHeight = Math.min(Math.round(imageHeight * 0.25), logoHeight + verticalPadding * 2);
+    const gap = Math.max(10, Math.round(imageWidth * 0.018));
     const logoCount = Math.min(6, logoBuffers.length);
     const maxLogoWidth = Math.max(40, Math.floor((imageWidth - gap * (logoCount + 1)) / logoCount));
     // Un logo sin canal alfa —un JPEG, lo más habitual— lleva su propio fondo,
@@ -157,7 +154,8 @@ export class SharpTransformService implements OnModuleInit {
     const preparedLogos = await Promise.all(
       logoBuffers.slice(0, 6).map(async buffer => {
         const hasAlpha = Boolean((await sharp(buffer).metadata()).hasAlpha);
-        const resized = sharp(buffer).resize({
+        const trimmed = await sharp(buffer).trim({ threshold: 10 }).toBuffer();
+        const resized = sharp(trimmed).resize({
           width: maxLogoWidth,
           height: hasAlpha ? logoHeight : Math.round(logoHeight * 0.8),
           fit: 'inside',
@@ -165,7 +163,7 @@ export class SharpTransformService implements OnModuleInit {
         });
         if (hasAlpha) return resized.png().toBuffer();
 
-        const padding = Math.max(6, Math.round(logoHeight * 0.1));
+        const padding = Math.max(3, Math.round(logoHeight * 0.08));
         return sharp(await resized.png().toBuffer())
           .extend({
             top: padding,
@@ -183,11 +181,9 @@ export class SharpTransformService implements OnModuleInit {
     let cursor = Math.max(gap, Math.round((imageWidth - totalLogoWidth) / 2));
     const top = options.position === 'top' ? 0 : imageHeight - panelHeight;
     // El rótulo también escala: a tamaño fijo era ilegible en una foto de 4000px.
-    const captionSize = Math.max(12, Math.round(panelHeight * 0.14));
-    const captionY = Math.round(captionSize * 1.6);
-    const panelOpacity = Math.min(1, Math.max(0.35, options.opacity ?? 0.82));
+    const panelOpacity = Math.min(1, Math.max(0.2, options.opacity ?? 0.72));
     const panel = Buffer.from(
-      `<svg width="${imageWidth}" height="${panelHeight}"><rect width="100%" height="100%" fill="rgba(0,0,0,${panelOpacity})"/><text x="${gap}" y="${captionY}" fill="white" font-family="Arial" font-size="${captionSize}" letter-spacing="${Math.round(captionSize * 0.12)}" opacity="0.75">PATROCINADO POR</text></svg>`,
+      `<svg width="${imageWidth}" height="${panelHeight}"><rect width="100%" height="100%" fill="rgba(0,0,0,${panelOpacity})"/></svg>`,
     );
     const composites: sharp.OverlayOptions[] = [{ input: panel, left: 0, top }];
     for (let index = 0; index < preparedLogos.length; index++) {
@@ -195,7 +191,7 @@ export class SharpTransformService implements OnModuleInit {
       composites.push({
         input: preparedLogos[index],
         left: cursor,
-        top: top + captionY + Math.round((panelHeight - captionY - logoHeight) / 2),
+        top: top + Math.round((panelHeight - (logoMetadata[index].height || logoHeight)) / 2),
       });
       cursor += width + gap;
     }

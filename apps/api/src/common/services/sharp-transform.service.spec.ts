@@ -35,4 +35,17 @@ describe('SharpTransformService sponsored downloads', () => {
     expect(await redPixels(large)).toBeGreaterThan((await redPixels(small)) * 4);
     await expect(sharp(large).metadata()).resolves.toMatchObject({ width: 1200, height: 800, format: 'jpeg' });
   });
+
+  it('places the sponsor band at the configured edge', async () => {
+    const photo = await sharp({ create: { width: 600, height: 400, channels: 3, background: '#eeeeee' } }).png().toBuffer();
+    const logo = await sharp({ create: { width: 180, height: 70, channels: 4, background: '#ef0000' } }).png().toBuffer();
+    const bottom = await service.generateSponsoredDownload(photo, [logo], { position: 'bottom', opacity: 1, maxHeightPercent: 8 });
+    const { data, info } = await sharp(bottom).raw().toBuffer({ resolveWithObject: true });
+    const darkness = (y: number) => {
+      let total = 0;
+      for (let x = 0; x < info.width; x++) total += data[(y * info.width + x) * info.channels];
+      return total / info.width;
+    };
+    expect(darkness(info.height - 5)).toBeLessThan(darkness(5) * 0.35);
+  });
 });

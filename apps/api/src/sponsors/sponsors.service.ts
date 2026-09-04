@@ -48,7 +48,7 @@ export class SponsorsService {
       throw new BadRequestException('El patrocinador debe pertenecer al mismo espacio que el evento');
     }
 
-    const placement = (dto.placement || { position: 'bottom', opacity: 0.92, maxHeightPercent: 8 }) as Prisma.InputJsonObject;
+    const placement = (dto.placement || { position: 'bottom', opacity: 0.72, maxHeightPercent: 8 }) as Prisma.InputJsonObject;
     const result = await this.prisma.eventSponsor.upsert({
       where: { eventId_sponsorId: { eventId, sponsorId: dto.sponsorId } },
       update: {
