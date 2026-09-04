@@ -106,8 +106,9 @@ export class PythonFaceApiService {
       // Comprimir AGRESIVAMENTE para no exceder límite de 2083 caracteres
       // Para detección facial, 200px es suficiente y genera ~15KB = ~20K chars base64
       const compressedBuffer = await sharp(imageBuffer)
-        .resize(200, 200, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 50 })
+        .rotate()
+        .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 88 })
         .toBuffer();
 
       const base64Image = compressedBuffer.toString('base64');

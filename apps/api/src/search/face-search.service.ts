@@ -68,25 +68,18 @@ export class FaceSearchService {
         throw new BadRequestException('La selfie no es una imagen JPG, PNG o WEBP válida');
       }
 
-      const tempImageKey = `temp/search/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
-      const temporaryImage = await this.storageService.uploadPrivateTemporaryImage(normalizedImage, tempImageKey);
-
-      let userFaceDescriptor: Float32Array | null = null;
-
-      try {
-        const tempImageUrl = await this.storageService.generateSecureDownloadUrl(temporaryImage.key, 300);
-        const faces = await this.pythonFaceApiService.detectAllFaces(tempImageUrl, 1);
-        if (faces.length > 0) {
-          userFaceDescriptor = new Float32Array(faces[0].embedding);
-          this.logger.log(`Face extracted. Confidence: ${faces[0].confidence}`);
-        } else {
-          this.logger.warn('No face detected in search image');
-        }
-      } finally {
+      // La selfie no se persiste: viaja directamente al servicio autenticado.
+      // Esto elimina R2, URLs firmadas y allowlists del camino de búsqueda.
+      let userFaceDescriptor = await this.pythonFaceApiService.extractFaceDescriptor(normalizedImage);
+      if (!userFaceDescriptor) {
+        const tempImageKey = `temp/search/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+        const temporaryImage = await this.storageService.uploadPrivateTemporaryImage(normalizedImage, tempImageKey);
         try {
-          await this.storageService.deleteImage(temporaryImage.key);
-        } catch (cleanupError) {
-          this.logger.warn(`Failed to cleanup temp image ${tempImageKey}:`, cleanupError);
+          const tempImageUrl = await this.storageService.generateSecureDownloadUrl(temporaryImage.key, 300);
+          const faces = await this.pythonFaceApiService.detectAllFaces(tempImageUrl, 1, 0.3);
+          if (faces.length) userFaceDescriptor = new Float32Array(faces[0].embedding);
+        } finally {
+          await this.storageService.deleteImage(temporaryImage.key).catch(() => undefined);
         }
       }
 
