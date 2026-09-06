@@ -19,6 +19,7 @@ import { PublicModule } from './public/public.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 import { SponsorsModule } from './sponsors/sponsors.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { BillingModule } from './billing/billing.module';
 import { PartnerApiModule } from './partner-api/partner-api.module';
 import { ConnectionErrorMiddleware } from './common/middleware/connection-error.middleware';
@@ -50,6 +51,7 @@ import { validateEnvironment } from './common/config/validate-environment';
     WorkspacesModule,
     SponsorsModule,
     MetricsModule,
+    AnalyticsModule,
     BillingModule,
     PartnerApiModule,
   ],

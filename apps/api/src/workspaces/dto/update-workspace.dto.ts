@@ -72,6 +72,10 @@ export class UpdateWorkspaceDto {
   isPublished?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  postEventReportsEnabled?: boolean;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => UpdateBrandThemeDto)
   brand?: UpdateBrandThemeDto;

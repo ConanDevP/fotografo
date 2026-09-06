@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
 import { UserRole } from '@shared/types';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -19,6 +19,7 @@ import { PartnerWebhooksService } from './partner-webhooks.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { SponsorsService } from '../sponsors/sponsors.service';
 import { FreeDownloadsService } from '../events/free-downloads.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { UpdateWorkspaceDto } from '../workspaces/dto/update-workspace.dto';
 import { CreateSponsorDto } from '../sponsors/dto/create-sponsor.dto';
 import { UpdateSponsorDto } from '../sponsors/dto/update-sponsor.dto';
@@ -40,6 +41,8 @@ export class PartnerApiService {
     private readonly workspaces: WorkspacesService,
     private readonly sponsors: SponsorsService,
     private readonly freeDownloads: FreeDownloadsService,
+    @Inject(forwardRef(() => AnalyticsService))
+    private readonly analytics: AnalyticsService,
   ) {}
 
   async listEvents(principal: PartnerPrincipal, query: PartnerListQueryDto) {
@@ -412,14 +415,53 @@ export class PartnerApiService {
 
   async eventAnalytics(principal: PartnerPrincipal, eventId: string) {
     await this.assertEventInWorkspace(principal.workspaceId, eventId);
-    const [event, photoStatus, publicationStatus, metricTypes, freeDownloads] = await Promise.all([
-      this.prisma.event.findUnique({ where: { id: eventId }, select: { id: true, totalFreeDownloads: true, createdAt: true, publishedAt: true } }),
-      this.prisma.photo.groupBy({ by: ['status'], where: { eventId }, _count: true }),
-      this.prisma.photo.groupBy({ by: ['publicationStatus'], where: { eventId }, _count: true }),
-      this.prisma.metricEvent.groupBy({ by: ['type'], where: { eventId }, _count: true }),
-      this.freeDownloads.getEventAnalytics(eventId, principal.actorUserId, principal.actorRole as UserRole),
-    ]);
-    return { event, photosByStatus: photoStatus, photosByPublicationStatus: publicationStatus, metrics: metricTypes, freeDownloads };
+    // Instantánea analítica completa (pipeline, cobertura, embudo, comercio).
+    return this.analytics.eventAnalytics(
+      eventId,
+      principal.actorUserId,
+      principal.actorRole as UserRole,
+    );
+  }
+
+  async analyticsEvents(principal: PartnerPrincipal) {
+    return this.analytics.eventsComparison(principal.workspaceId, principal.actorUserId);
+  }
+
+  async exportAnalytics(principal: PartnerPrincipal, eventId: string) {
+    await this.assertEventInWorkspace(principal.workspaceId, eventId);
+    const a: any = await this.analytics.eventAnalytics(
+      eventId,
+      principal.actorUserId,
+      principal.actorRole as UserRole,
+    );
+    const flat: Array<[string, string | number]> = [
+      ['event', a.event?.name ?? eventId],
+      ['computedAt', a.computedAt ?? ''],
+      ['totalPhotos', a.pipeline?.totalPhotos ?? 0],
+      ['processedPhotos', a.pipeline?.processedPhotos ?? 0],
+      ['photosWithBib', a.pipeline?.photosWithBib ?? 0],
+      ['photosWithFace', a.pipeline?.photosWithFace ?? 0],
+      ['ocrHitRatePct', a.pipeline?.ocrHitRatePct ?? ''],
+      ['fieldSize', a.coverage?.fieldSize ?? ''],
+      ['athletesWithPhotos', a.coverage?.athletesWithPhotos ?? 0],
+      ['coveragePct', a.coverage?.coveragePct ?? ''],
+      ['athletesWhoSearched', a.coverage?.athletesWhoSearched ?? 0],
+      ['claimRatePct', a.coverage?.claimRatePct ?? ''],
+      ['athletesWhoBought', a.coverage?.athletesWhoBought ?? 0],
+      ['eventViews', a.engagement?.eventViews ?? 0],
+      ['uniqueVisitors', a.engagement?.uniqueVisitors ?? 0],
+      ['searches', a.engagement?.searches ?? 0],
+      ['noResultSearches', a.engagement?.noResultSearches ?? 0],
+      ['discoveryRatePct', a.engagement?.discoveryRatePct ?? ''],
+      ['purchases', a.commerce?.purchases ?? 0],
+      ['freeDownloads', a.commerce?.freeDownloads ?? 0],
+      ['grossCents', a.commerce?.grossCents ?? 0],
+      ['organizerCommissionCents', a.commerce?.organizerCommissionCents ?? 0],
+      ['sponsorImpressions', a.sponsors?.impressions ?? 0],
+      ['sponsorClicks', a.sponsors?.clicks ?? 0],
+    ];
+    const csv = this.csv(['metric', 'value'], flat.map(([k, v]) => [k, v]));
+    return { filename: `analytics-${eventId}.csv`, contentType: 'text/csv; charset=utf-8', content: csv };
   }
 
   async exportPhotos(principal: PartnerPrincipal, eventId: string) {

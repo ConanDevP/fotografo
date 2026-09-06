@@ -261,6 +261,18 @@ export class PartnerApiController {
     return { data: await this.partner.eventAnalytics(req.partner, eventId) };
   }
 
+  @Get('analytics/events')
+  @RequirePartnerScopes('events:analytics')
+  async analyticsEvents(@Req() req: PartnerRequest): Promise<ApiResponse> {
+    return { data: await this.partner.analyticsEvents(req.partner) };
+  }
+
+  @Get('events/:eventId/exports/analytics')
+  @RequirePartnerScopes('exports:read')
+  async exportAnalytics(@Req() req: PartnerRequest, @Param('eventId') eventId: string): Promise<ApiResponse> {
+    return { data: await this.partner.exportAnalytics(req.partner, eventId) };
+  }
+
   @Get('events/:eventId/exports/photos')
   @RequirePartnerScopes('exports:read')
   async exportPhotos(@Req() req: PartnerRequest, @Param('eventId') eventId: string): Promise<ApiResponse> {

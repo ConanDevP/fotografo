@@ -25,7 +25,7 @@ describe('PartnerApiService isolation', () => {
       batchUploadJob: { findFirst: jest.fn() },
     };
     const events = { findOneForUser: jest.fn() };
-    const service = new PartnerApiService(prisma as any, events as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new PartnerApiService(prisma as any, events as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 
     await expect(service.getEvent(principal, 'event-foreign')).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.event.findFirst).toHaveBeenCalledWith(expect.objectContaining({
@@ -40,7 +40,7 @@ describe('PartnerApiService isolation', () => {
       batchUploadJob: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     const uploads = { getBatchUploadStatusDetailed: jest.fn() };
-    const service = new PartnerApiService(prisma as any, {} as any, uploads as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new PartnerApiService(prisma as any, {} as any, uploads as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 
     await expect(service.getBatch(principal, 'batch-foreign')).rejects.toBeInstanceOf(NotFoundException);
     expect(uploads.getBatchUploadStatusDetailed).not.toHaveBeenCalled();
@@ -49,7 +49,7 @@ describe('PartnerApiService isolation', () => {
   it('no permite descargar una fotografía de otro workspace', async () => {
     const prisma = { photo: { findFirst: jest.fn().mockResolvedValue(null) } };
     const photos = { generateSecureDownloadUrl: jest.fn() };
-    const service = new PartnerApiService(prisma as any, {} as any, {} as any, photos as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new PartnerApiService(prisma as any, {} as any, {} as any, photos as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 
     await expect(service.downloadPhoto(principal, 'photo-foreign', 300)).rejects.toBeInstanceOf(NotFoundException);
     expect(photos.generateSecureDownloadUrl).not.toHaveBeenCalled();
@@ -58,7 +58,7 @@ describe('PartnerApiService isolation', () => {
   it('permite buscar un dorsal privado solo después de validar el workspace', async () => {
     const prisma = { event: { findFirst: jest.fn().mockResolvedValue({ id: 'event-1' }) } };
     const search = { searchPhotosByBib: jest.fn().mockResolvedValue({ items: [], total: 0 }) };
-    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, search as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, search as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 
     await service.searchByBib(principal, 'event-1', '123', 25);
     expect(search.searchPhotosByBib).toHaveBeenCalledWith('event-1', '123', 25, undefined, true);
@@ -71,7 +71,7 @@ describe('PartnerApiService isolation', () => {
         findUnique: jest.fn().mockResolvedValue({ id: 'photo-1', bibs: [], faces: [] }),
       },
     };
-    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 
     const result = await service.getPhoto(principal, 'photo-1');
     const select = prisma.photo.findUnique.mock.calls[0][0].select;
@@ -91,7 +91,7 @@ describe('PartnerApiService isolation', () => {
         }),
       },
     };
-    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 
     const result = await service.getPhotoAssets(principal, 'photo-1');
     expect(result.assets).toEqual({ thumbnail: 'thumb', watermark: 'watermark', watermarkThumbnail: 'watermark-thumb' });
@@ -105,7 +105,7 @@ describe('PartnerApiService isolation', () => {
     };
     const webhooks = { emit: jest.fn().mockResolvedValue(undefined) };
     const freeDownloads = { downloadFreePhoto: jest.fn().mockResolvedValue({ downloadUrl: 'signed', expiresIn: 900, variant: 'SPONSORED', sponsors: [{ id: 's1' }] }) };
-    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, webhooks as any, {} as any, {} as any, freeDownloads as any);
+    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, webhooks as any, {} as any, {} as any, freeDownloads as any, {} as any);
 
     const result = await service.freeDownloadPhoto(principal, 'event-1', 'photo-1', { email: 'runner@example.com' }, {} as any);
     expect(result.variant).toBe('SPONSORED');
@@ -115,7 +115,7 @@ describe('PartnerApiService isolation', () => {
 
   it('solo restaura eventos archivados del workspace de la credencial', async () => {
     const prisma = { event: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() } };
-    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const service = new PartnerApiService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
     await expect(service.restoreEvent(principal, 'event-foreign')).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.event.update).not.toHaveBeenCalled();
   });

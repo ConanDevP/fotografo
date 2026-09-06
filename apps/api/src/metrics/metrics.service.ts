@@ -105,9 +105,24 @@ export class MetricsService {
     }
 
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    const userAgent = req.headers['user-agent'] || 'unknown';
+    const userAgent = String(req.headers['user-agent'] || 'unknown');
     const secret = this.config.get('METRICS_HASH_SECRET') || this.config.get('ORDER_ACCESS_SECRET') || 'lucilamon-local-metrics';
     const visitorHash = createHmac('sha256', secret).update(`${ip}|${userAgent}`).digest('hex');
+    // Hash rotado por día: cuenta únicos sin retener un identificador estable.
+    const daySalt = new Date().toISOString().slice(0, 10);
+    const dayVisitorHash = createHmac('sha256', secret)
+      .update(`${daySalt}|${ip}|${userAgent}`)
+      .digest('hex');
+
+    const ua = userAgent.toLowerCase();
+    const isBot = this.looksLikeBot(ua);
+    const device = isBot
+      ? 'bot'
+      : /ipad|tablet|playbook|silk|kindle/.test(ua)
+        ? 'tablet'
+        : /mobi|android|iphone|ipod|phone|blackberry|iemobile|opera mini/.test(ua)
+          ? 'mobile'
+          : 'desktop';
 
     await this.prisma.metricEvent.create({
       data: {
@@ -119,12 +134,110 @@ export class MetricsService {
         userId,
         sessionId: dto.sessionId,
         visitorHash,
+        dayVisitorHash,
+        channel: this.classifyChannel(dto, req),
+        device,
+        country: this.readCountry(req),
+        isBot,
+        isInternal: await this.isInternalView(userId, workspaceId),
         source: dto.source,
         metadata: dto.metadata as any,
       },
     });
 
     return { recorded: true };
+  }
+
+  private looksLikeBot(ua: string): boolean {
+    return /bot|crawler|spider|crawling|facebookexternalhit|slurp|bingpreview|headless|lighthouse|pingdom|uptimerobot|monitor|curl\/|wget\/|python-requests|axios\//.test(
+      ua,
+    );
+  }
+
+  private readCountry(req: Request): string | undefined {
+    const raw = String(
+      req.headers['cf-ipcountry'] ||
+        req.headers['x-vercel-ip-country'] ||
+        req.headers['x-country-code'] ||
+        req.headers['x-geo-country'] ||
+        '',
+    )
+      .toUpperCase()
+      .trim();
+    return /^[A-Z]{2}$/.test(raw) && raw !== 'XX' && raw !== 'T1' ? raw : undefined;
+  }
+
+  /**
+   * Hosts propios: se derivan solos de FRONTEND_URL / APP_URL (que ya son
+   * obligatorias en producción), y METRICS_SELF_HOSTS añade extras. Así la
+   * atribución de canal funciona sin configurar nada.
+   */
+  private selfHostsCache: string[] | null = null;
+  private selfHosts(): string[] {
+    if (this.selfHostsCache) return this.selfHostsCache;
+    const fromUrl = (name: string) => {
+      const value = this.config.get<string>(name);
+      if (!value) return '';
+      try {
+        return new URL(value).hostname.replace(/^www\./, '').toLowerCase();
+      } catch {
+        return '';
+      }
+    };
+    const extras = String(this.config.get('METRICS_SELF_HOSTS') || '')
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean);
+    this.selfHostsCache = [
+      ...new Set([fromUrl('FRONTEND_URL'), fromUrl('APP_URL'), fromUrl('PUBLIC_WEB_URL'), ...extras].filter(Boolean)),
+    ];
+    return this.selfHostsCache;
+  }
+
+  /**
+   * Canal de atribución: utm_source explícito > patrocinador > dominio de
+   * procedencia > `source` del cliente > "direct".
+   */
+  private classifyChannel(dto: RecordMetricDto, req: Request): string {
+    const md = (dto.metadata || {}) as Record<string, unknown>;
+    const utm = typeof md.utm_source === 'string' ? md.utm_source.trim().toLowerCase() : '';
+    if (utm) return utm.slice(0, 40);
+    if (dto.type === 'SPONSOR_CLICK' && typeof md.sponsorId === 'string') return 'sponsor';
+
+    const ref = String(req.headers['referer'] || req.headers['referrer'] || '');
+    if (ref) {
+      try {
+        const host = new URL(ref).hostname.replace(/^www\./, '').toLowerCase();
+        const isSelf = this.selfHosts().some(h => host === h || host.endsWith(`.${h}`));
+        if (host && !isSelf) return `referral:${host}`.slice(0, 60);
+      } catch {
+        // Referer ilegible: se ignora.
+      }
+    }
+
+    if (dto.source) return String(dto.source).trim().toLowerCase().slice(0, 40);
+    return 'direct';
+  }
+
+  /**
+   * Vista de un miembro del propio espacio: no cuenta como audiencia. Cacheado
+   * 5 min para no consultar workspace_members en cada evento de métrica.
+   */
+  private internalCache = new Map<string, { value: boolean; expiresAt: number }>();
+  private async isInternalView(userId?: string, workspaceId?: string): Promise<boolean> {
+    if (!userId || !workspaceId) return false;
+    const key = `${userId}:${workspaceId}`;
+    const cached = this.internalCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: { userId, workspaceId, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    const value = Boolean(member);
+    if (this.internalCache.size > 5000) this.internalCache.clear();
+    this.internalCache.set(key, { value, expiresAt: Date.now() + 5 * 60 * 1000 });
+    return value;
   }
 
   async overview(workspaceId: string, userId: string, from?: string, to?: string) {

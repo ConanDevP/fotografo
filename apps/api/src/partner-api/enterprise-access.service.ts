@@ -1,6 +1,18 @@
-import { ForbiddenException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../common/services/prisma.service';
+import { MailerService } from '../common/services/mailer.service';
 import { PARTNER_API_SCOPES, PartnerApiScope } from './partner-api.scopes';
+import { RequestEnterpriseAccessDto } from './dto/request-enterprise-access.dto';
 
 const FEATURE_SCOPES: Partial<Record<PartnerApiScope, string>> = {
   'webhooks:manage': 'webhooksEnabled', 'search:face': 'faceSearchEnabled',
@@ -10,10 +22,150 @@ const FEATURE_SCOPES: Partial<Record<PartnerApiScope, string>> = {
 
 @Injectable()
 export class EnterpriseAccessService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(EnterpriseAccessService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    // Opcional: el worker también usa este servicio (guards/cuotas) y no provee
+    // MailerService. Sin correo, la solicitud igual queda registrada.
+    @Optional() private readonly mailer?: MailerService,
+  ) {}
 
   async account(workspaceId: string) {
     return this.prisma.enterpriseAccount.findUnique({ where: { workspaceId } });
+  }
+
+  /**
+   * Solicitud de acceso a la API empresarial desde el dashboard del fotógrafo.
+   *
+   * No concede nada: crea (o actualiza) la cuenta Enterprise en estado PROSPECT
+   * con el contexto de la solicitud en `internalNotes`, deja rastro en auditoría
+   * y avisa al equipo comercial. El admin la revisa en /admin/enterprise y la
+   * pasa a PILOT/ACTIVE con las funcionalidades y topes acordados.
+   */
+  async requestAccess(
+    workspaceId: string,
+    requesterId: string,
+    requesterEmail: string,
+    dto: RequestEnterpriseAccessDto,
+  ) {
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { id: true, name: true, slug: true },
+    });
+    if (!workspace) throw new NotFoundException('Workspace no encontrado');
+
+    const account = await this.account(workspaceId);
+    if (account && ['PILOT', 'ACTIVE'].includes(account.status) && account.partnerApiEnabled) {
+      throw new ConflictException('Este espacio ya tiene acceso a la API empresarial');
+    }
+
+    // Anti-spam: una solicitud PROSPECT tocada en las últimas 12 h no se
+    // reprocesa ni vuelve a notificar.
+    if (
+      account?.status === 'PROSPECT' &&
+      Date.now() - account.updatedAt.getTime() < 12 * 60 * 60 * 1000
+    ) {
+      return {
+        pending: true,
+        alreadyRequested: true,
+        status: account.status,
+        requestedAt: account.updatedAt.toISOString(),
+        contactEmail: account.businessContactEmail ?? requesterEmail,
+        message: 'Ya tenemos tu solicitud en revisión.',
+      };
+    }
+
+    const contactEmail = (dto.contactEmail ?? requesterEmail).toLowerCase();
+    const note = [
+      `[SOLICITUD ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · ${requesterEmail}]`,
+      `Uso: ${dto.useCase.trim()}`,
+      dto.monthlyVolume ? `Volumen: ${dto.monthlyVolume.trim()}` : null,
+      dto.integrationType ? `Integración: ${dto.integrationType.trim()}` : null,
+      `Contacto: ${contactEmail}`,
+      dto.message ? `Mensaje: ${dto.message.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const saved = await this.prisma.$transaction(async tx => {
+      const record = account
+        ? await tx.enterpriseAccount.update({
+            where: { workspaceId },
+            data: {
+              // El estado no se toca si ya había un contrato (SUSPENDED/ENDED):
+              // que decida el admin. Solo se anota la petición.
+              status: account.status === 'PROSPECT' ? 'PROSPECT' : account.status,
+              internalNotes: [note, account.internalNotes].filter(Boolean).join('\n\n---\n\n').slice(0, 3000),
+              businessContactEmail: account.businessContactEmail ?? contactEmail,
+              updatedById: requesterId,
+            },
+          })
+        : await tx.enterpriseAccount.create({
+            data: {
+              workspaceId,
+              status: 'PROSPECT',
+              businessContactEmail: contactEmail,
+              internalNotes: note,
+              createdById: requesterId,
+              updatedById: requesterId,
+            },
+          });
+      await tx.auditLog.create({
+        data: {
+          userId: requesterId,
+          action: 'ENTERPRISE_ACCESS_REQUESTED',
+          data: {
+            workspaceId,
+            workspaceName: workspace.name,
+            useCase: dto.useCase.slice(0, 200),
+            contactEmail,
+          },
+        },
+      });
+      return record;
+    });
+
+    await this.notifySales(workspace, requesterEmail, contactEmail, note).catch(error =>
+      this.logger.warn(`No se pudo avisar a comercial: ${error instanceof Error ? error.message : 'error'}`),
+    );
+
+    return {
+      pending: true,
+      alreadyRequested: false,
+      status: saved.status,
+      requestedAt: saved.updatedAt.toISOString(),
+      contactEmail,
+      message: 'Hemos recibido tu solicitud. El equipo te contactará por correo.',
+    };
+  }
+
+  private async notifySales(
+    workspace: { name: string; slug: string },
+    requesterEmail: string,
+    contactEmail: string,
+    note: string,
+  ) {
+    if (!this.mailer?.isConfigured) return;
+    const to = this.config.get<string>('SALES_EMAIL') || this.config.get<string>('EMAIL_FROM');
+    if (!to) return;
+    const adminBase = (this.config.get<string>('FRONTEND_URL') || this.config.get<string>('APP_URL') || '').replace(/\/$/, '');
+    const link = adminBase ? `${adminBase}/admin/enterprise?search=${encodeURIComponent(workspace.slug)}` : '';
+    const esc = (v: string) => String(v ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
+    await this.mailer.send({
+      to,
+      subject: `Solicitud de API Business — ${workspace.name}`,
+      html: `
+<div style="font-family:sans-serif;max-width:560px">
+  <h2 style="margin:0 0 8px">Nueva solicitud de acceso Business</h2>
+  <p style="margin:0 0 4px"><strong>Espacio:</strong> ${esc(workspace.name)} (/${esc(workspace.slug)})</p>
+  <p style="margin:0 0 4px"><strong>Solicitante:</strong> ${esc(requesterEmail)}</p>
+  <p style="margin:0 0 12px"><strong>Contacto:</strong> ${esc(contactEmail)}</p>
+  <pre style="white-space:pre-wrap;background:#f6f6f6;padding:12px;border-radius:8px;font-size:13px">${esc(note)}</pre>
+  ${link ? `<p><a href="${esc(link)}">Abrir en /admin/enterprise</a></p>` : ''}
+</div>`.trim(),
+    });
   }
 
   async dashboard(workspaceId: string) {
@@ -35,6 +187,9 @@ export class EnterpriseAccessService {
       tier: account ? 'ENTERPRISE' : legacy ? 'LEGACY' : 'STANDARD',
       status: account?.status || (legacy ? 'LEGACY' : 'NOT_CONTRACTED'),
       active,
+      // Solicitud del fotógrafo pendiente de que comercial la revise.
+      requestPending: account?.status === 'PROSPECT',
+      requestedAt: account?.status === 'PROSPECT' ? account.updatedAt : null,
       contractStart: account?.contractStart || null,
       contractEnd: account?.contractEnd || null,
       features: {

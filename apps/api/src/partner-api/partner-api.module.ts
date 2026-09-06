@@ -1,8 +1,10 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
+import { MailerService } from '../common/services/mailer.service';
 import { EventsModule } from '../events/events.module';
 import { UploadsModule } from '../uploads/uploads.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { ApiClientsController } from './api-clients.controller';
 import { ApiClientsService } from './api-clients.service';
 import { PartnerApiController } from './partner-api.controller';
@@ -18,9 +20,9 @@ import { EnterpriseAccessService } from './enterprise-access.service';
 import { EnterpriseAccessController } from './enterprise-access.controller';
 
 @Module({
-  imports: [WorkspacesModule, EventsModule, UploadsModule, PhotosModule, SearchModule, SponsorsModule, MetricsModule],
+  imports: [WorkspacesModule, EventsModule, UploadsModule, PhotosModule, SearchModule, SponsorsModule, MetricsModule, forwardRef(() => AnalyticsModule)],
   controllers: [ApiClientsController, PartnerApiController, WorkspaceWebhooksController, EnterpriseAccessController],
-  providers: [PrismaService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService],
+  providers: [PrismaService, MailerService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService],
   exports: [PartnerWebhooksService, EnterpriseAccessService],
 })
 export class PartnerApiModule {}

@@ -84,6 +84,8 @@ model Workspace {
   /// Solo recoge las fotografías añadidas a eventos YA publicados; lo anterior
   /// a la publicación se cobra de una vez al publicar.
   pendingShareChargeCents       Decimal            @default(0) @map("pending_share_charge_cents") @db.Decimal(12, 4)
+  /// Si el espacio recibe el correo automático de resumen post-evento.
+  postEventReportsEnabled       Boolean            @default(true) @map("post_event_reports_enabled")
   /// Método de pago del espacio. Se pide al publicar el primer evento gratuito,
   /// no al registrarse: es cuando nace la obligación de pago.
   stripeCustomerId              String?            @unique @map("stripe_customer_id")
@@ -101,6 +103,7 @@ model Workspace {
   sponsors                      Sponsor[]
   ledgerEntries                 LedgerEntry[]
   metricEvents                  MetricEvent[]
+  metricRollups                 MetricDailyRollup[]
   orderItems                    OrderItem[]
   shareUsageCharges             ShareUsageCharge[]
   apiClients                    ApiClient[]
@@ -324,6 +327,8 @@ model Event {
   contributors               EventContributor[]
   eventSponsors              EventSponsor[]
   metricEvents               MetricEvent[]
+  metricRollups              MetricDailyRollup[]
+  analyticsSnapshot          EventAnalyticsSnapshot?
   ledgerEntries              LedgerEntry[]
   downloadAssets             DownloadAsset[]
   faceBibAssociations        FaceBibAssociation[]
@@ -504,8 +509,9 @@ model Sponsor {
   isActive    Boolean        @default(true) @map("is_active")
   createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  events      EventSponsor[]
+  workspace    Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  events       EventSponsor[]
+  dailyRollups SponsorDailyRollup[]
 
   @@index([workspaceId, isActive])
   @@map("sponsors")
@@ -557,6 +563,20 @@ model MetricEvent {
   userId      String?    @map("user_id") @db.Uuid
   sessionId   String?    @map("session_id")
   visitorHash String?    @map("visitor_hash")
+  /// Hash del visitante rotado por día (HMAC con sal = fecha UTC). Es la base
+  /// para contar únicos sin retener un identificador estable a largo plazo.
+  dayVisitorHash String? @map("day_visitor_hash")
+  /// Canal de atribución derivado en la captura: utm_source, "referral:<host>",
+  /// el `source` explícito o "direct".
+  channel     String?
+  /// mobile | tablet | desktop | bot, derivado del user-agent.
+  device      String?
+  /// ISO-3166 alpha-2 en mayúsculas, best-effort desde cabeceras del edge.
+  country     String?    @db.VarChar(2)
+  /// Vista de un miembro del propio espacio: fuera de las métricas de audiencia.
+  isInternal  Boolean    @default(false) @map("is_internal")
+  /// User-agent identificado como bot: fuera de los rollups.
+  isBot       Boolean    @default(false) @map("is_bot")
   type        MetricType
   source      String?
   metadata    Json?
@@ -569,7 +589,107 @@ model MetricEvent {
 
   @@index([workspaceId, createdAt])
   @@index([eventId, type, createdAt])
+  @@index([workspaceId, isBot, createdAt])
   @@map("metric_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analítica: capa de agregación
+//
+// `metric_events` es la captura cruda; consultarla en cada carga de dashboard
+// no escala. Estos rollups los mantiene un cron (incremental cada 10 min +
+// recálculo nocturno de 95 días) y son lo único que leen las vistas.
+//
+// Regla de oro: el dinero SIEMPRE sale de `LedgerEntry`/`Order`; aquí solo se
+// copia para no cruzar tablas en cada lectura.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Rollup diario. Grano: día × espacio × evento × tipo de métrica.
+/// Las filas de nivel espacio llevan `eventId = null` y `eventKey` = UUID cero.
+model MetricDailyRollup {
+  id             BigInt     @id @default(autoincrement())
+  day            DateTime   @db.Date
+  workspaceId    String     @map("workspace_id") @db.Uuid
+  eventId        String?    @map("event_id") @db.Uuid
+  eventKey       String     @map("event_key") @db.Uuid
+  metricType     MetricType @map("metric_type")
+  count          Int        @default(0)
+  uniqueVisitors Int        @default(0) @map("unique_visitors")
+  updatedAt      DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  event          Event?     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([day, workspaceId, eventKey, metricType])
+  @@index([workspaceId, day])
+  @@index([eventId, day])
+  @@map("metric_daily_rollup")
+}
+
+/// Una fila por evento, recalculada. Reúne calidad del pipeline (cobertura de
+/// dorsales, caras), embudo, geografía/dispositivo/canal y dinero del evento.
+model EventAnalyticsSnapshot {
+  eventId                  String   @id @map("event_id") @db.Uuid
+  workspaceId              String?  @map("workspace_id") @db.Uuid
+  totalPhotos              Int      @default(0) @map("total_photos")
+  processedPhotos          Int      @default(0) @map("processed_photos")
+  photosWithBib            Int      @default(0) @map("photos_with_bib")
+  photosWithFace           Int      @default(0) @map("photos_with_face")
+  photosNoBib              Int      @default(0) @map("photos_no_bib")
+  distinctBibs             Int      @default(0) @map("distinct_bibs")
+  distinctInferredBibs     Int      @default(0) @map("distinct_inferred_bibs")
+  fieldSize                Int?     @map("field_size")
+  bibsSearched             Int      @default(0) @map("bibs_searched")
+  bibsWithSale             Int      @default(0) @map("bibs_with_sale")
+  eventViews               Int      @default(0) @map("event_views")
+  photoViews               Int      @default(0) @map("photo_views")
+  uniqueVisitors           Int      @default(0) @map("unique_visitors")
+  bibSearches              Int      @default(0) @map("bib_searches")
+  faceSearches             Int      @default(0) @map("face_searches")
+  noResultSearches         Int      @default(0) @map("no_result_searches")
+  addToCart                Int      @default(0) @map("add_to_cart")
+  checkoutStarted          Int      @default(0) @map("checkout_started")
+  purchases                Int      @default(0)
+  freeDownloads            Int      @default(0) @map("free_downloads")
+  paidDownloads            Int      @default(0) @map("paid_downloads")
+  grossCents               Int      @default(0) @map("gross_cents")
+  netPlatformCents         Int      @default(0) @map("net_platform_cents")
+  organizerCommissionCents Int      @default(0) @map("organizer_commission_cents")
+  photographerEarningCents Int      @default(0) @map("photographer_earning_cents")
+  refundCents              Int      @default(0) @map("refund_cents")
+  sponsorImpressions       Int      @default(0) @map("sponsor_impressions")
+  sponsorClicks            Int      @default(0) @map("sponsor_clicks")
+  topCountries             Json?    @map("top_countries")
+  deviceSplit              Json?    @map("device_split")
+  channelSplit             Json?    @map("channel_split")
+  dailySeries              Json?    @map("daily_series")
+  /// Momento en que se envió el informe post-evento. Nulo = pendiente de enviar.
+  reportSentAt             DateTime? @map("report_sent_at") @db.Timestamptz(6)
+  /// Versión del enlace público del informe. Subirla invalida los enlaces ya
+  /// compartidos (revocación).
+  reportTokenVersion       Int      @default(1) @map("report_token_version")
+  computedAt               DateTime @default(now()) @map("computed_at") @db.Timestamptz(6)
+  event                    Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("event_analytics_snapshot")
+}
+
+/// Rollup diario por patrocinador (impresiones/clicks/alcance único).
+model SponsorDailyRollup {
+  id          BigInt   @id @default(autoincrement())
+  day         DateTime @db.Date
+  sponsorId   String   @map("sponsor_id") @db.Uuid
+  eventId     String?  @map("event_id") @db.Uuid
+  eventKey    String   @map("event_key") @db.Uuid
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  uniqueReach Int      @default(0) @map("unique_reach")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sponsor     Sponsor  @relation(fields: [sponsorId], references: [id], onDelete: Cascade)
+
+  @@unique([day, sponsorId, eventKey])
+  @@index([sponsorId, day])
+  @@map("sponsor_daily_rollup")
 }
 
 model LedgerEntry {
