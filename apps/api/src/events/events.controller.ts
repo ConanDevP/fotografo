@@ -280,6 +280,44 @@ export class EventsController {
     return { data: await this.eventsService.acceptInvitation(token || '', req.user.id) };
   }
 
+  @UseGuards(AuthGuard('jwt'))
+  @Post('invitations/current/decline')
+  @Throttle(10, 60)
+  async declineCurrentInvitation(
+    @Headers('x-invitation-token') token: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.declineInvitation(token || '', req.user.id) };
+  }
+
+  /** Invitaciones pendientes del usuario logueado (por su correo). */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('invitations/mine')
+  @Throttle(30, 60)
+  async getMyInvitations(@Req() req: AuthenticatedRequest): Promise<ApiResponse> {
+    return { data: await this.eventsService.getMyInvitations(req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('invitations/mine/:contributorId/accept')
+  @Throttle(10, 60)
+  async acceptMyInvitation(
+    @Param('contributorId') contributorId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.acceptInvitationById(contributorId, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('invitations/mine/:contributorId/decline')
+  @Throttle(10, 60)
+  async declineMyInvitation(
+    @Param('contributorId') contributorId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.declineInvitationById(contributorId, req.user.id) };
+  }
+
   // Backward compatibility for invitations issued before private-header links.
   @Get('invitations/:token')
   @Throttle(30, 60)
@@ -295,5 +333,15 @@ export class EventsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<ApiResponse> {
     return { data: await this.eventsService.acceptInvitation(token, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('invitations/:token/decline')
+  @Throttle(10, 60)
+  async declineInvitation(
+    @Param('token') token: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.eventsService.declineInvitation(token, req.user.id) };
   }
 }

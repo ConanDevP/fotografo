@@ -7,6 +7,7 @@ import { StorageService } from '../common/services/storage.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { QueueService } from '../common/services/queue.service';
 import { BillingService } from '../billing/billing.service';
+import { MailerService } from '../common/services/mailer.service';
 import { UserRole } from '@shared/types';
 
 /**
@@ -43,6 +44,7 @@ describe('Borrado de un evento', () => {
         { provide: WorkspacesService, useValue: {} },
         { provide: QueueService, useValue: {} },
         { provide: BillingService, useValue: billing },
+        { provide: MailerService, useValue: { send: jest.fn() } },
       ],
     }).compile();
 

@@ -22,6 +22,34 @@ export class AdminEnterpriseService {
     return { items: items.map(item => ({ ...item, partnerApiUsage: item.partnerApiUsage.map(u => ({ ...u, requestCount: u.requestCount.toString(), faceSearchCount: u.faceSearchCount.toString() })) })), pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
   }
 
+  /**
+   * Aprobación en un clic de una solicitud: pone la cuenta ACTIVE y habilita la
+   * Partner API a la vez. Evita el error de dejar el estado ACTIVE pero la API
+   * desactivada, que hacía reaparecer el botón de "solicitar acceso".
+   */
+  async approve(workspaceId: string, adminId: string) {
+    const account = await this.prisma.enterpriseAccount.findUnique({
+      where: { workspaceId },
+      select: { id: true, contractStart: true },
+    });
+    if (!account) throw new NotFoundException('Este espacio no tiene una solicitud/cuenta Enterprise');
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.enterpriseAccount.update({
+        where: { workspaceId },
+        data: {
+          status: 'ACTIVE',
+          partnerApiEnabled: true,
+          contractStart: account.contractStart ?? new Date(),
+          updatedById: adminId,
+        },
+      });
+      await tx.auditLog.create({
+        data: { userId: adminId, action: 'ENTERPRISE_ACCESS_APPROVED', data: { workspaceId } },
+      });
+      return updated;
+    });
+  }
+
   async upsert(workspaceId: string, dto: UpsertEnterpriseAccountDto, adminId: string) {
     const workspace = await this.prisma.workspace.findUnique({ where: { id: workspaceId }, select: { id: true, name: true } });
     if (!workspace) throw new NotFoundException('Workspace no encontrado');

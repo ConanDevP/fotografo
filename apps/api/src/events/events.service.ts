@@ -12,6 +12,7 @@ import { BillingService } from '../billing/billing.service';
 import { InviteContributorDto } from './dto/invite-contributor.dto';
 import { ReviewPhotoDto } from './dto/review-photo.dto';
 import { QueueService } from '../common/services/queue.service';
+import { MailerService } from '../common/services/mailer.service';
 
 @Injectable()
 export class EventsService {
@@ -23,7 +24,24 @@ export class EventsService {
     private workspacesService: WorkspacesService,
     private queueService: QueueService,
     private billingService: BillingService,
+    private mailerService: MailerService,
   ) {}
+
+  /** ¿Hay algún transporte de correo configurado? Sirve para avisar en la UI
+   *  cuando una invitación se crea pero el correo no va a salir. */
+  private emailTransportConfigured(): boolean {
+    return Boolean(
+      process.env.RESEND_API_KEY || process.env.SENDGRID_API_KEY || process.env.SMTP_HOST,
+    );
+  }
+
+  private readonly INVITATION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+  private escapeHtml(value: string): string {
+    return String(value ?? '').replace(/[&<>"']/g, ch =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string),
+    );
+  }
 
   async create(createEventDto: CreateEventDto, userId: string) {
     const {
@@ -163,8 +181,20 @@ export class EventsService {
           owner: {
             select: { id: true, email: true, role: true },
           },
+          workspace: { select: { name: true } },
+          // Relación del que consulta con cada evento, para poder distinguir en
+          // el panel "mi evento" de "colaboro en este evento (invitado por X)".
+          contributors: {
+            where: { userId },
+            select: {
+              status: true,
+              role: true,
+              organizerCommissionPercent: true,
+              invitedBy: { select: { name: true, email: true } },
+            },
+          },
           _count: {
-            select: { 
+            select: {
               photos: true,
               photoBibs: true,
               bibSubscriptions: true,
@@ -178,8 +208,28 @@ export class EventsService {
       }),
     ]);
 
+    const items = events.map(event => {
+      const { contributors, workspace, ...rest } = event;
+      const contributor = contributors[0];
+      let relation: 'ADMIN' | 'OWNER' | 'CONTRIBUTOR_ACCEPTED' | 'WORKSPACE_MEMBER' = 'OWNER';
+      if (userRole === UserRole.ADMIN && event.ownerId !== userId) relation = 'ADMIN';
+      else if (event.ownerId === userId) relation = 'OWNER';
+      else if (contributor?.status === 'ACCEPTED') relation = 'CONTRIBUTOR_ACCEPTED';
+      else relation = 'WORKSPACE_MEMBER';
+      return {
+        ...rest,
+        viewer: {
+          relation,
+          contributorRole: contributor?.role ?? null,
+          organizerCommissionPercent: contributor ? Number(contributor.organizerCommissionPercent) : null,
+          invitedByName: contributor?.invitedBy?.name ?? contributor?.invitedBy?.email ?? null,
+          orgName: workspace?.name ?? null,
+        },
+      };
+    });
+
     return {
-      items: events,
+      items,
       pagination: {
         page,
         limit,
@@ -855,6 +905,9 @@ export class EventsService {
     const event = await this.assertCanManageEvent(eventId, invitedById, userRole);
     const invitedEmail = dto.email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email: invitedEmail } });
+    if (user?.id === invitedById) {
+      throw new BadRequestException('Ya administras este evento; no necesitas invitarte.');
+    }
     const photographerWorkspace = user
       ? await this.prisma.workspace.findFirst({
           where: {
@@ -866,8 +919,18 @@ export class EventsService {
         })
       : null;
 
+    // Si ya aceptó, reinvitar no debe degradarla a INVITED.
+    const existing = await this.prisma.eventContributor.findUnique({
+      where: { eventId_invitedEmail: { eventId, invitedEmail } },
+      select: { status: true },
+    });
+    if (existing?.status === 'ACCEPTED') {
+      throw new BadRequestException('Ese fotógrafo ya aceptó la colaboración en este evento.');
+    }
+
     const invitationToken = randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(invitationToken);
+    const now = new Date();
     const data = {
       invitedEmail,
       userId: user?.id,
@@ -879,6 +942,10 @@ export class EventsService {
       invitedById,
       status: 'INVITED' as const,
       rightsAcceptedAt: null,
+      expiresAt: new Date(now.getTime() + this.INVITATION_TTL_MS),
+      lastInvitedAt: now,
+      declinedAt: null,
+      revokedAt: null,
     };
 
     const invitation = await this.prisma.eventContributor.upsert({
@@ -887,9 +954,18 @@ export class EventsService {
       create: { eventId, ...data },
     });
 
+    await this.prisma.auditLog.create({
+      data: {
+        userId: invitedById,
+        action: 'EVENT_CONTRIBUTOR_INVITED',
+        data: { eventId, eventName: event.name, invitedEmail, role: data.role, contributorId: invitation.id },
+      },
+    }).catch(() => undefined);
+
     const acceptanceUrlObject = new URL('/invitations/events', process.env.FRONTEND_URL || 'http://localhost:3000');
     acceptanceUrlObject.hash = new URLSearchParams({ token: invitationToken }).toString();
     const acceptanceUrl = acceptanceUrlObject.toString();
+
     let emailQueued = false;
     try {
       await this.queueService.addSendEmailJob({
@@ -908,12 +984,18 @@ export class EventsService {
       this.logger.warn(`La invitación ${invitation.id} fue creada, pero el correo quedó pendiente por indisponibilidad de la cola`);
     }
 
+    // `emailSent` es lo que mira la UI: encolado Y con transporte configurado.
+    // Sin esto, "invitación creada" era una mentira piadosa cuando el worker no
+    // podía enviar nada.
+    const emailSent = emailQueued && this.emailTransportConfigured();
+
     const { tokenHash: _tokenHash, ...safeInvitation } = invitation;
     return {
       invitation: safeInvitation,
       invitationToken,
       acceptanceUrl,
       emailQueued,
+      emailSent,
     };
   }
 
@@ -930,6 +1012,10 @@ export class EventsService {
     return contributors.map(({ tokenHash: _tokenHash, ...contributor }) => contributor);
   }
 
+  private invitationExpiresAt(row: { expiresAt: Date | null; updatedAt: Date }): number {
+    return row.expiresAt ? row.expiresAt.getTime() : row.updatedAt.getTime() + this.INVITATION_TTL_MS;
+  }
+
   async getInvitation(token: string) {
     if (!/^[a-f0-9]{64}$/.test(token)) throw new NotFoundException('Invitación inválida o vencida');
     const invitation = await this.prisma.eventContributor.findUnique({
@@ -939,48 +1025,189 @@ export class EventsService {
         invitedBy: { select: { id: true, name: true, email: true } },
       },
     });
-    const expiresAt = invitation ? invitation.updatedAt.getTime() + 14 * 24 * 60 * 60 * 1000 : 0;
-    if (!invitation || invitation.status !== 'INVITED' || expiresAt < Date.now()) {
+    if (
+      !invitation ||
+      invitation.status !== 'INVITED' ||
+      this.invitationExpiresAt(invitation) < Date.now()
+    ) {
       throw new NotFoundException('Invitación inválida o vencida');
     }
     const { tokenHash: _tokenHash, ...safeInvitation } = invitation;
     return safeInvitation;
   }
 
-  async acceptInvitation(token: string, userId: string) {
-    const invitation = await this.getInvitation(token);
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.email.toLowerCase() !== invitation.invitedEmail.toLowerCase()) {
+  /** Invitaciones pendientes del usuario logueado, por su correo. */
+  async getMyInvitations(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user) return [];
+    const rows = await this.prisma.eventContributor.findMany({
+      where: { invitedEmail: user.email.toLowerCase(), status: 'INVITED' },
+      include: {
+        event: {
+          select: {
+            id: true,
+            name: true,
+            date: true,
+            location: true,
+            imageUrl: true,
+            workspace: { select: { name: true, slug: true, logoUrl: true } },
+          },
+        },
+        invitedBy: { select: { name: true, email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows
+      .filter(row => this.invitationExpiresAt(row) >= Date.now())
+      .map(({ tokenHash: _t, ...row }) => ({
+        id: row.id,
+        role: row.role,
+        organizerCommissionPercent: Number(row.organizerCommissionPercent),
+        rightsTerms: row.rightsTerms,
+        expiresAt: row.expiresAt,
+        event: row.event,
+        invitedBy: row.invitedBy,
+      }));
+  }
+
+  private async finalizeAcceptance(
+    contributor: { id: string; invitedEmail: string },
+    user: { id: string; email: string },
+  ) {
+    if (user.email.toLowerCase() !== contributor.invitedEmail.toLowerCase()) {
       throw new ForbiddenException('Esta invitación pertenece a otra dirección de correo');
     }
-
     let workspace = await this.prisma.workspace.findFirst({
       where: {
-        ownerId: userId,
-        members: { some: { userId, status: 'ACTIVE', role: 'OWNER' } },
+        ownerId: user.id,
+        members: { some: { userId: user.id, status: 'ACTIVE', role: 'OWNER' } },
         deletedAt: null,
       },
       orderBy: { createdAt: 'asc' },
     });
     if (!workspace) workspace = await this.workspacesService.createDefaultForPhotographer(user);
 
-    return this.prisma.eventContributor.update({
-      where: { id: invitation.id },
+    const updated = await this.prisma.eventContributor.update({
+      where: { id: contributor.id },
       data: {
-        userId,
+        userId: user.id,
         photographerWorkspaceId: workspace.id,
         status: 'ACCEPTED',
         rightsAcceptedAt: new Date(),
+        acceptedAt: new Date(),
+        declinedAt: null,
+        revokedAt: null,
       },
       include: { event: true, photographerWorkspace: true },
     });
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: 'EVENT_CONTRIBUTOR_ACCEPTED',
+        data: { eventId: updated.eventId, contributorId: updated.id },
+      },
+    }).catch(() => undefined);
+    return updated;
+  }
+
+  async acceptInvitation(token: string, userId: string) {
+    const invitation = await this.getInvitation(token);
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new ForbiddenException('Sesión no válida');
+    return this.finalizeAcceptance(invitation, user);
+  }
+
+  /** Aceptar desde el panel, sin token: basta con estar logueado con el correo invitado. */
+  async acceptInvitationById(contributorId: string, userId: string) {
+    const [row, user] = await Promise.all([
+      this.prisma.eventContributor.findUnique({ where: { id: contributorId } }),
+      this.prisma.user.findUnique({ where: { id: userId } }),
+    ]);
+    if (!user) throw new ForbiddenException('Sesión no válida');
+    if (!row || row.status !== 'INVITED' || this.invitationExpiresAt(row) < Date.now()) {
+      throw new NotFoundException('Invitación inválida o vencida');
+    }
+    return this.finalizeAcceptance(row, user);
+  }
+
+  private async notifyInviterDeclined(contributorId: string) {
+    const row = await this.prisma.eventContributor.findUnique({
+      where: { id: contributorId },
+      select: {
+        invitedEmail: true,
+        event: { select: { name: true } },
+        invitedBy: { select: { email: true, name: true } },
+      },
+    });
+    if (!row?.invitedBy?.email) return;
+    await this.mailerService.send({
+      to: row.invitedBy.email,
+      subject: `Invitación rechazada — ${row.event.name}`,
+      html: `<p>${this.escapeHtml(row.invitedEmail)} ha rechazado la invitación a colaborar en <strong>${this.escapeHtml(row.event.name)}</strong>.</p>`,
+    }).catch(() => undefined);
+  }
+
+  async declineInvitation(token: string, userId: string) {
+    const invitation = await this.getInvitation(token);
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.email.toLowerCase() !== invitation.invitedEmail.toLowerCase()) {
+      throw new ForbiddenException('Esta invitación pertenece a otra dirección de correo');
+    }
+    return this.finalizeDecline(invitation.id, userId);
+  }
+
+  async declineInvitationById(contributorId: string, userId: string) {
+    const [row, user] = await Promise.all([
+      this.prisma.eventContributor.findUnique({ where: { id: contributorId } }),
+      this.prisma.user.findUnique({ where: { id: userId } }),
+    ]);
+    if (!user) throw new ForbiddenException('Sesión no válida');
+    if (!row || row.status !== 'INVITED') throw new NotFoundException('Invitación no encontrada');
+    if (user.email.toLowerCase() !== row.invitedEmail.toLowerCase()) {
+      throw new ForbiddenException('Esta invitación pertenece a otra dirección de correo');
+    }
+    return this.finalizeDecline(contributorId, userId);
+  }
+
+  private async finalizeDecline(contributorId: string, userId: string) {
+    const updated = await this.prisma.eventContributor.update({
+      where: { id: contributorId },
+      data: { status: 'DECLINED', declinedAt: new Date() },
+      include: { event: { select: { id: true, name: true } } },
+    });
+    await this.prisma.auditLog.create({
+      data: { userId, action: 'EVENT_CONTRIBUTOR_DECLINED', data: { eventId: updated.eventId, contributorId } },
+    }).catch(() => undefined);
+    await this.notifyInviterDeclined(contributorId);
+    return { declined: true, event: updated.event };
   }
 
   async revokeContributor(eventId: string, contributorId: string, userId: string, userRole: UserRole) {
     await this.assertCanManageEvent(eventId, userId, userRole);
-    const contributor = await this.prisma.eventContributor.findFirst({ where: { id: contributorId, eventId } });
+    const contributor = await this.prisma.eventContributor.findFirst({
+      where: { id: contributorId, eventId },
+      include: {
+        user: { select: { email: true } },
+        event: { select: { name: true } },
+      },
+    });
     if (!contributor) throw new NotFoundException('Colaborador no encontrado');
-    return this.prisma.eventContributor.update({ where: { id: contributorId }, data: { status: 'REVOKED' } });
+    const wasAccepted = contributor.status === 'ACCEPTED';
+    const updated = await this.prisma.eventContributor.update({
+      where: { id: contributorId },
+      data: { status: 'REVOKED', revokedAt: new Date() },
+    });
+    await this.prisma.auditLog.create({
+      data: { userId, action: 'EVENT_CONTRIBUTOR_REVOKED', data: { eventId, contributorId } },
+    }).catch(() => undefined);
+    if (wasAccepted && contributor.user?.email) {
+      await this.mailerService.send({
+        to: contributor.user.email,
+        subject: `Acceso finalizado — ${contributor.event.name}`,
+        html: `<p>Tu acceso como colaborador de <strong>${this.escapeHtml(contributor.event.name)}</strong> ha finalizado. Tus fotografías ya publicadas siguen en el evento.</p>`,
+      }).catch(() => undefined);
+    }
+    return updated;
   }
 
   async reviewPhoto(eventId: string, photoId: string, dto: ReviewPhotoDto, userId: string, userRole: UserRole) {

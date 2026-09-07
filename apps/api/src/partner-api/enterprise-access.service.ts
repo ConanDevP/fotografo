@@ -183,9 +183,22 @@ export class EnterpriseAccessService {
       const feature = FEATURE_SCOPES[scope];
       return !feature || Boolean((account as any)[feature]);
     }) : [];
+
+    // Un único estado que el dashboard del fotógrafo puede pintar sin ambigüedad.
+    // El caso que confundía: cuenta ACTIVE pero sin `partnerApiEnabled` (o con
+    // fechas de contrato aún no vigentes) → NO es "vuelve a solicitar", es
+    // "aprobada, ultimando configuración".
+    let accessState: 'NONE' | 'REQUESTED' | 'IN_SETUP' | 'ACTIVE' | 'SUSPENDED' | 'ENDED';
+    if (!account) accessState = legacy ? 'ACTIVE' : 'NONE';
+    else if (account.status === 'PROSPECT') accessState = 'REQUESTED';
+    else if (account.status === 'SUSPENDED') accessState = 'SUSPENDED';
+    else if (account.status === 'ENDED') accessState = 'ENDED';
+    else accessState = enabled ? 'ACTIVE' : 'IN_SETUP';
+
     return {
       tier: account ? 'ENTERPRISE' : legacy ? 'LEGACY' : 'STANDARD',
       status: account?.status || (legacy ? 'LEGACY' : 'NOT_CONTRACTED'),
+      accessState,
       active,
       // Solicitud del fotógrafo pendiente de que comercial la revise.
       requestPending: account?.status === 'PROSPECT',

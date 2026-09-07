@@ -188,6 +188,23 @@ export class WorkspacesService {
       },
     });
     if (!workspace) throw new NotFoundException('Espacio no encontrado');
+
+    // Ocultar "Impulsado por LucilaMon" solo lo permiten los planes de marca
+    // blanca. En el resto se fuerza a visible, aunque esté activado en ajustes.
+    if (workspace.brandTheme?.settings) {
+      const settings = { ...(workspace.brandTheme.settings as Record<string, unknown>) };
+      if (settings.hidePlatformCredit === true) {
+        const whiteLabel = await this.billing
+          .resolveForWorkspace(workspace.id)
+          .then(({ plan, enterprise }) => Boolean(plan.allowsCustomDomain || enterprise?.customDomainEnabled))
+          .catch(() => false);
+        if (!whiteLabel) {
+          settings.hidePlatformCredit = false;
+          (workspace.brandTheme as any).settings = settings;
+        }
+      }
+    }
+
     return workspace;
   }
 

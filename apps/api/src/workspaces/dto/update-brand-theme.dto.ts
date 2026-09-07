@@ -3,7 +3,7 @@ import { IsBoolean, IsHexColor, IsIn, IsObject, IsOptional, IsString, MaxLength 
 export class UpdateBrandThemeDto {
   @IsOptional()
   @IsString()
-  @IsIn(['editorial', 'impact', 'minimal'])
+  @IsIn(['editorial', 'impact', 'minimal', 'cine'])
   @MaxLength(40)
   template?: string;
 
@@ -21,7 +21,12 @@ export class UpdateBrandThemeDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['Inter', 'Geist', 'Playfair Display'])
+  @IsIn([
+    // Pares display + cuerpo actuales.
+    'grotesque', 'sport', 'editorial-serif', 'classic', 'neutral',
+    // Valores heredados, se siguen aceptando y se mapean en el frontend.
+    'Inter', 'Geist', 'Playfair Display',
+  ])
   @MaxLength(80)
   fontFamily?: string;
 

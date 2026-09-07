@@ -1,4 +1,4 @@
-import { Body, Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { UserRole } from '@shared/types';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -16,5 +16,10 @@ export class AdminEnterpriseController {
   }
   @Put(':workspaceId') async upsert(@Param('workspaceId') workspaceId: string, @Body() dto: UpsertEnterpriseAccountDto, @Req() req: any) {
     return { data: await this.service.upsert(workspaceId, dto, req.user.id) };
+  }
+
+  /** Aprobación en un clic: ACTIVE + Partner API habilitada. */
+  @Post(':workspaceId/approve') async approve(@Param('workspaceId') workspaceId: string, @Req() req: any) {
+    return { data: await this.service.approve(workspaceId, req.user.id) };
   }
 }
