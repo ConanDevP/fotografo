@@ -5,6 +5,7 @@ import { ApiResponse } from '@shared/types';
 import { CreateEventDto } from '../events/dto/create-event.dto';
 import { UpdateEventDto } from '../events/dto/update-event.dto';
 import { CompleteBatchDto, PresignBatchDto } from '../uploads/dto/presign-batch.dto';
+import { FinalizeBatchDto } from '../uploads/dto/finalize-batch.dto';
 import { CreatePartnerUploadBatchDto, PartnerBibSearchQueryDto, PartnerBulkDownloadDto, PartnerBulkPhotoIdsDto, PartnerBulkReviewDto, PartnerDownloadDto, PartnerFaceSearchDto, PartnerFreeDownloadDto, PartnerGalleryConfigDto, PartnerListQueryDto, PartnerLowConfidenceQueryDto } from './dto/partner-api.dto';
 import { PartnerApiKeyGuard } from './partner-api-key.guard';
 import { PartnerApiService } from './partner-api.service';
@@ -156,6 +157,16 @@ export class PartnerApiController {
     @Body() dto: CompleteBatchDto,
   ): Promise<ApiResponse> {
     return { data: await this.partner.completeFiles(req.partner, batchId, dto) };
+  }
+
+  @Post('upload-batches/:batchId/finalize')
+  @RequirePartnerScopes('photos:upload')
+  async finalizeUploadBatch(
+    @Req() req: PartnerRequest,
+    @Param('batchId') batchId: string,
+    @Body() dto: FinalizeBatchDto,
+  ): Promise<ApiResponse> {
+    return { data: await this.partner.finalizeFiles(req.partner, batchId, dto) };
   }
 
   @Get('upload-batches/:batchId')

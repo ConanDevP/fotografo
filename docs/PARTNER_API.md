@@ -133,7 +133,29 @@ Content-Type: application/json
 LucilaMon verifica objeto, tamaño, firma de imagen y dimensiones antes de
 encolarlo. Una URL firmada por sí sola no registra una foto como válida.
 
-### 4. Consultar procesamiento
+### 4. Cerrar el lote
+
+Cuando termines todos los intentos, registra los archivos que decidiste omitir.
+Envia un arreglo vacio si no omitiste ninguno. La operacion es idempotente.
+
+```http
+POST /v1/partner/upload-batches/{batchId}/finalize
+Authorization: Bearer <api-key>
+Content-Type: application/json
+
+{
+  "skipped": [{
+    "clientFileId": "camera-a-IMG_002",
+    "fileName": "IMG_002.jpg",
+    "reason": "Archivo corrupto"
+  }]
+}
+```
+
+El servidor limpia objetos provisionales y exige que confirmados, duplicados y
+omitidos coincidan con `totalFiles`.
+
+### 5. Consultar procesamiento
 
 ```http
 GET /v1/partner/upload-batches/{batchId}

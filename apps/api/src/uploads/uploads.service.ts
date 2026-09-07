@@ -1140,6 +1140,9 @@ export class UploadsService {
       items.map(async item => {
         const photo = item.photo;
         if (!photo) return;
+        let confirmedInDatabase = false;
+        let storageClaimed = false;
+        let verifiedSize = 0;
         // Ya confirmada en un intento anterior: reenviar la confirmación no debe
         // volver a contabilizar bytes ni encolar el procesamiento otra vez.
         if (photo.originalBytes) {
@@ -1153,6 +1156,7 @@ export class UploadsService {
           if (!head || head.size <= 0) {
             throw new BadRequestException('El archivo no llegó a subirse a almacenamiento');
           }
+          verifiedSize = head.size;
           if (head.size > FILE_CONSTRAINTS.MAX_SIZE) {
             await this.storageService.deletePhoto(objectKey).catch(() => undefined);
             throw new BadRequestException(
@@ -1196,6 +1200,11 @@ export class UploadsService {
             );
           }
 
+          // La cuota se consume atomicamente antes de publicar la confirmacion
+          // en BD. Si no cabe, el objeto se elimina en el bloque de compensacion.
+          await this.billingService.claimStorage(photo.photographerWorkspaceId, head.size);
+          storageClaimed = true;
+
           const updated = await this.prisma.photo.update({
             where: { id: photo.id },
             data: {
@@ -1205,17 +1214,21 @@ export class UploadsService {
               height: dimensions.height,
             },
           });
+          confirmedInDatabase = true;
 
           // El consumo se contabiliza con el tamaño verificado, nunca con el
           // declarado por el cliente.
-          await this.billingService.addStorage(photo.photographerWorkspaceId, head.size);
           if (photo.photographerWorkspaceId) {
             const event = await this.prisma.event.findUnique({
               where: { id: photo.eventId },
               select: { isPublished: true, commerceMode: true },
             });
             if (event?.isPublished && this.billingService.isShareMode(event.commerceMode)) {
-              await this.billingService.accrueSharePhotoCharge(photo.photographerWorkspaceId, 1);
+              await this.billingService
+                .accrueSharePhotoCharge(photo.photographerWorkspaceId, 1)
+                .catch(error => this.logger.error(
+                  `No se pudo acumular el cargo de modo compartir para ${photo.id}: ${getErrorMessage(error)}`,
+                ));
             }
           }
 
@@ -1223,15 +1236,29 @@ export class UploadsService {
             where: { id: item.id },
             data: { status: 'PROCESSING', error: null },
           });
-          await this.queueService.addProcessPhotoJob({
-            photoId: updated.id,
-            eventId: updated.eventId,
-            objectKey,
-          });
+          // Redis puede tener una interrupcion breve. La foto confirmada se
+          // conserva en PENDING para que JobRecoveryService la vuelva a encolar;
+          // nunca se borra un original valido por un fallo de la cola.
+          await this.queueService
+            .addProcessPhotoJob({ photoId: updated.id, eventId: updated.eventId, objectKey })
+            .catch(error => this.logger.error(
+              `Foto ${updated.id} confirmada, pendiente de recovery porque no se pudo encolar: ${getErrorMessage(error)}`,
+            ));
 
           confirmed.push({ clientFileId: item.clientFileId, photoId: updated.id, replayed: false });
         } catch (error) {
           const message = getErrorMessage(error);
+          if (confirmedInDatabase) {
+            await this.prisma.batchUploadItem
+              .update({ where: { id: item.id }, data: { status: 'PROCESSING', error: message.slice(0, 1000) } })
+              .catch(() => undefined);
+            confirmed.push({ clientFileId: item.clientFileId, photoId: photo.id, replayed: false, recoveryPending: true });
+            return;
+          }
+          if (storageClaimed) {
+            await this.billingService.releaseStorage(photo.photographerWorkspaceId, verifiedSize).catch(() => undefined);
+          }
+          await this.storageService.deletePhoto(photo.cloudinaryId).catch(() => undefined);
           // La fotografía provisional se borra: si se quedara, contaría como una
           // foto más del evento y se acabaría facturando algo que nunca se subió.
           await this.prisma.batchUploadItem
@@ -1245,6 +1272,51 @@ export class UploadsService {
 
     const jobStatus = await this.reconcileBatchUpload(jobId);
     return { confirmed, errors, jobStatus };
+  }
+
+  async finalizeBatchUpload(
+    jobId: string,
+    skipped: Array<{ clientFileId: string; fileName: string; reason: string }>,
+    userId: string,
+    authorizedWorkspaceId?: string,
+  ) {
+    const job = await this.assertOwnedJob(jobId, userId, authorizedWorkspaceId);
+    if (skipped.length) {
+      const abandoned = await this.prisma.batchUploadItem.findMany({
+        where: { batchJobId: jobId, clientFileId: { in: skipped.map(file => file.clientFileId) } },
+        include: { photo: true },
+      });
+      const alreadyConfirmed = new Set(
+        abandoned.filter(item => Boolean(item.photo?.originalBytes)).map(item => item.clientFileId),
+      );
+      for (const item of abandoned) {
+        if (item.photo && !item.photo.originalBytes) {
+          await this.storageService.deletePhoto(item.photo.cloudinaryId).catch(() => undefined);
+          await this.prisma.photo.delete({ where: { id: item.photo.id } }).catch(() => undefined);
+        }
+      }
+      const failures = skipped.filter(file => !alreadyConfirmed.has(file.clientFileId));
+      if (failures.length) await this.prisma.$transaction(
+        failures.map(file => this.prisma.batchUploadItem.upsert({
+          where: { batchJobId_clientFileId: { batchJobId: jobId, clientFileId: file.clientFileId } },
+          create: {
+            batchJobId: jobId,
+            clientFileId: file.clientFileId,
+            fileName: file.fileName,
+            status: 'FAILED',
+            error: file.reason,
+          },
+          update: { status: 'FAILED', error: file.reason, fileName: file.fileName },
+        })),
+      );
+    }
+    const itemCount = await this.prisma.batchUploadItem.count({ where: { batchJobId: jobId } });
+    if (itemCount !== job.totalFiles) {
+      throw new BadRequestException(
+        `No se puede cerrar el lote: se declararon ${job.totalFiles} archivos y se reportaron ${itemCount}`,
+      );
+    }
+    return this.reconcileBatchUpload(jobId);
   }
 
   private looksLikeImage(bytes: Buffer): boolean {

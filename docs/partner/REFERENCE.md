@@ -61,6 +61,7 @@ Las rutas son relativas a `/v1/partner`.
 | `POST` | `/events/{eventId}/upload-batches` | `photos:upload` | Crea lote de 1–5,000; idempotente |
 | `POST` | `/upload-batches/{batchId}/files` | `photos:upload` | Solicita carga para 1–50 archivos |
 | `POST` | `/upload-batches/{batchId}/complete` | `photos:upload` | Confirma 1–50 archivos ya enviados |
+| `POST` | `/upload-batches/{batchId}/finalize` | `photos:upload` | Cierra el lote y registra archivos omitidos |
 | `GET` | `/upload-batches/{batchId}` | `photos:read` | Obtiene progreso, conteos y fallos |
 | `GET` | `/events/{eventId}/photos` | `photos:read` | Lista fotos; filtros `status`, `publicationStatus` |
 | `GET` | `/photos/{photoId}` | `photos:read` | Metadatos, estado y detecciones |

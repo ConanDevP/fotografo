@@ -113,6 +113,31 @@ paths:
                   items: { type: string, maxLength: 200 }
       responses:
         '201': { description: Resultado de confirmación }
+  /upload-batches/{batchId}/finalize:
+    post:
+      summary: Cerrar el lote y registrar archivos omitidos
+      parameters:
+        - $ref: '#/components/parameters/BatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skipped]
+              properties:
+                skipped:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [clientFileId, fileName, reason]
+                    properties:
+                      clientFileId: { type: string, maxLength: 200 }
+                      fileName: { type: string, maxLength: 255 }
+                      reason: { type: string, maxLength: 1000 }
+      responses:
+        '201': { description: Estado reconciliado del lote }
   /upload-batches/{batchId}:
     get:
       summary: Consultar estado detallado del lote

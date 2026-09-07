@@ -271,6 +271,36 @@ export class BillingService {
   }
 
   /**
+   * Comprueba y consume espacio en una sola sentencia. `assertStorageAvailable`
+   * es solo una comprobacion temprana; esta es la barrera definitiva frente a
+   * varias confirmaciones concurrentes del mismo workspace.
+   */
+  async claimStorage(workspaceId: string | null | undefined, bytes: number): Promise<void> {
+    if (!workspaceId || bytes <= 0) return;
+    const amount = BigInt(Math.max(0, Math.round(bytes)));
+    const { storageAllowanceBytes, plan } = await this.resolveForWorkspace(workspaceId);
+    const changed = await this.prisma.$executeRaw`
+      UPDATE "workspaces"
+      SET "storage_bytes_used" = "storage_bytes_used" + ${amount},
+          "updated_at" = NOW()
+      WHERE "id" = ${workspaceId}::uuid
+        AND "storage_bytes_used" + ${amount} <= ${storageAllowanceBytes}
+    `;
+    if (changed === 0) {
+      const current = await this.resolveForWorkspace(workspaceId);
+      throw new ForbiddenException({
+        code: 'STORAGE_QUOTA_EXCEEDED',
+        message: `Has agotado el almacenamiento de tu plan ${plan.name} (${this.formatBytes(
+          storageAllowanceBytes,
+        )}). Amplia el espacio o libera fotografias para seguir subiendo.`,
+        allowanceBytes: storageAllowanceBytes.toString(),
+        availableBytes: current.storageAvailableBytes.toString(),
+        requiredBytes: bytes,
+      });
+    }
+  }
+
+  /**
    * Devuelve espacio al borrar fotografías. Nunca deja el contador en negativo.
    */
   async releaseStorage(

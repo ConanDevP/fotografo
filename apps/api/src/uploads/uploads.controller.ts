@@ -22,6 +22,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UploadPhotoDto } from './dto/upload-photo.dto';
 import { InitiateBatchUploadDto } from './dto/initiate-batch-upload.dto';
 import { CompleteBatchDto, PresignBatchDto } from './dto/presign-batch.dto';
+import { FinalizeBatchDto } from './dto/finalize-batch.dto';
 import { UserRole, ApiResponse } from '@shared/types';
 import { FILE_CONSTRAINTS } from '@shared/constants';
 
@@ -78,6 +79,17 @@ export class UploadsController {
     return {
       data: await this.uploadsService.completeBatchFiles(jobId, dto.clientFileIds, req.user.id),
     };
+  }
+
+  /** Registra archivos omitidos y permite cerrar correctamente un lote parcial. */
+  @Post('batch/:jobId/finalize')
+  @Throttle(30, 60)
+  async finalizeBatch(
+    @Param('jobId') jobId: string,
+    @Body() dto: FinalizeBatchDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.uploadsService.finalizeBatchUpload(jobId, dto.skipped, req.user.id) };
   }
 
   /**

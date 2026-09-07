@@ -233,6 +233,16 @@ export class PartnerApiService {
     );
   }
 
+  async finalizeFiles(principal: PartnerPrincipal, batchId: string, dto: { skipped: Array<{ clientFileId: string; fileName: string; reason: string }> }) {
+    await this.assertBatchInWorkspace(principal.workspaceId, batchId);
+    return this.uploads.finalizeBatchUpload(
+      batchId,
+      dto.skipped,
+      principal.actorUserId,
+      principal.workspaceId,
+    );
+  }
+
   async getBatch(principal: PartnerPrincipal, batchId: string) {
     await this.assertBatchInWorkspace(principal.workspaceId, batchId);
     return this.uploads.getBatchUploadStatusDetailed(batchId, principal.actorUserId, principal.workspaceId);
