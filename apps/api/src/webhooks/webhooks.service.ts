@@ -120,6 +120,7 @@ export class WebhooksService {
   */
 
   async handleStripeWebhook(rawBody: Buffer | string, signature: string): Promise<{ success: boolean }> {
+    let claimedEventId: string | null = null;
     try {
       if (!this.stripeGateway) {
         this.logger.warn('Stripe not configured, ignoring webhook');
@@ -138,6 +139,35 @@ export class WebhooksService {
       this.logger.log(`Processing Stripe webhook: ${event.type}`);
 
       this.logger.debug(`Stripe webhook verificado: ${event.id}`);
+
+      try {
+        await this.prisma.stripeWebhookEvent.create({ data: { id: event.id, type: event.type } });
+        claimedEventId = event.id;
+      } catch {
+        const existing = await this.prisma.stripeWebhookEvent.findUnique({ where: { id: event.id } });
+        if (existing?.processedAt) return { success: true };
+        // Una caída brusca puede dejar una reserva sin completar. Después de
+        // diez minutos permitimos que un reintento de Stripe la reclame; una
+        // entrega concurrente reciente se reconoce sin ejecutar dos veces.
+        if (existing && existing.createdAt.getTime() < Date.now() - 10 * 60_000) {
+          const recovered = await this.prisma.stripeWebhookEvent.deleteMany({
+            where: { id: event.id, processedAt: null, createdAt: { lt: new Date(Date.now() - 10 * 60_000) } },
+          });
+          if (recovered.count === 1) {
+            await this.prisma.stripeWebhookEvent.create({ data: { id: event.id, type: event.type } });
+            claimedEventId = event.id;
+          } else {
+            return { success: true };
+          }
+        } else if (existing) {
+          return { success: true };
+        }
+        if (claimedEventId) {
+          // Reserva recuperada correctamente; continúa con el procesamiento.
+        } else {
+          throw new Error(`No se pudo reservar el evento Stripe ${event.id}`);
+        }
+      }
 
       switch (event.type) {
         // Payment events
@@ -172,7 +202,7 @@ export class WebhooksService {
         case 'checkout.session.expired': {
           const session = event.data.object as Stripe.Checkout.Session;
           this.logger.log(`Checkout session expired: ${session.id}`);
-          // Optionally mark order as cancelled
+          await this.paymentsService.expireStripeCheckout(session.id);
           break;
         }
 
@@ -205,7 +235,13 @@ export class WebhooksService {
         case 'account.application.deauthorized': {
           const application = event.data.object as Stripe.Application;
           this.logger.log(`Application deauthorized: ${application.id}`);
-          // Handle account disconnection if needed
+          if (this.stripeConnect) await this.stripeConnect.handleDeauthorized(application.id);
+          break;
+        }
+
+        case 'refund.created':
+        case 'refund.updated': {
+          await this.paymentsService.syncStripeRefund(event.data.object as Stripe.Refund);
           break;
         }
 
@@ -318,8 +354,17 @@ export class WebhooksService {
           this.logger.log(`Unhandled Stripe event type: ${event.type}`);
       }
 
+      await this.prisma.stripeWebhookEvent.update({
+        where: { id: event.id },
+        data: { processedAt: new Date() },
+      });
       return { success: true };
     } catch (error) {
+      if (claimedEventId) {
+        await this.prisma.stripeWebhookEvent.deleteMany({
+          where: { id: claimedEventId, processedAt: null },
+        }).catch(() => undefined);
+      }
       this.logger.error('Error processing Stripe webhook', error);
       return { success: false };
     }

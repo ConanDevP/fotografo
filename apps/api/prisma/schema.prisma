@@ -473,6 +473,17 @@ model Order {
   @@map("orders")
 }
 
+/// Inbox idempotente de eventos financieros recibidos desde Stripe.
+model StripeWebhookEvent {
+  id          String    @id @map("id")
+  type        String
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  @@index([processedAt])
+  @@map("stripe_webhook_events")
+}
+
 model EventContributor {
   id                         String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   eventId                    String               @map("event_id") @db.Uuid

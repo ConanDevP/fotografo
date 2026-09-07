@@ -19,6 +19,7 @@ import {
 } from '@shared/payment-types';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { StripeGatewayService } from './gateways/stripe-gateway.service';
+import Stripe from 'stripe';
 
 @Injectable()
 export class PaymentsService {
@@ -740,6 +741,68 @@ export class PaymentsService {
     return { success: true, orderId: order.id };
   }
 
+  async expireStripeCheckout(sessionId: string): Promise<void> {
+    await this.prisma.order.updateMany({
+      where: { stripeSessionId: sessionId, status: 'CREATED' },
+      data: { status: 'CANCELLED', settlementStatus: 'NOT_REQUIRED' },
+    });
+  }
+
+  /** Sincroniza también los reembolsos iniciados directamente en Stripe. */
+  async syncStripeRefund(refund: Stripe.Refund): Promise<void> {
+    if (!['succeeded', 'pending'].includes(String(refund.status))) return;
+    const stripeGateway = this.paymentGatewayFactory.createGateway(PaymentGateway.STRIPE) as StripeGatewayService;
+    const stripe = stripeGateway.getStripeInstance();
+    const chargeId = typeof refund.charge === 'string' ? refund.charge : refund.charge?.id;
+    if (!chargeId) throw new Error(`El reembolso ${refund.id} no contiene cargo`);
+    const charge = await stripe.charges.retrieve(chargeId);
+    const intentId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
+    if (!intentId) throw new Error(`El cargo ${chargeId} no contiene PaymentIntent`);
+    const sessions = await stripe.checkout.sessions.list({ payment_intent: intentId, limit: 1 });
+    const sessionId = sessions.data[0]?.id;
+    const order = sessionId ? await this.prisma.order.findFirst({ where: { stripeSessionId: sessionId } }) : null;
+    if (!order) throw new Error(`No existe pedido local para el reembolso ${refund.id}`);
+
+    await this.prisma.ledgerEntry.createMany({
+      data: [{
+        dedupeKey: `${order.id}:refund:${refund.id}`,
+        orderId: order.id,
+        eventId: order.eventId,
+        type: 'REFUND',
+        status: 'AVAILABLE',
+        amountCents: -refund.amount,
+        currency: order.currency,
+        metadata: { stripeRefundId: refund.id, source: 'stripe_webhook', status: refund.status },
+      }],
+      skipDuplicates: true,
+    });
+
+    if (refund.status !== 'succeeded') return;
+    if (charge.amount_refunded < order.amountCents) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          settlementStatus: 'PARTIAL',
+          settlementError: `Reembolso parcial externo: ${charge.amount_refunded}/${order.amountCents}`,
+        },
+      });
+      return;
+    }
+
+    const reversalErrors = await this.reverseTransfersForOrder(order.id, `Reembolso Stripe ${refund.id}`);
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: 'REFUNDED', refundedAt: new Date(), stripeRefundId: refund.id,
+        refundRequestedAt: order.refundRequestedAt || new Date(),
+        accessTokenHash: null, accessTokenExpiresAt: null,
+        settlementStatus: reversalErrors.length ? 'FAILED' : 'NOT_REQUIRED',
+        settlementError: reversalErrors.length ? reversalErrors.join('; ').slice(0, 1000) : null,
+      },
+    });
+    if (reversalErrors.length) throw new Error(reversalErrors.join('; '));
+  }
+
   async getAvailableGateways() {
     const supportedGateways = this.paymentGatewayFactory.getSupportedGateways();
     const isDemoMode = this.configService.get('DEMO_PAYMENTS', 'false') === 'true';
@@ -1261,8 +1324,6 @@ export class PaymentsService {
       this.logger.warn(`Contracargo ${input.disputeId} sin pedido asociado (cargo ${input.chargeId})`);
       return;
     }
-    if (order.stripeDisputeId === input.disputeId) return; // reintento del webhook
-
     this.logger.warn(
       `⚠️ Contracargo ${input.disputeId} sobre el pedido ${order.id}: ` +
       `${input.amountCents} céntimos, motivo "${input.reason || 'sin especificar'}"`,
@@ -1270,7 +1331,7 @@ export class PaymentsService {
 
     // Primero se recupera lo del fotógrafo. Si se hiciera al final y algo
     // fallara, el importe ya estaría fuera y lo asumiría la plataforma.
-    await this.reverseTransfersForOrder(order.id, `Contracargo ${input.disputeId}`);
+    const reversalErrors = await this.reverseTransfersForOrder(order.id, `Contracargo ${input.disputeId}`);
 
     await this.prisma.order.update({
       where: { id: order.id },
@@ -1312,6 +1373,7 @@ export class PaymentsService {
     await this.prisma.ledgerEntry.createMany({ data: entries, skipDuplicates: true });
 
     await this.submitDisputeEvidence(input.disputeId, order.id);
+    if (reversalErrors.length) throw new Error(`Reversiones pendientes: ${reversalErrors.join('; ')}`);
   }
 
   /** Refleja el desenlace para que el pedido no se quede en un estado ambiguo. */
@@ -1327,9 +1389,21 @@ export class PaymentsService {
         // Ganar devuelve el importe, así que el pedido vuelve a estar pagado.
         // Perder lo deja como reembolsado: el comprador se quedó su dinero.
         status: won ? 'PAID' : 'REFUNDED',
+        settlementStatus: won ? 'PENDING' : 'NOT_REQUIRED',
         ...(won ? {} : { refundedAt: new Date() }),
       },
     });
+    if (won) {
+      await this.prisma.ledgerEntry.updateMany({
+        where: {
+          orderId: order.id,
+          status: 'REVERSED',
+          type: { in: ['ORGANIZER_COMMISSION', 'PHOTOGRAPHER_EARNING'] },
+        },
+        data: { status: 'AVAILABLE', externalTransferId: null, externalReversalId: null, paidOutAt: null, failureReason: null },
+      });
+      await this.settleStripeOrder(order.id, `dispute-won-${disputeId}`);
+    }
     this.logger.log(`Contracargo ${disputeId} cerrado como "${status}" en el pedido ${order.id}`);
   }
 
@@ -1422,19 +1496,21 @@ export class PaymentsService {
   }
 
   /** Devuelve a la plataforma lo ya transferido a los beneficiarios. */
-  private async reverseTransfersForOrder(orderId: string, reason: string): Promise<void> {
+  private async reverseTransfersForOrder(orderId: string, reason: string): Promise<string[]> {
     const entries = await this.prisma.ledgerEntry.findMany({
       where: {
         orderId,
         type: { in: ['ORGANIZER_COMMISSION', 'PHOTOGRAPHER_EARNING'] },
+        status: 'PAID_OUT',
         externalTransferId: { not: null },
       },
     });
-    if (!entries.length) return;
+    if (!entries.length) return [];
 
     const stripeGateway = this.paymentGatewayFactory.createGateway(PaymentGateway.STRIPE) as StripeGatewayService;
     const stripe = stripeGateway.getStripeInstance();
 
+    const failures: string[] = [];
     for (const entry of entries) {
       try {
         await stripe.transfers.createReversal(
@@ -1453,8 +1529,10 @@ export class PaymentsService {
           where: { id: entry.id },
           data: { failureReason: message.slice(0, 1000) },
         });
+        failures.push(message);
       }
     }
+    return failures;
   }
 
   private async fetchProcessorFee(order: { id: string; paymentGateway: string | null; stripeSessionId: string | null }): Promise<number> {
@@ -1830,7 +1908,7 @@ export class PaymentsService {
     });
   }
 
-  private async settleStripeOrder(orderId: string) {
+  private async settleStripeOrder(orderId: string, idempotencySuffix = 'initial') {
     const staleProcessing = new Date(Date.now() - 10 * 60_000);
     const claim = await this.prisma.order.updateMany({
       where: {
@@ -1928,7 +2006,7 @@ export class PaymentsService {
               workspaceId: entry.workspaceId || '',
               type: entry.type,
             },
-          }, { idempotencyKey: `lucilamon-ledger-${entry.id}` });
+          }, { idempotencyKey: `lucilamon-ledger-${entry.id}-${idempotencySuffix}` });
           await this.prisma.ledgerEntry.update({
             where: { id: entry.id },
             data: {

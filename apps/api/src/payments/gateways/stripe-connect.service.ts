@@ -224,7 +224,21 @@ export class StripeConnectService {
             this.logger.log(`Account ${account.id} updated via webhook: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}`);
         } catch (error) {
             this.logger.error(`Error handling account.updated for ${account.id}`, error);
+            throw error;
         }
+    }
+
+    async handleDeauthorized(accountId: string): Promise<void> {
+        const updated = await this.prisma.user.updateMany({
+            where: { stripeAccountId: accountId },
+            data: {
+                stripeAccountStatus: 'disconnected',
+                stripeOnboardingCompleted: false,
+                stripeChargesEnabled: false,
+                stripePayoutsEnabled: false,
+            },
+        });
+        if (updated.count === 0) this.logger.warn(`Cuenta Stripe desconectada sin usuario local: ${accountId}`);
     }
 
     /**

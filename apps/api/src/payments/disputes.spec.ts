@@ -36,6 +36,7 @@ describe('Contracargos', () => {
         ]),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 2 }),
       },
       metricEvent: {
         findMany: jest.fn().mockResolvedValue([
@@ -111,23 +112,27 @@ describe('Contracargos', () => {
     expect(evidencia.customer_email_address).toBe('atleta@test.com');
   });
 
-  it('no repite el trabajo si el webhook llega dos veces', async () => {
+  it('reintenta reversiones pendientes si el webhook llega de nuevo', async () => {
     prisma.order.findFirst.mockResolvedValue({ ...ORDER, stripeDisputeId: 'dp_1' });
 
     await abrir();
 
-    expect(stripe.transfers.createReversal).not.toHaveBeenCalled();
-    expect(prisma.order.update).not.toHaveBeenCalled();
+    expect(stripe.transfers.createReversal).toHaveBeenCalledTimes(2);
   });
 
   it('ganar la disputa devuelve el pedido a pagado', async () => {
     prisma.order.findFirst.mockResolvedValue({ ...ORDER, stripeDisputeId: 'dp_1' });
+    const settle = jest.spyOn(service as any, 'settleStripeOrder').mockResolvedValue(undefined);
 
     await service.handleDisputeClosed('dp_1', 'won');
 
     expect(prisma.order.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'PAID', disputeOutcome: 'won' }) }),
     );
+    expect(prisma.ledgerEntry.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'AVAILABLE', externalTransferId: null }),
+    }));
+    expect(settle).toHaveBeenCalledWith('ord-1', 'dispute-won-dp_1');
   });
 
   it('perderla lo deja como reembolsado', async () => {

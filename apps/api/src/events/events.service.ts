@@ -268,8 +268,31 @@ export class EventsService {
   }
 
   async findOneForUser(id: string, userId: string, userRole: UserRole) {
-    await this.assertCanAccessEvent(id, userId, userRole);
-    return this.findOne(id);
+    const access = await this.assertCanAccessEvent(id, userId, userRole);
+    const event = await this.findOne(id);
+    const workspaceRole = access.workspace?.members[0]?.role ?? null;
+    const contributor = access.contributors[0] ?? null;
+    const canManage =
+      userRole === UserRole.ADMIN
+      || access.ownerId === userId
+      || (!!workspaceRole && [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.EDITOR].includes(workspaceRole))
+      || (!!contributor && ['EDITOR', 'EVENT_MANAGER'].includes(contributor.role));
+    return {
+      ...event,
+      viewer: {
+        relation: userRole === UserRole.ADMIN
+          ? 'ADMIN'
+          : access.ownerId === userId
+            ? 'OWNER'
+            : contributor
+              ? 'CONTRIBUTOR'
+              : 'WORKSPACE_MEMBER',
+        workspaceRole,
+        contributorRole: contributor?.role ?? null,
+        canManage,
+        canUpload: true,
+      },
+    };
   }
 
   async findBySlug(slug: string) {
