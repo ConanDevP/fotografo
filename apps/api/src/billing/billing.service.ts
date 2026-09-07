@@ -607,21 +607,42 @@ export class BillingService {
       }),
     ]);
     const pendingShareCents = Number(workspace?.pendingShareChargeCents ?? 0);
+    const ent = effective.enterprise;
 
     return {
       plan: {
         slug: effective.plan.slug,
         name: effective.plan.name,
+        // Con contrato Empresa el plan lo lleva el contrato, no el autoservicio:
+        // el panel muestra "Empresa" y oculta las tarjetas de cambio de plan.
+        displayName: ent ? 'Empresa' : effective.plan.name,
+        managed: Boolean(ent),
         priceCents: effective.plan.priceCents,
         currency: effective.plan.currency,
         commissionPercent: effective.commissionPercent,
         sharePhotoCents: Number(effective.plan.sharePhotoCents),
-        allowsCustomDomain: effective.plan.allowsCustomDomain || Boolean(effective.enterprise?.customDomainEnabled),
-        allowsSponsors: effective.plan.allowsSponsors || Boolean(effective.enterprise?.sponsorsEnabled),
-        allowsAdvancedMetrics: effective.plan.allowsAdvancedMetrics || Boolean(effective.enterprise?.advancedAnalyticsEnabled),
+        allowsCustomDomain: effective.plan.allowsCustomDomain || Boolean(ent?.customDomainEnabled),
+        allowsSponsors: effective.plan.allowsSponsors || Boolean(ent?.sponsorsEnabled),
+        allowsAdvancedMetrics: effective.plan.allowsAdvancedMetrics || Boolean(ent?.advancedAnalyticsEnabled),
         sponsoredEventFeeCents: effective.plan.sponsoredEventFeeCents,
-        maxAdmins: effective.enterprise?.maxAdmins ?? effective.plan.maxAdmins,
+        maxAdmins: ent?.maxAdmins ?? effective.plan.maxAdmins,
       },
+      enterprise: ent
+        ? {
+            status: ent.status,
+            legalName: ent.legalName,
+            accountManager: ent.accountManager,
+            contractStart: ent.contractStart,
+            contractEnd: ent.contractEnd,
+            partnerApiEnabled: ent.partnerApiEnabled,
+            webhooksEnabled: ent.webhooksEnabled,
+            faceSearchEnabled: ent.faceSearchEnabled,
+            customDomainEnabled: ent.customDomainEnabled,
+            advancedAnalyticsEnabled: ent.advancedAnalyticsEnabled,
+            exportsEnabled: ent.exportsEnabled,
+            priorityProcessingEnabled: ent.priorityProcessingEnabled,
+          }
+        : null,
       // Modo compartir acumulado desde la última factura.
       shareMode: {
         pendingCents: pendingShareCents,
