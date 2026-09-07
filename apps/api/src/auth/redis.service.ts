@@ -87,6 +87,24 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.connection.del(key);
   }
 
+  async deleteRefreshTokensForUser(userId: string): Promise<void> {
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.connection.scan(cursor, 'MATCH', 'refresh_token:*', 'COUNT', 200);
+      cursor = nextCursor;
+      if (!keys.length) continue;
+      const values = await this.connection.mget(...keys);
+      const owned = keys.filter((_, index) => {
+        try {
+          return values[index] ? JSON.parse(values[index]!).userId === userId : false;
+        } catch {
+          return false;
+        }
+      });
+      if (owned.length) await this.connection.del(...owned);
+    } while (cursor !== '0');
+  }
+
   private refreshTokenKey(token: string) {
     return `refresh_token:${createHash('sha256').update(token).digest('hex')}`;
   }

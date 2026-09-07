@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
@@ -105,6 +105,20 @@ export class AuthService {
 
   async logout(refreshToken: string): Promise<void> {
     await this.redisService.deleteRefreshToken(refreshToken);
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.usersService.findById(userId);
+    if (!user.passwordHash || !(await argon2.verify(user.passwordHash, currentPassword))) {
+      throw new UnauthorizedException('La contraseña actual no es correcta');
+    }
+    if (await argon2.verify(user.passwordHash, newPassword)) {
+      throw new BadRequestException('La nueva contraseña debe ser diferente de la actual');
+    }
+    const passwordHash = await argon2.hash(newPassword);
+    await this.usersService.update(userId, { passwordHash });
+    await this.redisService.deleteRefreshTokensForUser(userId);
+    return { changed: true };
   }
 
   async validateUser(email: string, password: string): Promise<any> {

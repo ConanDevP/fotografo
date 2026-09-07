@@ -16,6 +16,7 @@ import { CreateAdminDto } from './dto/create-admin.dto';
 import { ForgotPasswordDto, ResetPasswordWithTokenDto } from './dto/password-reset.dto';
 import { PasswordResetService } from './password-reset.service';
 import { AccountDeletionService } from './account-deletion.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ApiResponse } from '@shared/types';
 
 @Controller('auth')
@@ -88,6 +89,19 @@ export class AuthController {
     const refreshToken = refreshTokenDto.refreshToken || this.readRefreshCookie(req);
     if (refreshToken) await this.authService.logout(refreshToken);
     res.clearCookie('lucilamon_refresh', this.refreshCookieOptions());
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Put('password')
+  @Throttle(5, 900)
+  async changePassword(
+    @Req() req: any,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<ApiResponse> {
+    const result = await this.authService.changePassword(req.user.id, dto.currentPassword, dto.newPassword);
+    res.clearCookie('lucilamon_refresh', this.refreshCookieOptions());
+    return { data: result };
   }
 
   /**
