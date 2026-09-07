@@ -1,16 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { SubscriptionStatus } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { UpsertEnterpriseAccountDto } from './dto/admin-enterprise.dto';
 
-/** Plan que se concede al aprobar una cuenta Business si no paga ya uno. */
-const BUSINESS_PLAN_SLUG = 'organizacion';
-const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
-
 @Injectable()
 export class AdminEnterpriseService {
-  private readonly logger = new Logger(AdminEnterpriseService.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
   async list(search = '', page = 1, limit = 50) {
@@ -33,15 +26,19 @@ export class AdminEnterpriseService {
    * Aprobación en un clic de una solicitud: pone la cuenta ACTIVE y habilita la
    * Partner API a la vez. Evita el error de dejar el estado ACTIVE pero la API
    * desactivada, que hacía reaparecer el botón de "solicitar acceso".
+   *
+   * El plan efectivo (comisión, cupo, funciones) lo resuelve BillingService a
+   * partir de la propia cuenta Enterprise activa: no hace falta crear aquí una
+   * suscripción aparte.
    */
   async approve(workspaceId: string, adminId: string) {
     const account = await this.prisma.enterpriseAccount.findUnique({
       where: { workspaceId },
-      select: { id: true, contractStart: true, contractEnd: true },
+      select: { id: true, contractStart: true },
     });
     if (!account) throw new NotFoundException('Este espacio no tiene una solicitud/cuenta Enterprise');
-    const updated = await this.prisma.$transaction(async tx => {
-      const acc = await tx.enterpriseAccount.update({
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.enterpriseAccount.update({
         where: { workspaceId },
         data: {
           status: 'ACTIVE',
@@ -53,109 +50,8 @@ export class AdminEnterpriseService {
       await tx.auditLog.create({
         data: { userId: adminId, action: 'ENTERPRISE_ACCESS_APPROVED', data: { workspaceId } },
       });
-      return acc;
+      return updated;
     });
-
-    // Una cuenta Business no puede quedarse en el plan gratuito: sin un plan de
-    // pago, su comisión y su cupo seguirían siendo los de Arranque aunque el
-    // panel diga "Empresa". Se le concede el plan superior (misma vía que
-    // "Acceso a planes"), salvo que ya pague uno por Stripe. Va fuera de la
-    // transacción para que un fallo aquí no revierta la aprobación.
-    const planNote = await this.ensureBusinessPlan(
-      workspaceId,
-      account.contractEnd,
-      adminId,
-    ).catch(error => {
-      this.logger.warn(
-        `No se pudo conceder el plan al aprobar Business en ${workspaceId}: ${
-          error instanceof Error ? error.message : 'error desconocido'
-        }`,
-      );
-      return 'No se pudo asignar el plan automáticamente. Hazlo desde "Acceso a planes".';
-    });
-
-    return { ...updated, planNote };
-  }
-
-  /**
-   * Garantiza que el espacio tenga al menos el plan Business concedido. Devuelve
-   * un aviso legible si no se pudo (y no lanza), o `null` si quedó en orden.
-   */
-  private async ensureBusinessPlan(
-    workspaceId: string,
-    contractEnd: Date | null,
-    adminId: string,
-  ): Promise<string | null> {
-    const [plan, existing, workspace] = await Promise.all([
-      this.prisma.plan.findUnique({ where: { slug: BUSINESS_PLAN_SLUG } }),
-      this.prisma.subscription.findUnique({ where: { workspaceId } }),
-      this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { name: true, storageBytesUsed: true },
-      }),
-    ]);
-    if (!workspace) return null;
-    if (!plan?.isActive) {
-      return `No existe el plan "${BUSINESS_PLAN_SLUG}"; ejecuta el seed de planes.`;
-    }
-    // Si ya paga un plan por Stripe, no se toca: lo gestiona el cliente.
-    if (existing?.stripeSubscriptionId && existing.status === SubscriptionStatus.ACTIVE) {
-      return null;
-    }
-    // Si ya tiene una concesión vigente de este mismo plan, nada que hacer.
-    if (
-      existing?.status === SubscriptionStatus.ACTIVE &&
-      existing.planId === plan.id &&
-      (!existing.adminGrantedUntil || existing.adminGrantedUntil > new Date())
-    ) {
-      return null;
-    }
-    if (workspace.storageBytesUsed > plan.includedStorageBytes) {
-      return 'El espacio usado supera el cupo del plan; concédelo a mano desde "Acceso a planes".';
-    }
-
-    const until =
-      contractEnd && contractEnd.getTime() > Date.now()
-        ? contractEnd
-        : new Date(Date.now() + YEAR_MS);
-
-    await this.prisma.$transaction(async tx => {
-      await tx.subscription.upsert({
-        where: { workspaceId },
-        create: {
-          workspaceId,
-          planId: plan.id,
-          status: SubscriptionStatus.ACTIVE,
-          extraStorageBlocks: 0,
-          adminGrantedUntil: until,
-          adminGrantReason: 'Cuenta Business aprobada',
-          adminGrantedById: adminId,
-        },
-        update: {
-          planId: plan.id,
-          status: SubscriptionStatus.ACTIVE,
-          cancelAtPeriodEnd: false,
-          adminGrantedUntil: until,
-          adminGrantReason: 'Cuenta Business aprobada',
-          adminGrantedById: adminId,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          userId: adminId,
-          action: 'PLAN_ACCESS_GRANTED_BY_ADMIN',
-          data: {
-            workspaceId,
-            workspaceName: workspace.name,
-            planSlug: plan.slug,
-            expiresAt: until.toISOString(),
-            reason: 'Cuenta Business aprobada',
-            via: 'enterprise-approve',
-          },
-        },
-      });
-    });
-    return null;
   }
 
   async upsert(workspaceId: string, dto: UpsertEnterpriseAccountDto, adminId: string) {
@@ -165,26 +61,10 @@ export class AdminEnterpriseService {
     const end = dto.contractEnd ? new Date(dto.contractEnd) : null;
     if (start && end && end <= start) throw new BadRequestException('El fin del contrato debe ser posterior al inicio');
     const data = { ...dto, currency: (dto.currency || 'USD').toUpperCase(), contractStart: start, contractEnd: end };
-    const account = await this.prisma.$transaction(async tx => {
-      const saved = await tx.enterpriseAccount.upsert({ where: { workspaceId }, create: { workspaceId, ...data, createdById: adminId, updatedById: adminId }, update: { ...data, updatedById: adminId } });
+    return this.prisma.$transaction(async tx => {
+      const account = await tx.enterpriseAccount.upsert({ where: { workspaceId }, create: { workspaceId, ...data, createdById: adminId, updatedById: adminId }, update: { ...data, updatedById: adminId } });
       await tx.auditLog.create({ data: { userId: adminId, action: 'ENTERPRISE_ACCOUNT_UPSERTED', data: { workspaceId, workspaceName: workspace.name, status: dto.status, partnerApiEnabled: dto.partnerApiEnabled, contractEnd: dto.contractEnd || null } } });
-      return saved;
+      return account;
     });
-
-    // Un contrato que pasa a activo arrastra el plan: si no, el panel del
-    // cliente seguiría en Arranque. Best-effort, no revierte el guardado.
-    let planNote: string | null = null;
-    if (['ACTIVE', 'PILOT'].includes(dto.status)) {
-      planNote = await this.ensureBusinessPlan(workspaceId, end, adminId).catch(error => {
-        this.logger.warn(
-          `No se pudo conceder el plan al guardar el contrato de ${workspaceId}: ${
-            error instanceof Error ? error.message : 'error desconocido'
-          }`,
-        );
-        return 'No se pudo asignar el plan automáticamente. Hazlo desde "Acceso a planes".';
-      });
-    }
-
-    return { ...account, planNote };
   }
 }

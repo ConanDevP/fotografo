@@ -39,7 +39,8 @@ describe('PartnerApiKeyGuard', () => {
       workspaceMember: { findFirst: jest.fn() },
     };
     const reflector = { getAllAndOverride: jest.fn().mockReturnValue(required) } as unknown as Reflector;
-    return { guard: new PartnerApiKeyGuard(prisma as any, reflector), prisma };
+    const enterpriseAccess = { authorizeExistingClient: jest.fn().mockResolvedValue(undefined) };
+    return { guard: new PartnerApiKeyGuard(prisma as any, reflector, enterpriseAccess as any), prisma, enterpriseAccess };
   }
 
   it('autentica una clave válida y añade el contexto de workspace', async () => {
@@ -68,6 +69,15 @@ describe('PartnerApiKeyGuard', () => {
     const { guard } = setup(['photos:upload']);
     await expect(guard.canActivate(context({ headers: { authorization: `Bearer ${KEY}` } })))
       .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('aplica las capacidades y cuotas empresariales al autenticar', async () => {
+    const { guard, enterpriseAccess } = setup(['events:read']);
+    const request = { headers: { authorization: `Bearer ${KEY}` } };
+    await guard.canActivate(context(request));
+    expect(enterpriseAccess.authorizeExistingClient).toHaveBeenCalledWith(
+      'workspace-1', ['events:read'], ['events:read'],
+    );
   });
 
   it('invalida la clave si su creador fue degradado a un rol sin administración', async () => {

@@ -18,10 +18,11 @@ import { SponsorsModule } from '../sponsors/sponsors.module';
 import { MetricsModule } from '../metrics/metrics.module';
 import { EnterpriseAccessService } from './enterprise-access.service';
 import { EnterpriseAccessController } from './enterprise-access.controller';
+import { PartnerDocsController } from './partner-docs.controller';
 
 @Module({
   imports: [WorkspacesModule, EventsModule, UploadsModule, PhotosModule, SearchModule, SponsorsModule, MetricsModule, forwardRef(() => AnalyticsModule)],
-  controllers: [ApiClientsController, PartnerApiController, WorkspaceWebhooksController, EnterpriseAccessController],
+  controllers: [ApiClientsController, PartnerApiController, PartnerDocsController, WorkspaceWebhooksController, EnterpriseAccessController],
   providers: [PrismaService, MailerService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService],
   exports: [PartnerWebhooksService, EnterpriseAccessService],
 })

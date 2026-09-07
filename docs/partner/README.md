@@ -26,6 +26,11 @@ integración.
 4. [Salida a producción](PRODUCTION.md): checklist técnico y de seguridad.
 5. [Contrato OpenAPI](../partner-openapi.yaml): especificación legible por herramientas y generadores de SDK.
 
+La entrada pública para equipos técnicos se publica en `/developers`. El portal,
+este índice y `info.version` del OpenAPI deben actualizarse juntos en cada release.
+El contrato importable queda disponible en `/v1/partner-docs/openapi.yaml` sin
+autenticación porque no contiene credenciales ni detalles internos de operación.
+
 ## Convenciones
 
 - Base URL: `https://api.lucilamon.com/v1/partner`

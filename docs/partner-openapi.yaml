@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LucilaMon Partner API
-  version: 1.2.0
+  version: 1.3.0
   description: API servidor-a-servidor para eventos y cargas de fotografías.
 servers:
   - url: https://api.lucilamon.com/v1/partner
@@ -406,6 +406,11 @@ paths:
   /events/{eventId}/analytics:
     parameters: [{ $ref: '#/components/parameters/EventId' }]
     get: { summary: Analytics del evento, responses: { '200': { description: Metricas consolidadas } } }
+  /analytics/events:
+    get: { summary: Resumen analítico de los eventos del workspace, responses: { '200': { description: Métricas por evento } } }
+  /events/{eventId}/exports/analytics:
+    parameters: [{ $ref: '#/components/parameters/EventId' }]
+    get: { summary: Exportar analítica del evento en CSV, responses: { '200': { description: CSV en data.content } } }
   /events/{eventId}/exports/photos:
     parameters: [{ $ref: '#/components/parameters/EventId' }]
     get: { summary: Exportar inventario CSV, responses: { '200': { description: CSV en data.content } } }

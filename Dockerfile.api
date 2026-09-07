@@ -5,6 +5,7 @@ RUN npm ci
 COPY nest-cli.json tsconfig.json ./
 COPY apps ./apps
 COPY packages ./packages
+COPY docs ./docs
 RUN npx prisma generate --schema apps/api/prisma/schema.prisma && npx nest build api
 
 FROM node:20-bookworm-slim AS runtime
@@ -16,6 +17,7 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build --chown=node:node /app/apps/api/src/assets ./apps/api/src/assets
+COPY --from=build --chown=node:node /app/docs ./docs
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD node -e "fetch('http://127.0.0.1:8080/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"

@@ -16,6 +16,9 @@ import { WorkspacesService } from '../workspaces/workspaces.service';
 import { PlanSubscriptionsService } from './plan-subscriptions.service';
 import { UserRole } from '@shared/types';
 
+/** Plan que representa a un contrato Empresa sin suscripción de pago propia. */
+const BILLING_BUSINESS_PLAN_SLUG = 'organizacion';
+
 export interface EffectivePlan {
   plan: Plan;
   subscription: Subscription | null;
@@ -97,6 +100,17 @@ export class BillingService {
     return plan;
   }
 
+  /**
+   * Plan que se atribuye a un espacio con contrato Empresa activo y sin
+   * suscripción de pago. Es el plan superior del catálogo; si no existe (seed
+   * incompleto) se devuelve null y el espacio se queda en su plan actual.
+   */
+  private async businessPlan(): Promise<Plan | null> {
+    return this.prisma.plan.findFirst({
+      where: { slug: BILLING_BUSINESS_PLAN_SLUG, isActive: true },
+    });
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Plan efectivo de un espacio
   // ───────────────────────────────────────────────────────────────────────────
@@ -117,16 +131,25 @@ export class BillingService {
     // bloquear el espacio: las fotos ya vendidas siguen siendo accesibles.
     const grantIsCurrent = !subscription?.adminGrantedUntil || subscription.adminGrantedUntil > new Date();
     const active = subscription && subscription.status === 'ACTIVE' && grantIsCurrent ? subscription : null;
-    const plan = active ? active.plan : await this.defaultPlan();
+
+    const enterprise = workspace.enterpriseAccount;
+    const enterpriseActive = Boolean(enterprise && ['PILOT', 'ACTIVE'].includes(enterprise.status)
+      && (!enterprise.contractStart || enterprise.contractStart <= new Date())
+      && (!enterprise.contractEnd || enterprise.contractEnd > new Date()));
+
+    let plan = active ? active.plan : await this.defaultPlan();
+    // Un contrato Empresa activo lleva implícito, como mínimo, el plan superior:
+    // comisión, cupo y funciones, aunque el cliente no tenga suscripción de
+    // pago. Si ya paga un plan concreto, se respeta el suyo.
+    if (enterpriseActive && plan.isDefault) {
+      const businessPlan = await this.businessPlan();
+      if (businessPlan) plan = businessPlan;
+    }
 
     const blockBytes = plan.extraStorageBlockBytes ?? BigInt(0);
     const extraBytes = blockBytes * BigInt(active?.extraStorageBlocks ?? 0);
     const allowance = plan.includedStorageBytes + extraBytes;
     const used = workspace.storageBytesUsed;
-    const enterprise = workspace.enterpriseAccount;
-    const enterpriseActive = Boolean(enterprise && ['PILOT', 'ACTIVE'].includes(enterprise.status)
-      && (!enterprise.contractStart || enterprise.contractStart <= new Date())
-      && (!enterprise.contractEnd || enterprise.contractEnd > new Date()));
 
     return {
       plan,
