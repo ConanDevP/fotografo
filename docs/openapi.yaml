@@ -738,17 +738,21 @@ components:
 
     EventPricing:
       type: object
-      required: [singlePhoto, currency]
+      required: [singlePhoto, pack5, pack10, allPhotos, currency]
       properties:
         singlePhoto:
           type: integer
-          description: Price in cents
+          minimum: 150
+          description: Precio en unidad menor; mínimo 1.50 USD/EUR
         pack5:
           type: integer
+          minimum: 150
         pack10:
           type: integer
+          minimum: 150
         allPhotos:
           type: integer
+          minimum: 150
         currency:
           type: string
           enum: [USD, EUR, GBP]
