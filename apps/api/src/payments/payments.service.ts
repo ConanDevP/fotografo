@@ -20,6 +20,7 @@ import {
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { StripeGatewayService } from './gateways/stripe-gateway.service';
 import Stripe from 'stripe';
+import { pricingPolicyIssue } from '@shared/pricing-policy';
 
 @Injectable()
 export class PaymentsService {
@@ -115,7 +116,7 @@ export class PaymentsService {
     }
 
     const pricing = event.pricing as unknown as EventPricing;
-    if (!pricing || !this.isValidPricing(pricing)) {
+    if (!pricing || !this.isValidPricing(pricing) || pricingPolicyIssue(pricing)) {
       throw new BadRequestException({
         code: ERROR_CODES.VALIDATION_ERROR,
         message: 'El evento no tiene precios válidos configurados',

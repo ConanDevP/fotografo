@@ -13,6 +13,7 @@ import { InviteContributorDto } from './dto/invite-contributor.dto';
 import { ReviewPhotoDto } from './dto/review-photo.dto';
 import { QueueService } from '../common/services/queue.service';
 import { MailerService } from '../common/services/mailer.service';
+import { pricingPolicyIssue } from '@shared/pricing-policy';
 
 @Injectable()
 export class EventsService {
@@ -708,6 +709,16 @@ export class EventsService {
     }
     if (typeof pricing.currency !== 'string' || !/^[A-Z]{3}$/.test(pricing.currency.toUpperCase())) {
       throw new BadRequestException('La moneda debe usar un código ISO de tres letras');
+    }
+    const issue = pricingPolicyIssue(pricing as any);
+    if (issue) {
+      throw new BadRequestException({
+        code: issue.code,
+        message: issue.message,
+        field: issue.field,
+        minimumCents: issue.minimumCents,
+        currency: String(pricing.currency).toUpperCase(),
+      });
     }
   }
 
