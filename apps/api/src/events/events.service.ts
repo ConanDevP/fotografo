@@ -272,10 +272,11 @@ export class EventsService {
     const event = await this.findOne(id);
     const workspaceRole = access.workspace?.members[0]?.role ?? null;
     const contributor = access.contributors[0] ?? null;
+    const managerRoles: WorkspaceRole[] = [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.EDITOR];
     const canManage =
       userRole === UserRole.ADMIN
       || access.ownerId === userId
-      || (!!workspaceRole && [WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.EDITOR].includes(workspaceRole))
+      || (!!workspaceRole && managerRoles.includes(workspaceRole))
       || (!!contributor && ['EDITOR', 'EVENT_MANAGER'].includes(contributor.role));
     return {
       ...event,
