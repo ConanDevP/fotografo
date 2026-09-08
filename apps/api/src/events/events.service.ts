@@ -701,7 +701,7 @@ export class EventsService {
       throw new BadRequestException('La configuración de precios no es válida');
     }
     const pricing = value as Record<string, unknown>;
-    for (const field of ['singlePhoto', 'pack5', 'pack10', 'allPhotos']) {
+    for (const field of ['singlePhoto', 'pack5', 'pack10']) {
       const amount = pricing[field];
       if (!Number.isInteger(amount) || Number(amount) < 1 || Number(amount) > 100_000_000) {
         throw new BadRequestException(`El precio ${field} debe ser un entero positivo en centavos`);

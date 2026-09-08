@@ -5,7 +5,6 @@ const valid = {
   singlePhoto: 150,
   pack5: 675,
   pack10: 1200,
-  allPhotos: 1800,
 };
 
 describe('pricingPolicyIssue', () => {

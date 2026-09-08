@@ -79,7 +79,6 @@ export interface EventPricing {
   singlePhoto: number; // Precio en centavos
   pack5: number;       // Pack de 5 fotos
   pack10: number;      // Pack de 10 fotos  
-  allPhotos: number;   // Todas las fotos del dorsal
   currency: string;    // USD, EUR, etc.
 }
 

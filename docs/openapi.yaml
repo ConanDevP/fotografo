@@ -738,7 +738,7 @@ components:
 
     EventPricing:
       type: object
-      required: [singlePhoto, pack5, pack10, allPhotos, currency]
+      required: [singlePhoto, pack5, pack10, currency]
       properties:
         singlePhoto:
           type: integer
@@ -748,9 +748,6 @@ components:
           type: integer
           minimum: 150
         pack10:
-          type: integer
-          minimum: 150
-        allPhotos:
           type: integer
           minimum: 150
         currency:
@@ -1121,7 +1118,7 @@ components:
                 description: Required if type is PHOTO
               packageType:
                 type: string
-                enum: [pack5, pack10, allPhotos]
+                enum: [pack5, pack10]
                 description: Required if type is PACKAGE
 
     OrderResult:

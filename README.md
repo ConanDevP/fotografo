@@ -185,7 +185,6 @@ POST /v1/events
   "pricing": {
     "singlePhoto": 500,
     "pack5": 2000,
-    "allPhotos": 3500,
     "currency": "EUR"
   }
 }

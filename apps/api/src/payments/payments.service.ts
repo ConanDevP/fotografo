@@ -132,7 +132,7 @@ export class PaymentsService {
     const validatedItems: Array<{
       type: ItemType;
       photoId: string;
-      packageType?: 'pack5' | 'pack10' | 'allPhotos';
+      packageType?: 'pack5' | 'pack10';
       priceCents: number;
       beneficiaryWorkspaceId: string | null;
     }> = [];
@@ -173,7 +173,6 @@ export class PaymentsService {
       const packagePrices = {
         pack5: pricing.pack5,
         pack10: pricing.pack10,
-        allPhotos: pricing.allPhotos,
       };
       const packageType = item.packageType;
       if (!packageType || packagePrices[packageType] === undefined) {
@@ -183,11 +182,9 @@ export class PaymentsService {
       if (usedPhotoIds.size + photoIds.length > 100) {
         throw new BadRequestException('Un pedido no puede contener más de 100 fotografías');
       }
-      const expectedCount = packageType === 'pack5' ? 5 : packageType === 'pack10' ? 10 : null;
-      if (photoIds.length === 0 || (expectedCount !== null && photoIds.length !== expectedCount)) {
-        throw new BadRequestException(
-          expectedCount ? `El paquete ${packageType} requiere exactamente ${expectedCount} fotos` : 'Selecciona al menos una foto para el paquete',
-        );
+      const expectedCount = packageType === 'pack5' ? 5 : 10;
+      if (photoIds.length !== expectedCount) {
+        throw new BadRequestException(`El paquete ${packageType} requiere exactamente ${expectedCount} fotos`);
       }
       if (photoIds.some(photoId => usedPhotoIds.has(photoId))) {
         throw new BadRequestException('Una foto no puede aparecer más de una vez en el pedido');
@@ -203,15 +200,6 @@ export class PaymentsService {
       });
       if (photos.length !== photoIds.length) {
         throw new BadRequestException('El paquete contiene fotos inválidas o no publicadas');
-      }
-
-      // `allPhotos` significa "todas las fotos de un dorsal", pero no se estaba
-      // comprobando: aceptaba cualquier cantidad de fotografías sueltas al
-      // precio del lote completo. Con 7,99 $ la unidad y 95,88 $ el lote, cien
-      // fotografías cualesquiera costaban 95,88 en vez de 799. Cualquiera que
-      // llamara a la API directamente pagaba una novena parte.
-      if (packageType === 'allPhotos') {
-        await this.assertCoversWholeSet(eventId, photoIds);
       }
 
       const packagePrice = packagePrices[packageType];
@@ -2112,7 +2100,7 @@ export class PaymentsService {
   }
 
   private isValidPricing(pricing: EventPricing) {
-    return ['singlePhoto', 'pack5', 'pack10', 'allPhotos'].every(field => {
+    return ['singlePhoto', 'pack5', 'pack10'].every(field => {
       const amount = pricing[field as keyof EventPricing];
       return typeof amount === 'number' && Number.isInteger(amount) && amount > 0 && amount <= 100_000_000;
     }) && typeof pricing.currency === 'string' && /^[A-Z]{3}$/.test(pricing.currency.toUpperCase());

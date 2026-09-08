@@ -535,13 +535,12 @@ components:
         bibRules: { type: object, additionalProperties: true }
         pricing:
           type: object
-          required: [singlePhoto, pack5, pack10, allPhotos, currency]
+          required: [singlePhoto, pack5, pack10, currency]
           description: Importes en la unidad menor de la moneda; cada precio debe ser al menos 150 (1.50 USD/EUR).
           properties:
             singlePhoto: { type: integer, minimum: 150 }
             pack5: { type: integer, minimum: 150 }
             pack10: { type: integer, minimum: 150 }
-            allPhotos: { type: integer, minimum: 150 }
             currency: { type: string, pattern: '^[A-Z]{3}$' }
     UploadFile:
       type: object

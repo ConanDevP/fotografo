@@ -171,7 +171,6 @@ Authorization: Bearer <token>
     "singlePhoto": 500,
     "pack5": 2000,
     "pack10": 3500,
-    "allPhotos": 5000,
     "currency": "EUR"
   }
 }
@@ -1140,7 +1139,6 @@ ORDER BY pb.created_at DESC;
     "singlePhoto": 500,    // 5.00 EUR (centavos)
     "pack5": 2000,         // 20.00 EUR por 5 fotos
     "pack10": 3500,        // 35.00 EUR por 10 fotos
-    "allPhotos": 5000,     // 50.00 EUR todas del dorsal
     "currency": "EUR"      // USD, EUR, etc.
   }
 }

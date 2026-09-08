@@ -1,4 +1,4 @@
-import { IsBoolean, ArrayMaxSize, ArrayMinSize, IsArray, IsEmail, IsEnum, IsOptional, IsString, IsUrl, IsUUID, Matches, MaxLength, ValidateNested } from 'class-validator';
+import { IsBoolean, ArrayMaxSize, ArrayMinSize, IsArray, IsEmail, IsEnum, IsIn, IsOptional, IsString, IsUrl, IsUUID, Matches, MaxLength, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ItemType } from '@shared/types';
 import { PaymentGateway } from '@shared/payment-types';
@@ -13,7 +13,8 @@ class OrderItemDto {
 
   @IsOptional()
   @IsString({ message: 'Tipo de paquete debe ser texto' })
-  packageType?: 'pack5' | 'pack10' | 'allPhotos';
+  @IsIn(['pack5', 'pack10'], { message: 'Tipo de paquete debe ser pack5 o pack10' })
+  packageType?: 'pack5' | 'pack10';
 
   @IsOptional()
   @IsArray()

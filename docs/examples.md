@@ -57,7 +57,6 @@ curl -X POST http://localhost:8080/v1/events \
       "singlePhoto": 350,
       "pack5": 1500,
       "pack10": 2500,
-      "allPhotos": 4000,
       "currency": "EUR"
     }
   }'
@@ -79,7 +78,6 @@ curl -X POST http://localhost:8080/v1/events \
     "pricing": {
       "singlePhoto": 350,
       "pack5": 1500,
-      "allPhotos": 4000,
       "currency": "EUR"
     }
   }
@@ -309,7 +307,6 @@ curl -X POST http://localhost:8080/v1/events \
     "pricing": {
       "singlePhoto": 400,
       "pack5": 1800,
-      "allPhotos": 3000,
       "currency": "EUR"
     }
   }'

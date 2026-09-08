@@ -4,7 +4,6 @@ export type PricingPolicyInput = {
   singlePhoto: number;
   pack5: number;
   pack10: number;
-  allPhotos: number;
   currency: string;
 };
 
@@ -21,11 +20,10 @@ export function pricingPolicyIssue(pricing: PricingPolicyInput): PricingPolicyIs
     singlePhoto: MIN_PHOTO_PRICE_CENTS,
     pack5: MIN_PHOTO_PRICE_CENTS,
     pack10: MIN_PHOTO_PRICE_CENTS,
-    allPhotos: MIN_PHOTO_PRICE_CENTS,
   } as const;
   for (const field of Object.keys(minimums) as Array<keyof typeof minimums>) {
     if (pricing[field] < minimums[field]) {
-      const labels = { singlePhoto: 'La foto individual', pack5: 'El pack de 5', pack10: 'El pack de 10', allPhotos: 'El paquete de todas las fotos' };
+      const labels = { singlePhoto: 'La foto individual', pack5: 'El pack de 5', pack10: 'El pack de 10' };
       return {
         field,
         minimumCents: minimums[field],
@@ -42,9 +40,6 @@ export function pricingPolicyIssue(pricing: PricingPolicyInput): PricingPolicyIs
   }
   if (pricing.pack10 > pricing.pack5 * 2) {
     return { field: 'pack10', code: 'PACKAGE_ORDER_INVALID', message: 'El pack de 10 debe tener un precio por foto igual o menor que el pack de 5' };
-  }
-  if (pricing.allPhotos < pricing.pack10) {
-    return { field: 'allPhotos', code: 'PACKAGE_ORDER_INVALID', message: 'Todas las fotos no puede costar menos que el pack de 10' };
   }
   return null;
 }

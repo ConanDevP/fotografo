@@ -28,11 +28,6 @@ export class EventPricingDto {
   @Max(100_000_000)
   pack10: number;
 
-  @IsInt()
-  @Min(1)
-  @Max(100_000_000)
-  allPhotos: number;
-
   @IsString()
   @Transform(({ value }) => typeof value === 'string' ? value.trim().toUpperCase() : value)
   @Matches(/^[A-Z]{3}$/)
