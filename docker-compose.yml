@@ -125,7 +125,6 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/v1}
         NEXT_PUBLIC_APP_HOSTS: ${NEXT_PUBLIC_APP_HOSTS:-lucilamon.com,www.lucilamon.com}
-        NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET: ${NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET:-domains.lucilamon.com}
     restart: unless-stopped
     environment:
       PORT: 3000
@@ -133,7 +132,6 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/v1}
       INTERNAL_API_URL: http://api:8080/v1
       NEXT_PUBLIC_APP_HOSTS: ${NEXT_PUBLIC_APP_HOSTS:-lucilamon.com,www.lucilamon.com}
-      NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET: ${NEXT_PUBLIC_CUSTOM_DOMAIN_TARGET:-domains.lucilamon.com}
     expose:
       - "3000"
     depends_on:

@@ -353,6 +353,12 @@ export class PartnerApiController {
     return { data: await this.partner.verifyWorkspaceDomain(req.partner) };
   }
 
+  @Delete('workspace/domain')
+  @RequirePartnerScopes('workspace:write')
+  async disconnectWorkspaceDomain(@Req() req: PartnerRequest): Promise<ApiResponse> {
+    return { data: await this.partner.disconnectWorkspaceDomain(req.partner) };
+  }
+
   @Get('events/:eventId/search/bib')
   @RequirePartnerScopes('search:bib')
   async searchByBib(@Req() req: PartnerRequest, @Param('eventId') eventId: string, @Query() query: PartnerBibSearchQueryDto): Promise<ApiResponse> {

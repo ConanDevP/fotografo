@@ -135,7 +135,8 @@ prioridad 0–100 y si es obligatorio en descargas gratuitas.
 | `PATCH` | `/workspace` | `workspace:write` | Nombre, slug, dominio, contacto, redes y tema |
 | `POST` | `/workspace/assets/{kind}` | `workspace:write` | Sube `logo` o `cover`, máximo 5 MB |
 | `DELETE` | `/workspace/assets/{kind}` | `workspace:write` | Elimina activo de marca |
-| `POST` | `/workspace/domain/verify` | `workspace:write` | Comprueba la configuración del dominio |
+| `POST` | `/workspace/domain/verify` | `workspace:write` | Registra el dominio en Railway y devuelve DNS, certificado y estado real |
+| `DELETE` | `/workspace/domain` | `workspace:write` | Desconecta el dominio de Railway de forma idempotente; la URL canónica continúa activa |
 
 ### Webhooks
 

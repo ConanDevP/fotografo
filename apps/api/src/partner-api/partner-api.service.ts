@@ -518,6 +518,15 @@ export class PartnerApiService {
     return result;
   }
 
+  async disconnectWorkspaceDomain(principal: PartnerPrincipal) {
+    const result = await this.workspaces.disconnectCustomDomain(principal.workspaceId, principal.actorUserId);
+    await this.emit(principal.workspaceId, 'workspace.brand.updated', {
+      workspaceId: principal.workspaceId,
+      domainDisconnected: true,
+    });
+    return result;
+  }
+
   async searchByBib(principal: PartnerPrincipal, eventId: string, bib: string, limit: number, cursor?: string) {
     await this.assertEventInWorkspace(principal.workspaceId, eventId);
     return this.search.searchPhotosByBib(eventId, bib, limit, cursor, true);

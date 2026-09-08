@@ -120,9 +120,21 @@ export class WorkspacesController {
   }
 
   @UseGuards(AuthGuard('jwt'))
+  @Get(':workspaceId/domain/status')
+  async domainStatus(@Param('workspaceId') workspaceId: string, @Req() req: any): Promise<ApiResponse> {
+    return { data: await this.workspaces.customDomainStatus(workspaceId, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
   @Post(':workspaceId/domain/verify')
   async verifyDomain(@Param('workspaceId') workspaceId: string, @Req() req: any): Promise<ApiResponse> {
     return { data: await this.workspaces.verifyCustomDomain(workspaceId, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Delete(':workspaceId/domain')
+  async disconnectDomain(@Param('workspaceId') workspaceId: string, @Req() req: any): Promise<ApiResponse> {
+    return { data: await this.workspaces.disconnectCustomDomain(workspaceId, req.user.id) };
   }
 
   @UseGuards(AuthGuard('jwt'))

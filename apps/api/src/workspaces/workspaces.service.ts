@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, WorkspaceRole } from '@prisma/client';
@@ -15,10 +16,10 @@ import { UpdateBrandThemeDto } from './dto/update-brand-theme.dto';
 import { AddWorkspaceMemberDto } from './dto/add-workspace-member.dto';
 import { UpdateWorkspaceMemberDto } from './dto/update-workspace-member.dto';
 import { randomBytes } from 'crypto';
-import { resolveTxt } from 'dns/promises';
 import { ConfigService } from '@nestjs/config';
 import { StorageService } from '../common/services/storage.service';
 import { BillingService } from '../billing/billing.service';
+import { RailwayDomainsService } from './railway-domains.service';
 
 const MANAGER_ROLES: WorkspaceRole[] = [
   WorkspaceRole.OWNER,
@@ -28,6 +29,8 @@ const MANAGER_ROLES: WorkspaceRole[] = [
 
 @Injectable()
 export class WorkspacesService {
+  private readonly logger = new Logger(WorkspacesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -36,6 +39,7 @@ export class WorkspacesService {
     // workspaces necesita facturación para saber qué permite ese plan.
     @Inject(forwardRef(() => BillingService))
     private readonly billing: BillingService,
+    private readonly railwayDomains: RailwayDomainsService,
   ) {}
 
   async create(dto: CreateWorkspaceDto, userId: string) {
@@ -43,6 +47,8 @@ export class WorkspacesService {
     const customDomain = dto.customDomain ? this.normalizeCustomDomain(dto.customDomain) : undefined;
     if (customDomain) await this.assertDomainAvailable(customDomain);
     const brand = dto.brand || {};
+
+    if (customDomain) await this.railwayDomains.ensure(customDomain);
 
     return this.prisma.$transaction(async tx => {
       return tx.workspace.create({
@@ -53,7 +59,6 @@ export class WorkspacesService {
           logoUrl: dto.logoUrl,
           coverUrl: dto.coverUrl,
           customDomain,
-          customDomainVerificationToken: customDomain ? randomBytes(18).toString('hex') : undefined,
           contactEmail: dto.contactEmail,
           website: dto.website,
           instagram: dto.instagram,
@@ -233,6 +238,8 @@ export class WorkspacesService {
     const { brand, slug: requestedSlug, customDomain: requestedDomain, ...workspaceData } = dto;
     const data: Prisma.WorkspaceUpdateInput = { ...workspaceData };
 
+    let previousDomain: string | null = null;
+    let nextDomain: string | null | undefined;
     if (requestedSlug) data.slug = await this.generateUniqueSlug(requestedSlug, workspaceId);
     if (requestedDomain !== undefined) {
       const current = await this.prisma.workspace.findUnique({
@@ -240,6 +247,8 @@ export class WorkspacesService {
         select: { customDomain: true },
       });
       const customDomain = requestedDomain ? this.normalizeCustomDomain(requestedDomain) : null;
+      previousDomain = current?.customDomain || null;
+      nextDomain = customDomain;
       if (customDomain) {
         // Solo al ponerlo: si el plan baja, el dominio ya configurado se
         // respeta en lugar de dejar la landing inaccesible sin avisar.
@@ -247,15 +256,16 @@ export class WorkspacesService {
           await this.billing.assertPlanAllows(workspaceId, 'allowsCustomDomain');
         }
         await this.assertDomainAvailable(customDomain, workspaceId);
+        if (customDomain !== current?.customDomain) await this.railwayDomains.ensure(customDomain);
       }
       data.customDomain = customDomain;
       if (customDomain !== current?.customDomain) {
         data.customDomainVerifiedAt = null;
-        data.customDomainVerificationToken = customDomain ? randomBytes(18).toString('hex') : null;
+        data.customDomainVerificationToken = null;
       }
     }
 
-    return this.prisma.$transaction(async tx => {
+    const updated = await this.prisma.$transaction(async tx => {
       if (brand) {
         const brandData = brand as Prisma.InputJsonObject;
         await tx.brandTheme.upsert({
@@ -270,6 +280,12 @@ export class WorkspacesService {
         include: this.workspaceInclude(),
       });
     });
+    if (previousDomain && nextDomain !== undefined && previousDomain !== nextDomain) {
+      await this.railwayDomains.remove(previousDomain).catch(error => {
+        this.logger.warn(`No se pudo retirar de Railway el dominio anterior ${previousDomain}: ${error instanceof Error ? error.message : 'error desconocido'}`);
+      });
+    }
+    return updated;
   }
 
   async updateBrand(workspaceId: string, dto: UpdateBrandThemeDto, userId: string) {
@@ -388,27 +404,55 @@ export class WorkspacesService {
     await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     const workspace = await this.prisma.workspace.findUnique({
       where: { id: workspaceId },
-      select: { customDomain: true, customDomainVerificationToken: true },
+      select: { customDomain: true },
     });
-    if (!workspace?.customDomain || !workspace.customDomainVerificationToken) {
+    if (!workspace?.customDomain) {
       throw new BadRequestException('Configura un dominio antes de verificarlo');
     }
+    await this.railwayDomains.ensure(workspace.customDomain);
+    return this.customDomainStatus(workspaceId, userId);
+  }
 
-    let records: string[][];
-    try {
-      records = await resolveTxt(`_lucilamon.${workspace.customDomain}`);
-    } catch {
-      throw new BadRequestException('No encontramos el registro TXT de verificación');
-    }
-    const expected = `lucilamon-verification=${workspace.customDomainVerificationToken}`;
-    if (!records.some(parts => parts.join('') === expected)) {
-      throw new BadRequestException('El registro TXT todavía no coincide con el token del espacio');
-    }
-    return this.prisma.workspace.update({
+  async customDomainStatus(workspaceId: string, userId: string) {
+    await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const workspace = await this.prisma.workspace.findUnique({
       where: { id: workspaceId },
-      data: { customDomainVerifiedAt: new Date() },
       select: { customDomain: true, customDomainVerifiedAt: true },
     });
+    if (!workspace?.customDomain) return null;
+    const setup = await this.railwayDomains.status(workspace.customDomain);
+    const shouldBeVerified = setup?.state === 'ACTIVE';
+    let verifiedAt = workspace.customDomainVerifiedAt;
+    if (shouldBeVerified && !verifiedAt) verifiedAt = new Date();
+    if (!shouldBeVerified && verifiedAt) verifiedAt = null;
+    if (verifiedAt !== workspace.customDomainVerifiedAt) {
+      await this.prisma.workspace.update({ where: { id: workspaceId }, data: { customDomainVerifiedAt: verifiedAt } });
+    }
+    return setup ? { ...setup, verifiedAt } : null;
+  }
+
+  async disconnectCustomDomain(workspaceId: string, userId: string) {
+    await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const workspace = await this.prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { customDomain: true },
+    });
+    if (!workspace) throw new NotFoundException('Espacio no encontrado');
+    if (!workspace.customDomain) return { disconnected: true, domain: null };
+
+    const domain = workspace.customDomain;
+    // Primero se retira el enrutamiento público. Si Railway falla, conservamos
+    // la asociación local para que el usuario pueda reintentar sin un dominio huérfano.
+    await this.railwayDomains.remove(domain);
+    await this.prisma.workspace.updateMany({
+      where: { id: workspaceId, customDomain: domain },
+      data: {
+        customDomain: null,
+        customDomainVerifiedAt: null,
+        customDomainVerificationToken: null,
+      },
+    });
+    return { disconnected: true, domain: null };
   }
 
   async addMember(workspaceId: string, dto: AddWorkspaceMemberDto, userId: string) {

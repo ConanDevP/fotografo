@@ -461,8 +461,21 @@ paths:
             schema: { type: object, required: [image], properties: { image: { type: string, format: binary } } }
       responses: { '201': { description: Activo actualizado } }
     delete: { summary: Eliminar logo o portada, responses: { '200': { description: Activo eliminado } } }
+  /workspace/domain:
+    delete:
+      summary: Desconectar el dominio white-label de Railway
+      description: Es idempotente. La landing continúa disponible bajo lucilamon.com/s/{slug}; los registros del proveedor DNS se eliminan manualmente.
+      responses:
+        '200': { description: Dominio desconectado }
   /workspace/domain/verify:
-    post: { summary: Verificar DNS del dominio white-label, responses: { '201': { description: Estado de verificacion } } }
+    post:
+      summary: Registrar o comprobar el dominio white-label en Railway
+      responses:
+        '201':
+          description: DNS requerido y estado de certificado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomDomainSetupEnvelope' }
 components:
   securitySchemes:
     PartnerApiKey:
@@ -642,6 +655,31 @@ components:
         facebook: { type: string, format: uri, nullable: true }
         isPublished: { type: boolean }
         brand: { type: object, additionalProperties: true }
+    CustomDomainSetupEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [provider, providerId, domain, state, certificateStatus, dnsRecords]
+          properties:
+            provider: { type: string, enum: [RAILWAY] }
+            providerId: { type: string }
+            domain: { type: string }
+            state: { type: string, enum: [PENDING_DNS, PENDING_CERTIFICATE, ACTIVE, FAILED] }
+            certificateStatus: { type: string }
+            verifiedAt: { type: string, format: date-time, nullable: true }
+            dnsRecords:
+              type: array
+              items:
+                type: object
+                required: [type, name, value, status]
+                properties:
+                  type: { type: string, enum: [CNAME, TXT] }
+                  name: { type: string }
+                  value: { type: string }
+                  status: { type: string }
+                  currentValue: { type: string, nullable: true }
     SuccessEnvelope:
       type: object
       required: [data]

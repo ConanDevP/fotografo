@@ -44,6 +44,14 @@ export function validateEnvironment(config: Record<string, unknown>) {
   requireSecret('FACE_API_KEY');
   requireSecret('PARTNER_WEBHOOK_ENCRYPTION_KEY');
   requireValue('GEMINI_API_KEY');
+  requireSecret('RAILWAY_API_TOKEN', 20);
+  requireValue('RAILWAY_PROJECT_ID');
+  requireValue('RAILWAY_ENVIRONMENT_ID');
+  requireValue('RAILWAY_FRONTEND_SERVICE_ID');
+  const railwayPort = Number(text('RAILWAY_FRONTEND_PORT') || '3000');
+  if (!Number.isInteger(railwayPort) || railwayPort < 1 || railwayPort > 65535) {
+    errors.push('RAILWAY_FRONTEND_PORT debe ser un puerto válido');
+  }
 
   const privateKey = normalizePem(config.JWT_PRIVATE_KEY);
   const publicKey = normalizePem(config.JWT_PUBLIC_KEY);
