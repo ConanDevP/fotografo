@@ -22,6 +22,7 @@ export type CustomDomainSetup = {
 type RailwayDomain = {
   id: string;
   domain: string;
+  targetPort?: number | null;
   status?: {
     verificationToken?: string | null;
     certificateStatus?: string | null;
@@ -42,7 +43,23 @@ export class RailwayDomainsService {
 
   async ensure(domain: string): Promise<CustomDomainSetup> {
     const existing = await this.find(domain);
-    if (existing) return this.toSetup(existing);
+    const targetPort = this.targetPort();
+    if (existing) {
+      if (existing.targetPort !== targetPort) {
+        await this.graphql<{ customDomainUpdate: boolean }>(
+          `mutation customDomainUpdate($environmentId: String!, $id: String!, $targetPort: Int) {
+            customDomainUpdate(environmentId: $environmentId, id: $id, targetPort: $targetPort)
+          }`,
+          {
+            environmentId: this.required('RAILWAY_ENVIRONMENT_ID'),
+            id: existing.id,
+            targetPort,
+          },
+        );
+        existing.targetPort = targetPort;
+      }
+      return this.toSetup(existing);
+    }
 
     const availability = await this.graphql<{ customDomainAvailable: { available: boolean; message?: string } }>(
       `query customDomainAvailable($domain: String!) {
@@ -60,8 +77,7 @@ export class RailwayDomainsService {
       serviceId: this.required('RAILWAY_FRONTEND_SERVICE_ID'),
       domain,
     };
-    const targetPort = Number(this.config.get<string>('RAILWAY_FRONTEND_PORT', '3000'));
-    if (Number.isInteger(targetPort) && targetPort > 0) input.targetPort = targetPort;
+    input.targetPort = targetPort;
 
     const created = await this.graphql<{ customDomainCreate: RailwayDomain }>(
       `mutation customDomainCreate($input: CustomDomainCreateInput!) {
@@ -105,7 +121,7 @@ export class RailwayDomainsService {
     const result = await this.graphql<{ domains: { customDomains: RailwayDomain[] } }>(
       `query domains($projectId: String!, $environmentId: String!, $serviceId: String!) {
         domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) {
-          customDomains { id domain status { verificationToken certificateStatus dnsRecords { hostlabel requiredValue currentValue status } } }
+          customDomains { id domain targetPort status { verificationToken certificateStatus dnsRecords { hostlabel requiredValue currentValue status } } }
         }
       }`,
       {
@@ -135,9 +151,19 @@ export class RailwayDomainsService {
       records.push({ type: 'TXT', name: `_railway-verify.${item.domain}`, value: token, status: 'PENDING' });
     }
     const certificateStatus = String(status.certificateStatus || 'PENDING').toUpperCase();
-    const certificateValid = ['ISSUED', 'VALID', 'CERTIFICATE_STATUS_VALID'].includes(certificateStatus);
+    const certificateValid = [
+      'ISSUED',
+      'VALID',
+      'CERTIFICATE_STATUS_VALID',
+      'CERTIFICATE_STATUS_TYPE_VALID',
+    ].includes(certificateStatus);
+    const certificateFailed = [
+      'FAILED',
+      'CERTIFICATE_STATUS_FAILED',
+      'CERTIFICATE_STATUS_TYPE_FAILED',
+    ].includes(certificateStatus);
     const dnsValid = records.length > 0 && records.filter(record => record.type === 'CNAME').every(record => this.isDnsValid(record.status));
-    const state: CustomDomainSetup['state'] = certificateStatus === 'FAILED'
+    const state: CustomDomainSetup['state'] = certificateFailed
       ? 'FAILED'
       : certificateValid && dnsValid
         ? 'ACTIVE'
@@ -155,6 +181,14 @@ export class RailwayDomainsService {
   private required(name: string) {
     const value = this.config.get<string>(name)?.trim();
     if (!value) throw new ServiceUnavailableException('La integración de dominios personalizados no está configurada');
+    return value;
+  }
+
+  private targetPort() {
+    const value = Number(this.required('RAILWAY_FRONTEND_PORT'));
+    if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+      throw new ServiceUnavailableException('El puerto del frontend para dominios personalizados no es válido');
+    }
     return value;
   }
 

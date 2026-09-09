@@ -9,7 +9,7 @@ RAILWAY_API_TOKEN="token-secreto"
 RAILWAY_PROJECT_ID="uuid-del-proyecto"
 RAILWAY_ENVIRONMENT_ID="uuid-del-ambiente-production"
 RAILWAY_FRONTEND_SERVICE_ID="uuid-del-servicio-frontend"
-RAILWAY_FRONTEND_PORT="3000"
+RAILWAY_FRONTEND_PORT="8080"
 ```
 
 Estas variables pertenecen únicamente al backend. No deben comenzar con `NEXT_PUBLIC_` ni configurarse en el servicio frontend.

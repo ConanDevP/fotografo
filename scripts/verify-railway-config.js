@@ -69,6 +69,7 @@ fetch('https://backboard.railway.com/graphql/v2', {
             customDomains {
               id
               domain
+              targetPort
               status {
                 verificationToken
                 certificateStatus
@@ -92,6 +93,36 @@ fetch('https://backboard.railway.com/graphql/v2', {
       return;
     }
     console.log(`DOMAINS_QUERY=OK (${domainJson.data.domains.customDomains.length} configured)`);
+    for (const domain of domainJson.data.domains.customDomains) {
+      console.log(`DOMAIN=${domain.domain} PORT=${domain.targetPort ?? 'AUTO'} CERTIFICATE=${domain.status?.certificateStatus ?? 'UNKNOWN'}`);
+      if (process.argv.includes('--fix-ports') && domain.targetPort !== Number(process.env.RAILWAY_FRONTEND_PORT)) {
+        const updateResponse = await fetch('https://backboard.railway.com/graphql/v2', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${process.env.RAILWAY_API_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: `mutation updatePort($environmentId: String!, $id: String!, $targetPort: Int) {
+              customDomainUpdate(environmentId: $environmentId, id: $id, targetPort: $targetPort)
+            }`,
+            variables: {
+              environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+              id: domain.id,
+              targetPort: Number(process.env.RAILWAY_FRONTEND_PORT),
+            },
+          }),
+          signal: controller.signal,
+        });
+        const updateJson = await updateResponse.json();
+        if (updateJson.errors?.length) {
+          console.error(`PORT_FIX=ERROR (${domain.domain}: ${updateJson.errors[0].message})`);
+          process.exitCode = 6;
+        } else {
+          console.log(`PORT_FIX=OK (${domain.domain} -> ${process.env.RAILWAY_FRONTEND_PORT})`);
+        }
+      }
+    }
   })
   .catch((error) => {
     console.error(`REQUEST_ERROR=${error.name}: ${error.message}`);

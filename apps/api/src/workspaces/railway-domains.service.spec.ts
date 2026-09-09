@@ -8,7 +8,7 @@ describe('RailwayDomainsService', () => {
     RAILWAY_PROJECT_ID: 'project-id',
     RAILWAY_ENVIRONMENT_ID: 'environment-id',
     RAILWAY_FRONTEND_SERVICE_ID: 'frontend-id',
-    RAILWAY_FRONTEND_PORT: '3000',
+    RAILWAY_FRONTEND_PORT: '8080',
   });
   const service = new RailwayDomainsService(config);
 
@@ -68,5 +68,34 @@ describe('RailwayDomainsService', () => {
     await service.remove('fotos.cliente.com');
 
     expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it('corrige el puerto de un dominio existente', async () => {
+    const post = jest.spyOn(axios, 'post')
+      .mockResolvedValueOnce({ data: { data: { domains: { customDomains: [{
+        id: 'domain-id', domain: 'fotos.cliente.com', targetPort: 3000,
+        status: { certificateStatus: 'ISSUED', dnsRecords: [] },
+      }] } } } } as any)
+      .mockResolvedValueOnce({ data: { data: { customDomainUpdate: true } } } as any);
+
+    await service.ensure('fotos.cliente.com');
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][1]).toMatchObject({
+      variables: { environmentId: 'environment-id', id: 'domain-id', targetPort: 8080 },
+    });
+  });
+
+  it('reconoce el estado válido que Railway devuelve actualmente', async () => {
+    jest.spyOn(axios, 'post')
+      .mockResolvedValueOnce({ data: { data: { domains: { customDomains: [{ id: 'domain-id', domain: 'fotos.cliente.com' }] } } } } as any)
+      .mockResolvedValueOnce({ data: { data: { customDomain: {
+        id: 'domain-id', domain: 'fotos.cliente.com', status: {
+          certificateStatus: 'CERTIFICATE_STATUS_TYPE_VALID',
+          dnsRecords: [{ hostlabel: 'fotos', requiredValue: 'target.up.railway.app', status: 'DNS_RECORD_STATUS_PROPAGATED' }],
+        },
+      } } } } as any);
+
+    await expect(service.status('fotos.cliente.com')).resolves.toMatchObject({ state: 'ACTIVE' });
   });
 });
