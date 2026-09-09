@@ -85,6 +85,12 @@ export class PaymentsService {
         pricing: true,
         platformFeePercent: true,
         workspaceId: true,
+        workspace: {
+          select: {
+            customDomain: true,
+            customDomainVerifiedAt: true,
+          },
+        },
         commerceMode: true,
         organizerCommissionPercent: true,
         contributors: {
@@ -296,8 +302,12 @@ export class PaymentsService {
     // Usar pasarela real (PayPal, Stripe, MercadoPago)
     const finalCurrency = pricing.currency;
     const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
-    const finalReturnUrl = this.validateRedirectUrl(orderData.returnUrl, `${frontendUrl}/payment/success`);
-    const finalCancelUrl = this.validateRedirectUrl(orderData.cancelUrl, `${frontendUrl}/payment/cancel`);
+    const workspaceOrigin = event.workspace?.customDomain && event.workspace.customDomainVerifiedAt
+      ? `https://${event.workspace.customDomain}`
+      : undefined;
+    const eventOrigins = workspaceOrigin ? [workspaceOrigin] : [];
+    const finalReturnUrl = this.validateRedirectUrl(orderData.returnUrl, `${frontendUrl}/payment/success`, eventOrigins);
+    const finalCancelUrl = this.validateRedirectUrl(orderData.cancelUrl, `${frontendUrl}/payment/cancel`, eventOrigins);
 
     const platformFeePercent = Number(event.platformFeePercent || 0);
     const transferGroup = `lucilamon_order_${order.id}`;
@@ -1205,12 +1215,12 @@ export class PaymentsService {
     }
   }
 
-  private validateRedirectUrl(candidate: string | undefined, fallback: string) {
+  private validateRedirectUrl(candidate: string | undefined, fallback: string, additionalOrigins: string[] = []) {
     if (!candidate) return fallback;
     const allowed = new Set<string>();
     const frontendUrl = this.configService.get('FRONTEND_URL');
     const corsOrigins = this.configService.get('CORS_ORIGINS');
-    for (const value of [frontendUrl, ...(corsOrigins ? corsOrigins.split(',') : [])]) {
+    for (const value of [frontendUrl, ...(corsOrigins ? corsOrigins.split(',') : []), ...additionalOrigins]) {
       if (!value) continue;
       try { allowed.add(new URL(value.trim()).origin); } catch { /* invalid configuration is ignored */ }
     }
@@ -1230,6 +1240,13 @@ export class PaymentsService {
         eventId: true,
         guestEmail: true,
         user: { select: { email: true } },
+        event: {
+          select: {
+            workspace: {
+              select: { customDomain: true, customDomainVerifiedAt: true },
+            },
+          },
+        },
       },
     });
     const email = order?.user?.email || order?.guestEmail;
@@ -1242,6 +1259,9 @@ export class PaymentsService {
         email,
         orderId: order.id,
         downloadToken: this.createPaidAccessToken(order.id),
+        storefrontUrl: order.event?.workspace?.customDomain && order.event.workspace.customDomainVerifiedAt
+          ? `https://${order.event.workspace.customDomain}`
+          : undefined,
       },
       0,
       `order-confirmation-${order.id}`,

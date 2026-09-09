@@ -143,6 +143,7 @@ export interface SendBibEmailJob {
   rightsTerms?: string;
   orderId?: string;
   downloadToken?: string;
+  storefrontUrl?: string;
 }
 
 export interface ReprocessPhotoJob {

@@ -46,7 +46,9 @@ export class SendBibEmailProcessor extends WorkerHost {
       });
       if (!event) throw new Error(`Evento ${eventId} no encontrado`);
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const downloadUrl = new URL(`/download/${job.data.orderId}`, frontendUrl);
+      const downloadUrl = job.data.storefrontUrl
+        ? new URL(`/pago?orderId=${encodeURIComponent(job.data.orderId)}`, job.data.storefrontUrl)
+        : new URL(`/download/${job.data.orderId}`, frontendUrl);
       downloadUrl.hash = new URLSearchParams({ token: job.data.downloadToken }).toString();
       await this.mailService.sendOrderConfirmation(
         email,
