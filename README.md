@@ -297,15 +297,11 @@ LOG_LEVEL="warn"
 
 ## 🤝 **Contribuir**
 
-1. Fork del proyecto
-2. Crear feature branch (`git checkout -b feature/nueva-funcionalidad`)
-3. Commit changes (`git commit -m 'Agregar nueva funcionalidad'`)
-4. Push to branch (`git push origin feature/nueva-funcionalidad`)
-5. Abrir Pull Request
+Software propietario de distribución cerrada. No se aceptan forks ni pull requests externos; los cambios se gestionan internamente por el equipo/licenciante.
 
 ## 📄 **Licencia**
 
-Este proyecto está bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) para detalles.
+Software propietario. Todos los derechos reservados. El uso, copia, modificación o distribución de este código requiere una licencia comercial vigente otorgada por el titular — ver el archivo [LICENSE](LICENSE). Este proyecto **no** está bajo licencia MIT.
 
 ---
 
