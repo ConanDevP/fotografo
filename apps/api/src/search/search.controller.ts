@@ -5,14 +5,17 @@ import {
   Param,
   Query,
   Body,
+  Res,
   ParseIntPipe,
   DefaultValuePipe,
   BadRequestException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
 
 import { SearchService } from './search.service';
 import { FaceSearchService } from './face-search.service';
+import { ShareCardService } from './share-card.service';
 import { SubscribeToBibDto } from './dto/subscribe-to-bib.dto';
 import { SendPhotosDto } from './dto/send-photos.dto';
 import { FaceSearchDto } from './dto/face-search.dto';
@@ -25,6 +28,7 @@ export class SearchController {
   constructor(
     private readonly searchService: SearchService,
     private readonly faceSearchService: FaceSearchService,
+    private readonly shareCardService: ShareCardService,
   ) {}
 
   @Get('photos')
@@ -163,6 +167,18 @@ export class SearchController {
         optimized: true,
       },
     };
+  }
+
+  @Get('share-card/:photoId')
+  @Throttle(RATE_LIMITS.SEARCH, 60)
+  async getShareCard(
+    @Param('eventId') eventId: string,
+    @Param('photoId') photoId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const buffer = await this.shareCardService.buildShareCard(eventId, photoId);
+    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=3600' });
+    res.send(buffer);
   }
 
   @Get('face-stats')

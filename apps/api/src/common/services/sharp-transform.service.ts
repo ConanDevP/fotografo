@@ -199,6 +199,158 @@ export class SharpTransformService implements OnModuleInit {
     return image.composite(composites).jpeg({ quality: 92 }).toBuffer();
   }
 
+  // ===================================================
+  // SHARE CARD - vertical (9:16) branded card for social sharing
+  // ===================================================
+  async generateShareCard(
+    imageBuffer: Buffer,
+    faceBbox: [number, number, number, number] | null,
+    options: {
+      eventName: string;
+      workspaceName: string;
+      logoBuffer?: Buffer | null;
+      accentColor: string;
+      showCredit: boolean;
+    },
+  ): Promise<Buffer> {
+    const CARD_WIDTH = 1080;
+    const CARD_HEIGHT = 1920;
+    const targetAspect = CARD_WIDTH / CARD_HEIGHT;
+
+    // El bbox de la cara viene del análisis de InsightFace sobre la imagen SIN
+    // corregir por EXIF (el servicio Python no llama a exif_transpose). Por
+    // eso el recorte se calcula aquí, antes de `.rotate()`, en el mismo
+    // espacio de coordenadas que el bbox — si se rota primero, el recorte
+    // apunta a un punto distinto de la foto en cualquier imagen con EXIF
+    // orientation != 1 (la mayoría de fotos de cámara/teléfono).
+    const metadata = await sharp(imageBuffer).metadata();
+    const width = metadata.width ?? 0;
+    const height = metadata.height ?? 0;
+
+    let cropped = sharp(imageBuffer);
+    if (width > 0 && height > 0) {
+      let cropWidth: number;
+      let cropHeight: number;
+      if (width / height > targetAspect) {
+        cropHeight = height;
+        cropWidth = Math.round(height * targetAspect);
+      } else {
+        cropWidth = width;
+        cropHeight = Math.round(width / targetAspect);
+      }
+      cropWidth = Math.min(cropWidth, width);
+      cropHeight = Math.min(cropHeight, height);
+
+      const centerX = faceBbox ? faceBbox[0] + faceBbox[2] / 2 : width / 2;
+      const centerY = faceBbox ? faceBbox[1] + faceBbox[3] / 2 : height / 2;
+      const left = Math.max(0, Math.min(Math.round(centerX - cropWidth / 2), width - cropWidth));
+      const top = Math.max(0, Math.min(Math.round(centerY - cropHeight / 2), height - cropHeight));
+
+      cropped = cropped.extract({ left, top, width: cropWidth, height: cropHeight });
+    }
+
+    const basePhoto = await cropped
+      .rotate()
+      .resize(CARD_WIDTH, CARD_HEIGHT, { fit: 'cover' })
+      .jpeg({ quality: 92 })
+      .toBuffer();
+
+    const overlay = await this.createShareCardOverlay(CARD_WIDTH, CARD_HEIGHT, options);
+    const composites: sharp.OverlayOptions[] = [{ input: overlay, left: 0, top: 0 }];
+
+    if (options.logoBuffer) {
+      try {
+        const logoMeta = await sharp(options.logoBuffer).metadata();
+        const hasAlpha = Boolean(logoMeta.hasAlpha);
+        const logoHeight = 96;
+        const resizedLogo = sharp(options.logoBuffer).resize({ height: logoHeight, fit: 'inside', withoutEnlargement: true });
+        const preparedLogo = hasAlpha
+          ? await resizedLogo.png().toBuffer()
+          : await sharp(await resizedLogo.png().toBuffer())
+              .extend({ top: 10, bottom: 10, left: 10, right: 10, background: { r: 255, g: 255, b: 255, alpha: 1 } })
+              .png()
+              .toBuffer();
+        composites.push({ input: preparedLogo, left: 48, top: 64 });
+      } catch (error) {
+        this.logger.warn(`No se pudo componer el logo en la tarjeta para compartir: ${getErrorMessage(error)}`);
+      }
+    }
+
+    return sharp(basePhoto).composite(composites).jpeg({ quality: 92 }).toBuffer();
+  }
+
+  private async createShareCardOverlay(
+    width: number,
+    height: number,
+    options: { eventName: string; workspaceName: string; accentColor: string; showCredit: boolean },
+  ): Promise<Buffer> {
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Degradado inferior: sin esto el texto se pierde contra fotos claras.
+    const gradientStart = Math.round(height * 0.62);
+    const gradient = ctx.createLinearGradient(0, gradientStart, 0, height);
+    gradient.addColorStop(0, 'rgba(0,0,0,0)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0.82)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, gradientStart, width, height - gradientStart);
+
+    const paddingX = 56;
+
+    // Barra de acento: el único toque de color de marca del organizador sobre
+    // una superposición que, por lo demás, es neutra a propósito.
+    const barWidth = 64;
+    const barHeight = 8;
+    const barY = height - 300;
+    ctx.fillStyle = options.accentColor;
+    ctx.fillRect(paddingX, barY, barWidth, barHeight);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.font = 'bold 34px Arial';
+    ctx.textBaseline = 'alphabetic';
+    this.wrapText(ctx, options.workspaceName.toUpperCase(), paddingX, barY + 60, width - paddingX * 2, 40);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 64px Arial';
+    this.wrapText(ctx, options.eventName, paddingX, barY + 130, width - paddingX * 2, 72);
+
+    if (options.showCredit) {
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.font = 'bold 26px Arial';
+      ctx.fillText('Fotos por LucilaMon', paddingX, height - 56);
+    }
+
+    return canvas.toBuffer('image/png');
+  }
+
+  /** Envuelve texto en hasta 2 líneas y las dibuja en el canvas. */
+  private wrapText(
+    ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
+    text: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    lineHeight: number,
+  ): void {
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let line = '';
+
+    for (const word of words) {
+      const testLine = line ? `${line} ${word}` : word;
+      if (ctx.measureText(testLine).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = testLine;
+      }
+      if (lines.length >= 2) break;
+    }
+    if (line && lines.length < 2) lines.push(line);
+
+    lines.slice(0, 2).forEach((text, index) => ctx.fillText(text, x, y + index * lineHeight));
+  }
+
   private async createWatermarkOverlay(
     width: number, 
     height: number, 
