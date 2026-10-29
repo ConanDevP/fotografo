@@ -7,6 +7,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma, WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../common/services/prisma.service';
@@ -15,11 +16,12 @@ import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { UpdateBrandThemeDto } from './dto/update-brand-theme.dto';
 import { AddWorkspaceMemberDto } from './dto/add-workspace-member.dto';
 import { UpdateWorkspaceMemberDto } from './dto/update-workspace-member.dto';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { StorageService } from '../common/services/storage.service';
 import { BillingService } from '../billing/billing.service';
 import { RailwayDomainsService } from './railway-domains.service';
+import { MailerService } from '../common/services/mailer.service';
 
 const MANAGER_ROLES: WorkspaceRole[] = [
   WorkspaceRole.OWNER,
@@ -40,6 +42,7 @@ export class WorkspacesService {
     @Inject(forwardRef(() => BillingService))
     private readonly billing: BillingService,
     private readonly railwayDomains: RailwayDomainsService,
+    @Optional() private readonly mailer?: MailerService,
   ) {}
 
   async create(dto: CreateWorkspaceDto, userId: string) {
@@ -455,31 +458,53 @@ export class WorkspacesService {
     return { disconnected: true, domain: null };
   }
 
-  async addMember(workspaceId: string, dto: AddWorkspaceMemberDto, userId: string) {
-    // Los roles que administran cuentan contra el cupo del plan; fotógrafos
-    // invitados, analistas y soporte no lo consumen.
-    const managerRoles: WorkspaceRole[] = [WorkspaceRole.OWNER, WorkspaceRole.ADMIN];
-    if (managerRoles.includes(dto.role as WorkspaceRole)) {
-      const limit = await this.billing.maxAdminsFor(workspaceId);
-      if (limit !== null) {
-        const current = await this.prisma.workspaceMember.count({
-          where: { workspaceId, status: 'ACTIVE', role: { in: managerRoles } },
-        });
-        if (current >= limit) {
-          throw new ForbiddenException({
-            code: 'PLAN_UPGRADE_REQUIRED',
-            message: `Tu plan admite ${limit} administrador${limit === 1 ? '' : 'es'}. Sube de plan para añadir más.`,
-            feature: 'maxAdmins',
-          });
-        }
-      }
-    }
+  /** Los roles que administran cuentan contra el cupo del plan; fotógrafos, analistas y soporte no lo consumen. */
+  private static readonly MANAGER_ROLES: WorkspaceRole[] = [WorkspaceRole.OWNER, WorkspaceRole.ADMIN];
 
+  /**
+   * Comprueba que un administrador más cabe en el plan. `excludeUserId` es la
+   * persona que se está promoviendo o reactivando: ya cuenta si estaba activa,
+   * así que no se suma dos veces.
+   */
+  private async assertAdminCapacity(workspaceId: string, excludeUserId?: string) {
+    const limit = await this.billing.maxAdminsFor(workspaceId);
+    if (limit === null) return;
+    const current = await this.prisma.workspaceMember.count({
+      where: {
+        workspaceId,
+        status: 'ACTIVE',
+        role: { in: WorkspacesService.MANAGER_ROLES },
+        ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+      },
+    });
+    if (current >= limit) {
+      throw new ForbiddenException({
+        code: 'PLAN_UPGRADE_REQUIRED',
+        message: `Tu plan admite ${limit} administrador${limit === 1 ? '' : 'es'}. Sube de plan para añadir más.`,
+        feature: 'maxAdmins',
+      });
+    }
+  }
+
+  private hashInvitationToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private escapeHtml(value: string) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
+  }
+
+  async addMember(workspaceId: string, dto: AddWorkspaceMemberDto, userId: string) {
     await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
     if (dto.role === 'OWNER') throw new BadRequestException('La propiedad se transfiere mediante un proceso separado');
 
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email.toLowerCase() } });
-    if (!user) throw new NotFoundException('El usuario debe registrarse antes de ser añadido al equipo');
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    const isManager = WorkspacesService.MANAGER_ROLES.includes(dto.role as WorkspaceRole);
+    if (isManager) await this.assertAdminCapacity(workspaceId, user?.id);
+
+    // Sin cuenta todavía: se guarda una invitación y se manda el enlace por correo.
+    if (!user) return this.inviteByEmail(workspaceId, email, dto.role as WorkspaceRole, userId);
 
     return this.prisma.workspaceMember.upsert({
       where: { workspaceId_userId: { workspaceId, userId: user.id } },
@@ -487,6 +512,95 @@ export class WorkspacesService {
       create: { workspaceId, userId: user.id, role: dto.role },
       include: { user: { select: { id: true, name: true, email: true, profileImageUrl: true } } },
     });
+  }
+
+  private async inviteByEmail(workspaceId: string, email: string, role: WorkspaceRole, invitedById: string) {
+    const token = randomBytes(32).toString('hex');
+    const data = {
+      role,
+      tokenHash: this.hashInvitationToken(token),
+      invitedById,
+      status: 'PENDING',
+      acceptedAt: null,
+      expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+    };
+    const invitation = await this.prisma.workspaceInvitation.upsert({
+      where: { workspaceId_email: { workspaceId, email } },
+      update: data,
+      create: { workspaceId, email, ...data },
+    });
+    const workspace = await this.prisma.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } });
+    const url = new URL('/invitations/team', process.env.FRONTEND_URL || 'http://localhost:3000');
+    url.hash = new URLSearchParams({ token }).toString();
+    const link = url.toString();
+
+    let emailSent = false;
+    try {
+      emailSent = (await this.mailer?.send({
+        to: email,
+        subject: `Te invitaron al equipo de ${workspace?.name ?? 'LucilaMon'}`,
+        html: `<p>Te invitaron a unirte al equipo de <strong>${this.escapeHtml(workspace?.name ?? 'LucilaMon')}</strong> en LucilaMon como <strong>${role}</strong>.</p>
+<p><a href="${link}">Aceptar la invitación</a></p>
+<p>Si todavía no tienes cuenta, crea una con este mismo correo y vuelve a abrir el enlace. Caduca en 14 días.</p>`,
+      })) ?? false;
+    } catch (error) {
+      this.logger.warn(`La invitación ${invitation.id} se creó, pero el correo no salió`);
+    }
+    const { tokenHash: _hash, ...safe } = invitation;
+    return { invited: true, invitation: safe, emailSent, acceptanceUrl: link };
+  }
+
+  async listInvitations(workspaceId: string, userId: string) {
+    await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const rows = await this.prisma.workspaceInvitation.findMany({
+      where: { workspaceId, status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(({ tokenHash: _hash, ...row }) => row);
+  }
+
+  async revokeInvitation(workspaceId: string, invitationId: string, userId: string) {
+    await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const result = await this.prisma.workspaceInvitation.updateMany({
+      where: { id: invitationId, workspaceId, status: 'PENDING' },
+      data: { status: 'REVOKED' },
+    });
+    if (!result.count) throw new NotFoundException('Invitación no encontrada');
+    return { revoked: true };
+  }
+
+  async getInvitation(token: string) {
+    const invitation = await this.prisma.workspaceInvitation.findUnique({
+      where: { tokenHash: this.hashInvitationToken(token) },
+      include: { workspace: { select: { name: true } } },
+    });
+    if (!invitation || invitation.status !== 'PENDING' || invitation.expiresAt < new Date()) {
+      throw new NotFoundException('La invitación no existe o ya no es válida');
+    }
+    return { email: invitation.email, role: invitation.role, workspaceName: invitation.workspace.name, expiresAt: invitation.expiresAt };
+  }
+
+  async acceptInvitation(token: string, userId: string) {
+    const invitation = await this.prisma.workspaceInvitation.findUnique({ where: { tokenHash: this.hashInvitationToken(token) } });
+    if (!invitation || invitation.status !== 'PENDING' || invitation.expiresAt < new Date()) {
+      throw new NotFoundException('La invitación no existe o ya no es válida');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user || user.email.toLowerCase() !== invitation.email) {
+      throw new ForbiddenException('Esta invitación es para otro correo. Inicia sesión con la cuenta invitada.');
+    }
+    if (WorkspacesService.MANAGER_ROLES.includes(invitation.role)) {
+      await this.assertAdminCapacity(invitation.workspaceId, userId);
+    }
+    const [member] = await this.prisma.$transaction([
+      this.prisma.workspaceMember.upsert({
+        where: { workspaceId_userId: { workspaceId: invitation.workspaceId, userId } },
+        update: { role: invitation.role, status: 'ACTIVE' },
+        create: { workspaceId: invitation.workspaceId, userId, role: invitation.role },
+      }),
+      this.prisma.workspaceInvitation.update({ where: { id: invitation.id }, data: { status: 'ACCEPTED', acceptedAt: new Date() } }),
+    ]);
+    return { workspaceId: invitation.workspaceId, role: member.role };
   }
 
   async updateMember(workspaceId: string, memberId: string, dto: UpdateWorkspaceMemberDto, userId: string) {
@@ -499,7 +613,7 @@ export class WorkspacesService {
     }
     const member = await this.prisma.workspaceMember.findFirst({
       where: { id: memberId, workspaceId },
-      select: { id: true, userId: true, role: true },
+      select: { id: true, userId: true, role: true, status: true },
     });
     if (!member) throw new NotFoundException('Miembro no encontrado');
     if (member.role === WorkspaceRole.OWNER) {
@@ -508,11 +622,33 @@ export class WorkspacesService {
     if (member.userId === userId && dto.status === 'SUSPENDED') {
       throw new BadRequestException('No puedes suspender tu propio acceso');
     }
+    // Subir a administrador o reactivar a uno suspendido ocupa un puesto del plan.
+    const finalRole = dto.role ?? member.role;
+    const finalStatus = dto.status ?? member.status;
+    if (WorkspacesService.MANAGER_ROLES.includes(finalRole) && finalStatus === 'ACTIVE') {
+      await this.assertAdminCapacity(workspaceId, member.userId);
+    }
     return this.prisma.workspaceMember.update({
       where: { id: member.id },
       data: { role: dto.role, status: dto.status },
       include: { user: { select: { id: true, name: true, email: true, profileImageUrl: true } } },
     });
+  }
+
+  async removeMember(workspaceId: string, memberId: string, userId: string) {
+    await this.assertAccess(workspaceId, userId, [WorkspaceRole.OWNER, WorkspaceRole.ADMIN]);
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: { id: memberId, workspaceId },
+      select: { id: true, userId: true, role: true },
+    });
+    if (!member) throw new NotFoundException('Miembro no encontrado');
+    if (member.role === WorkspaceRole.OWNER) throw new BadRequestException('No puedes quitar al propietario');
+    if (member.userId === userId) throw new BadRequestException('No puedes quitarte a ti mismo del equipo');
+    await this.prisma.workspaceMember.delete({ where: { id: member.id } });
+    await this.prisma.auditLog.create({
+      data: { userId, action: 'WORKSPACE_MEMBER_REMOVED', data: { workspaceId, removedUserId: member.userId, role: member.role } },
+    }).catch(() => undefined);
+    return { removed: true };
   }
 
   async assertAccess(workspaceId: string, userId: string, roles?: WorkspaceRole[]) {

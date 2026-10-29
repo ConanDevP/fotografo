@@ -13,14 +13,18 @@ export class PartnerApiKeyGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<any>();
     const apiKey = this.extractApiKey(request);
-    const parsed = /^lm_live_([a-f0-9]{16})_([A-Za-z0-9_-]{40,})$/.exec(apiKey);
+    const parsed = /^lm_(live|test)_([a-f0-9]{16})_([A-Za-z0-9_-]{40,})$/.exec(apiKey);
     if (!parsed) throw new UnauthorizedException('Credencial API inválida');
 
     const client = await this.prisma.apiClient.findUnique({
-      where: { keyPrefix: parsed[1] },
+      where: { keyPrefix: parsed[2] },
       include: { workspace: { select: { id: true, ownerId: true, deletedAt: true } } },
     });
     if (!client || client.revokedAt || client.workspace.deletedAt) {
+      throw new UnauthorizedException('Credencial API inválida');
+    }
+    // El prefijo de la clave y su entorno registrado deben coincidir.
+    if ((parsed[1] === 'test') !== (client.environment === 'TEST')) {
       throw new UnauthorizedException('Credencial API inválida');
     }
     if (client.expiresAt && client.expiresAt.getTime() <= Date.now()) {
@@ -60,7 +64,7 @@ export class PartnerApiKeyGuard implements CanActivate {
     const granted = new Set(client.scopes);
     const missing = required.filter(scope => !granted.has(scope));
     if (missing.length) throw new ForbiddenException(`Falta el permiso API: ${missing.join(', ')}`);
-    await this.enterpriseAccess.authorizeExistingClient(client.workspaceId, client.scopes as PartnerApiScope[], required);
+    await this.enterpriseAccess.authorizeExistingClient(client.workspaceId, client.scopes as PartnerApiScope[], required, client.environment);
 
     request.partner = {
       apiClientId: client.id,

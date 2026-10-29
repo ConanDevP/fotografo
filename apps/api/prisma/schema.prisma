@@ -97,6 +97,7 @@ model Workspace {
   brandTheme                    BrandTheme?
   subscription                  Subscription?
   members                       WorkspaceMember[]
+  teamInvitations               WorkspaceInvitation[]
   events                        Event[]
   photographerPhotos            Photo[]            @relation("PhotoPhotographerWorkspace")
   eventContributions            EventContributor[] @relation("ContributorWorkspace")
@@ -174,6 +175,12 @@ model EnterpriseAccount {
   maxWebhookEndpoints       Int?                    @map("max_webhook_endpoints")
   maxAdmins                 Int?                    @map("max_admins")
   retentionDays             Int?                    @map("retention_days")
+  /// Si el cupo anual de fotografías se supera: `false` bloquea las subidas; `true` las deja pasar y
+  /// factura cada fotografía de más a `overagePhotoCents`.
+  allowOverage              Boolean                 @default(false) @map("allow_overage")
+  overagePhotoCents         Decimal?                @map("overage_photo_cents") @db.Decimal(8, 4)
+  /// Días de plazo de las facturas que se envían al cliente.
+  invoiceDaysDue            Int                     @default(30) @map("invoice_days_due")
   createdById               String?                 @map("created_by_id") @db.Uuid
   updatedById               String?                 @map("updated_by_id") @db.Uuid
   createdAt                 DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -286,6 +293,27 @@ model WorkspaceMember {
   @@unique([workspaceId, userId])
   @@index([userId, status])
   @@map("workspace_members")
+}
+
+/// Invitación al equipo de un espacio para alguien que aún no tiene cuenta (o que la
+/// acepta con el enlace del correo). El token se guarda como hash.
+model WorkspaceInvitation {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  email       String
+  role        WorkspaceRole
+  tokenHash   String        @unique @map("token_hash")
+  invitedById String        @map("invited_by_id") @db.Uuid
+  /// PENDING · ACCEPTED · REVOKED
+  status      String        @default("PENDING") @db.VarChar(12)
+  expiresAt   DateTime      @map("expires_at") @db.Timestamptz(6)
+  acceptedAt  DateTime?     @map("accepted_at") @db.Timestamptz(6)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([email, status])
+  @@map("workspace_invitations")
 }
 
 model Event {
@@ -1207,4 +1235,74 @@ enum SubscriptionStatus {
   ACTIVE
   PAST_DUE
   CANCELED
+}
+
+
+/// Libro de créditos: una fila por unidad consumida. Hoy la unidad es una
+/// fotografía procesada (dorsal + rostros + derivadas + almacenamiento). Es
+/// añadir-solo: lo que se factura y lo que se limita sale de sumar este libro,
+/// no de contar fotos vivas, que se borran.
+model UsageLedgerEntry {
+  id          BigInt    @id @default(autoincrement())
+  workspaceId String    @map("workspace_id") @db.Uuid
+  kind        String    @db.VarChar(32)
+  quantity    Int       @default(1)
+  /// Evita contar dos veces el mismo hecho (reintentos, reprocesos).
+  dedupeKey   String    @unique @map("dedupe_key")
+  photoId     String?   @map("photo_id") @db.Uuid
+  eventId     String?   @map("event_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, kind, createdAt])
+  @@map("usage_ledger")
+}
+
+/// Una fila por llamada al proveedor de IA, también las que fallan o no
+/// encuentran dorsal: son las que hoy no dejan rastro y las que más cuestan
+/// (el reintento con el modelo mayor).
+model AiUsageLog {
+  id           BigInt   @id @default(autoincrement())
+  workspaceId  String?  @map("workspace_id") @db.Uuid
+  eventId      String?  @map("event_id") @db.Uuid
+  photoId      String?  @map("photo_id") @db.Uuid
+  provider     String   @default("GEMINI") @db.VarChar(24)
+  model        String   @db.VarChar(80)
+  strategy     String   @db.VarChar(16)
+  success      Boolean
+  bibsFound    Int      @default(0) @map("bibs_found")
+  promptTokens Int?     @map("prompt_tokens")
+  outputTokens Int?     @map("output_tokens")
+  totalTokens  Int?     @map("total_tokens")
+  durationMs   Int?     @map("duration_ms")
+  errorCode    String?  @map("error_code") @db.VarChar(80)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt])
+  @@index([photoId])
+  @@index([createdAt])
+  @@map("ai_usage_logs")
+}
+
+
+/// Factura emitida a un cliente Enterprise. La clave única (espacio, tipo,
+/// periodo) es lo que impide facturar dos veces el mismo concepto si un cron se
+/// repite o se lanza a mano.
+model EnterpriseInvoice {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  /// ANNUAL (cuota del contrato) u OVERAGE (fotografías por encima del cupo).
+  kind            String   @db.VarChar(16)
+  periodKey       String   @map("period_key") @db.VarChar(64)
+  units           Int      @default(0)
+  amountCents     Int      @map("amount_cents")
+  currency        String   @default("USD") @db.VarChar(3)
+  status          String   @default("PENDING") @db.VarChar(16)
+  stripeInvoiceId String?  @unique @map("stripe_invoice_id")
+  error           String?  @db.VarChar(500)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, kind, periodKey])
+  @@index([status])
+  @@map("enterprise_invoices")
 }

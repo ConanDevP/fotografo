@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { StorageService } from '../common/services/storage.service';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -9,6 +9,7 @@ import { createHash, randomBytes } from 'crypto';
 import { EventContributorRole, WorkspaceRole } from '@prisma/client';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { BillingService } from '../billing/billing.service';
+import { MeteringService } from '../billing/metering.service';
 import { InviteContributorDto } from './dto/invite-contributor.dto';
 import { ReviewPhotoDto } from './dto/review-photo.dto';
 import { QueueService } from '../common/services/queue.service';
@@ -26,6 +27,7 @@ export class EventsService {
     private queueService: QueueService,
     private billingService: BillingService,
     private mailerService: MailerService,
+    @Optional() private meteringService?: MeteringService,
   ) {}
 
   /** ¿Hay algún transporte de correo configurado? Sirve para avisar en la UI
@@ -76,6 +78,7 @@ export class EventsService {
     if (!workspace) {
       throw new BadRequestException('Crea un espacio de fotógrafo u organizador antes de crear eventos');
     }
+    await this.meteringService?.assertEventCapacity(workspace.id);
     
     // Generate unique slug from name with timestamp to ensure uniqueness
     const baseSlug = this.generateSlug(name);
@@ -458,6 +461,45 @@ export class EventsService {
     );
 
     return { message: 'Evento eliminado', deletedObjects: objects.deleted };
+  }
+
+  /**
+   * Borrado por política de retención del contrato. Es el mismo borrado que
+   * `remove`, sin la autorización de un usuario: lo lanza el sistema. Quien
+   * llama debe haber comprobado ya que el evento no tiene ventas.
+   */
+  async purgeForRetention(id: string): Promise<{ deletedObjects: number }> {
+    const paidOrders = await this.prisma.order.count({
+      where: { eventId: id, status: { in: ['PAID', 'REFUNDED', 'DISPUTED'] } },
+    });
+    if (paidOrders > 0) return { deletedObjects: 0 };
+
+    const usage = await this.prisma.photo.groupBy({
+      by: ['photographerWorkspaceId'],
+      where: { eventId: id },
+      _sum: { originalBytes: true, derivedBytes: true },
+    });
+    await this.prisma.$transaction(
+      async tx => {
+        await tx.photo.deleteMany({ where: { eventId: id } });
+        await tx.event.delete({ where: { id } });
+        for (const row of usage) {
+          await this.billingService.releaseStorage(
+            row.photographerWorkspaceId,
+            (row._sum.originalBytes ?? 0) + (row._sum.derivedBytes ?? 0),
+            tx,
+          );
+        }
+      },
+      { timeout: 120_000, maxWait: 10_000 },
+    );
+    const objects = await this.storageService.deleteEventObjects(id);
+    if (objects.failed > 0) {
+      await this.prisma.auditLog
+        .create({ data: { action: 'EVENT_STORAGE_CLEANUP_REQUIRED', data: { eventId: id, failed: objects.failed, reason: 'retention' } } })
+        .catch(() => undefined);
+    }
+    return { deletedObjects: objects.deleted };
   }
 
   async restore(id: string, userId: string, userRole: UserRole) {

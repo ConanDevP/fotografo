@@ -48,6 +48,7 @@ export class ReprocessPhotoProcessor extends WorkerHost {
         ocrImageUrl,
         photo.event.bibRules as any,
         geminiStrategy,
+        { photoId, eventId: photo.eventId, workspaceId: photo.photographerWorkspaceId },
       );
 
       // Replace previous OCR results only after the new OCR call succeeds.

@@ -27,6 +27,8 @@ import { AttachEventSponsorDto } from '../sponsors/dto/attach-event-sponsor.dto'
 import { InviteContributorDto } from '../events/dto/invite-contributor.dto';
 import { Request } from 'express';
 
+import { loadPhotoAllowance } from '../billing/metering.service';
+
 @Injectable()
 export class PartnerApiService {
   private readonly logger = new Logger(PartnerApiService.name);
@@ -678,5 +680,32 @@ export class PartnerApiService {
 
   private pagination(page: number, limit: number, total: number) {
     return { page, limit, total, pages: Math.ceil(total / limit) };
+  }
+
+  /** Consumo del contrato: lo que el cliente necesita para no llegar a ciegas a un tope. */
+  async getUsage(ctx: PartnerPrincipal) {
+    const period = new Date().toISOString().slice(0, 7);
+    const [account, usage, photos] = await Promise.all([
+      this.prisma.enterpriseAccount.findUnique({ where: { workspaceId: ctx.workspaceId } }),
+      this.prisma.partnerApiUsage.findUnique({ where: { workspaceId_period: { workspaceId: ctx.workspaceId, period } } }),
+      loadPhotoAllowance(this.prisma, ctx.workspaceId),
+    ]);
+    const pct = (used: number, limit: number | null | undefined) => (limit ? Math.round((used / limit) * 1000) / 10 : null);
+    const requests = Number(usage?.requestCount ?? 0n);
+    const faces = Number(usage?.faceSearchCount ?? 0n);
+    return {
+      period,
+      contract: account ? { status: account.status, start: account.contractStart, end: account.contractEnd } : null,
+      photos: {
+        used: photos.used,
+        limit: photos.limit,
+        remaining: photos.remaining,
+        percentUsed: pct(photos.used, photos.limit),
+        windowStart: photos.windowStart,
+        windowEnd: photos.windowEnd,
+      },
+      apiRequests: { used: requests, limit: account?.monthlyApiRequestLimit ?? null, percentUsed: pct(requests, account?.monthlyApiRequestLimit) },
+      faceSearches: { used: faces, limit: account?.monthlyFaceSearchLimit ?? null, percentUsed: pct(faces, account?.monthlyFaceSearchLimit) },
+    };
   }
 }

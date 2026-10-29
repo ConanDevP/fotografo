@@ -55,6 +55,14 @@ export class AdminSystemController {
     return { data: report };
   }
 
+  @Get('reports/ai-costs')
+  async getAiCostReport(
+    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponse> {
+    return { data: await this.adminSystemService.getAiCostReport(req.user.role, days) };
+  }
+
   @Get('reports/users-growth')
   async getUsersGrowthReport(
     @Query('months', new DefaultValuePipe(12), ParseIntPipe) months: number,

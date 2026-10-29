@@ -38,7 +38,11 @@ export class ApiClientsService {
     await this.assertCanManage(workspaceId, userId);
     await this.enterpriseAccess.assertCanCreateClient(workspaceId, dto.scopes as PartnerApiScope[]);
     const expiry = this.validateExpiry(dto.expiresAt);
-    const credential = this.generateCredential();
+    // Mientras el contrato está en piloto, las claves son de prueba (`lm_test_`):
+    // se distinguen a simple vista de las de producción y dejan de valer al
+    // activar el contrato, así nadie lanza a producción con una clave de pruebas.
+    const environment = await this.environmentFor(workspaceId);
+    const credential = this.generateCredential(environment);
     const client = await this.prisma.apiClient.create({
       data: {
         workspaceId,
@@ -47,7 +51,7 @@ export class ApiClientsService {
         keyPrefix: credential.prefix,
         secretHash: credential.hash,
         scopes: [...new Set(dto.scopes)],
-        environment: 'LIVE',
+        environment,
         expiresAt: expiry,
       },
       select: {
@@ -68,7 +72,7 @@ export class ApiClientsService {
     const existing = await this.findClient(workspaceId, clientId);
     await this.enterpriseAccess.assertCanRotateClient(workspaceId, existing.scopes as PartnerApiScope[]);
     const expiry = dto.expiresAt === undefined ? undefined : this.validateExpiry(dto.expiresAt);
-    const credential = this.generateCredential();
+    const credential = this.generateCredential(existing.environment === 'TEST' ? 'TEST' : 'LIVE');
     const client = await this.prisma.apiClient.update({
       where: { id: clientId },
       data: {
@@ -102,10 +106,15 @@ export class ApiClientsService {
     return client;
   }
 
-  private generateCredential() {
+  private async environmentFor(workspaceId: string): Promise<'LIVE' | 'TEST'> {
+    const account = await this.enterpriseAccess.account(workspaceId);
+    return account?.status === 'PILOT' ? 'TEST' : 'LIVE';
+  }
+
+  private generateCredential(environment: 'LIVE' | 'TEST' = 'LIVE') {
     const prefix = randomBytes(8).toString('hex');
     const secret = randomBytes(32).toString('base64url');
-    const apiKey = `lm_live_${prefix}_${secret}`;
+    const apiKey = `lm_${environment === 'TEST' ? 'test' : 'live'}_${prefix}_${secret}`;
     return { prefix, apiKey, hash: createHash('sha256').update(apiKey).digest('hex') };
   }
 

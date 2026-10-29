@@ -324,6 +324,10 @@ export class PartnerApiController {
   @RequirePartnerScopes('events:sponsors')
   async detachSponsor(@Req() req: PartnerRequest, @Param('eventId') eventId: string, @Param('sponsorId') sponsorId: string): Promise<ApiResponse> { return { data: await this.partner.detachSponsor(req.partner, eventId, sponsorId) }; }
 
+  @Get('usage')
+  @RequirePartnerScopes('workspace:read')
+  async usage(@Req() req: PartnerRequest): Promise<ApiResponse> { return { data: await this.partner.getUsage(req.partner) }; }
+
   @Get('workspace')
   @RequirePartnerScopes('workspace:read')
   async workspace(@Req() req: PartnerRequest): Promise<ApiResponse> { return { data: await this.partner.getWorkspace(req.partner) }; }

@@ -133,6 +133,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
             ocrImageUrl,
             event.bibRules as any,
             'flash',
+            { photoId, eventId, workspaceId: photo.photographerWorkspaceId },
           );
 
           // Escalado a un modelo mayor cuando el rápido no lee ningún dorsal.
@@ -145,6 +146,7 @@ export class ProcessPhotoProcessor extends WorkerHost {
                 ocrImageUrl,
                 event.bibRules as any,
                 'pro',
+                { photoId, eventId, workspaceId: photo.photographerWorkspaceId },
               );
               if (escalated.bibs?.length) {
                 ocrResult = escalated;

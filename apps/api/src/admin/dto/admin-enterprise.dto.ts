@@ -24,7 +24,8 @@ export class UpsertEnterpriseAccountDto {
   @IsBoolean() advancedAnalyticsEnabled: boolean;
   @IsBoolean() exportsEnabled: boolean;
   @IsBoolean() originalDownloadsEnabled: boolean;
-  @IsBoolean() sponsoredDownloadsEnabled: boolean;
+  /** Reservado: ninguna función lo consulta todavía, por eso no se ofrece en el panel. */
+  @IsOptional() @IsBoolean() sponsoredDownloadsEnabled?: boolean;
   @IsBoolean() priorityProcessingEnabled: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) annualPhotoLimit?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) annualEventLimit?: number;
@@ -34,4 +35,7 @@ export class UpsertEnterpriseAccountDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(1000) maxWebhookEndpoints?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10000) maxAdmins?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) retentionDays?: number;
+  @IsOptional() @IsBoolean() allowOverage?: boolean;
+  @IsOptional() @Type(() => Number) @Min(0) @Max(100000) overagePhotoCents?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(120) invoiceDaysDue?: number;
 }

@@ -13,6 +13,7 @@ import { PrismaService } from '../common/services/prisma.service';
 import { MailerService } from '../common/services/mailer.service';
 import { PARTNER_API_SCOPES, PartnerApiScope } from './partner-api.scopes';
 import { RequestEnterpriseAccessDto } from './dto/request-enterprise-access.dto';
+import { loadPhotoAllowance } from '../billing/metering.service';
 
 const FEATURE_SCOPES: Partial<Record<PartnerApiScope, string>> = {
   'webhooks:manage': 'webhooksEnabled', 'search:face': 'faceSearchEnabled',
@@ -158,7 +159,7 @@ export class EnterpriseAccessService {
       subject: `Solicitud de API Business — ${workspace.name}`,
       html: `
 <div style="font-family:sans-serif;max-width:560px">
-  <h2 style="margin:0 0 8px">Nueva solicitud de acceso Business</h2>
+  <h2 style="margin:0 0 8px">Nueva solicitud de acceso Enterprise</h2>
   <p style="margin:0 0 4px"><strong>Espacio:</strong> ${esc(workspace.name)} (/${esc(workspace.slug)})</p>
   <p style="margin:0 0 4px"><strong>Solicitante:</strong> ${esc(requesterEmail)}</p>
   <p style="margin:0 0 12px"><strong>Contacto:</strong> ${esc(contactEmail)}</p>
@@ -171,10 +172,11 @@ export class EnterpriseAccessService {
   async dashboard(workspaceId: string) {
     const account = await this.account(workspaceId);
     const period = new Date().toISOString().slice(0, 7);
-    const [usage, apiClients, webhookEndpoints] = await Promise.all([
+    const [usage, apiClients, webhookEndpoints, photoAllowance] = await Promise.all([
       this.prisma.partnerApiUsage.findUnique({ where: { workspaceId_period: { workspaceId, period } } }),
       this.prisma.apiClient.count({ where: { workspaceId, revokedAt: null } }),
       this.prisma.partnerWebhookEndpoint.count({ where: { workspaceId, active: true } }),
+      loadPhotoAllowance(this.prisma, workspaceId),
     ]);
     const legacy = !account && apiClients > 0;
     const active = this.isActive(account);
@@ -218,7 +220,16 @@ export class EnterpriseAccessService {
         maxApiClients: account?.maxApiClients ?? null, maxWebhookEndpoints: account?.maxWebhookEndpoints ?? null,
         maxAdmins: account?.maxAdmins ?? null, retentionDays: account?.retentionDays ?? null,
       },
-      usage: { period, apiRequests: Number(usage?.requestCount || 0n), faceSearches: Number(usage?.faceSearchCount || 0n), apiClients, webhookEndpoints },
+      usage: {
+        period, apiRequests: Number(usage?.requestCount || 0n), faceSearches: Number(usage?.faceSearchCount || 0n), apiClients, webhookEndpoints,
+        photos: {
+          used: photoAllowance.used,
+          limit: photoAllowance.limit,
+          remaining: photoAllowance.remaining,
+          windowStart: photoAllowance.windowStart.toISOString(),
+          windowEnd: photoAllowance.windowEnd.toISOString(),
+        },
+      },
       permittedScopes,
     };
   }
@@ -247,12 +258,16 @@ export class EnterpriseAccessService {
     await this.assertScopes(account, scopes);
   }
 
-  async authorizeExistingClient(workspaceId: string, scopes: PartnerApiScope[], required: PartnerApiScope[]) {
+  async authorizeExistingClient(workspaceId: string, scopes: PartnerApiScope[], required: PartnerApiScope[], environment = 'LIVE') {
     const account = await this.account(workspaceId);
     if (!account) return; // Compatibilidad exclusiva para credenciales emitidas antes del control Enterprise.
+    if (environment === 'TEST' && account.status === 'ACTIVE') {
+      throw new ForbiddenException('Las claves de prueba (lm_test_) dejan de valer al activar el contrato. Crea una clave de producción.');
+    }
     if (!this.isActive(account) || !account.partnerApiEnabled) throw new ForbiddenException('Acceso API empresarial suspendido o vencido');
     await this.assertScopes(account, [...scopes, ...required]);
-    await this.reserveRequest(workspaceId, account.monthlyApiRequestLimit, required.includes('search:face') ? account.monthlyFaceSearchLimit : null);
+    const isFaceSearch = required.includes('search:face');
+    await this.reserveRequest(workspaceId, account.monthlyApiRequestLimit, isFaceSearch ? account.monthlyFaceSearchLimit : null, isFaceSearch);
   }
 
   async assertCanCreateWebhook(workspaceId: string) {
@@ -273,10 +288,10 @@ export class EnterpriseAccessService {
     if (disabled.length) throw new ForbiddenException(`El contrato no habilita estos permisos: ${disabled.join(', ')}`);
   }
 
-  private async reserveRequest(workspaceId: string, limit: number | null, faceLimit: number | null) {
-    if (limit == null && faceLimit == null) return;
+  /** Anota la petición siempre (también sin tope: es la base del informe de uso) y corta si supera un tope. */
+  private async reserveRequest(workspaceId: string, limit: number | null, faceLimit: number | null, isFaceSearch = false) {
     const period = new Date().toISOString().slice(0, 7);
-    const faceIncrement = faceLimit == null ? 0 : 1;
+    const faceIncrement = isFaceSearch ? 1 : 0;
     const rows = await this.prisma.$queryRaw<Array<{ request_count: bigint, face_search_count: bigint }>>`
       INSERT INTO "partner_api_usage" ("workspace_id", "period", "request_count", "face_search_count", "updated_at")
       VALUES (${workspaceId}::uuid, ${period}, 1, ${faceIncrement}, NOW())

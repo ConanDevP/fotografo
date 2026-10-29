@@ -6,6 +6,14 @@ Cada API key pertenece a un workspace y solo puede acceder a recursos de ese
 workspace. Un identificador válido de otra cuenta responde `404`. La clave debe
 usarse exclusivamente desde servidores del cliente.
 
+### Claves de prueba y de producción
+
+Mientras tu contrato está en **piloto** recibes claves de prueba (`lm_test_…`):
+topes bajos, sin descarga de originales y con fecha de fin. Al activarse el
+contrato dejan de valer (`403`) y debes crear claves de producción (`lm_live_…`).
+Nunca uses una clave de prueba en producción ni al revés: el prefijo y el entorno
+registrado deben coincidir.
+
 ## Scopes
 
 | Scope | Autoriza |
@@ -127,6 +135,20 @@ procesamiento, eliminación y descarga informan el resultado por fotografía.
 El placement acepta posición `top`/`bottom`, opacidad 0.35–1, altura 2–20%,
 prioridad 0–100 y si es obligatorio en descargas gratuitas.
 
+### Consumo del contrato
+
+| Método | Ruta | Scope | Función |
+|---|---|---|---|
+| `GET` | `/usage` | `workspace:read` | Fotografías procesadas, solicitudes y búsquedas faciales del periodo frente a los topes del contrato |
+
+La respuesta incluye, por cada concepto, `used`, `limit` (nulo si el contrato no
+fija tope), `remaining` y `percentUsed`. Las fotografías se miden por año
+contractual (`windowStart`–`windowEnd`); solicitudes y búsquedas faciales, por mes.
+Consúltalo antes de cargas grandes y configura una alerta propia al llegar al 80 %.
+
+Cada fotografía consume un crédito cuando su subida queda verificada. Los
+reintentos, las fotografías repetidas y los reprocesos no consumen otro.
+
 ### Marca blanca
 
 | Método | Ruta | Scope | Función |
@@ -184,7 +206,7 @@ petición y termina cuando sea nulo o no esté presente.
 |---|---|---|
 | `400` | Validación o estado no permitido | Corregir; no repetir igual |
 | `401` | Clave ausente, inválida, expirada o revocada | Rotar/revisar clave |
-| `403` | Scope o capacidad del plan insuficiente | Ajustar permisos o plan |
+| `403` | Scope o capacidad del plan insuficiente, o cupo anual de fotografías agotado (`PHOTO_LIMIT_REACHED`, con `limit`, `used` y `resetsAt`) | Ajustar permisos o plan; ampliar el cupo con tu gestor |
 | `404` | Recurso inexistente o fuera del workspace | Revisar ID |
 | `409` | Conflicto o idempotencia en curso/reutilizada | Resolver o reintentar con la misma clave |
 | `413` | Cuerpo o archivo excede el máximo | Reducir tamaño |

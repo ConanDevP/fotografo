@@ -19,6 +19,7 @@ import { AdminIntegrationsService } from './admin-integrations.service';
 import { AdminIntegrationsController } from './admin-integrations.controller';
 import { AdminPlanAccessController } from './admin-plan-access.controller';
 import { AdminPlanAccessService } from './admin-plan-access.service';
+import { PartnerApiModule } from '../partner-api/partner-api.module';
 import { AdminEnterpriseController } from './admin-enterprise.controller';
 import { AdminEnterpriseService } from './admin-enterprise.service';
 import { PrismaService } from '../common/services/prisma.service';
@@ -30,7 +31,7 @@ import { EventsModule } from '../events/events.module';
   // El borrado permanente de eventos reutiliza el del panel del fotógrafo, que
   // es el que libera cuota y limpia el almacenamiento. Tener dos borrados
   // distintos era justamente lo que dejaba uno de ellos roto y con fugas.
-  imports: [EventsModule],
+  imports: [EventsModule, PartnerApiModule],
   controllers: [
     AdminController,
     AdminUsersController,

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
@@ -15,6 +16,12 @@ const GeminiResponseSchema = z.object({
   notes: z.string().optional(),
 });
 
+export interface AiCallContext {
+  photoId?: string;
+  eventId?: string;
+  workspaceId?: string | null;
+}
+
 @Injectable()
 export class OcrGeminiService {
   private readonly logger = new Logger(OcrGeminiService.name);
@@ -22,6 +29,7 @@ export class OcrGeminiService {
 
   constructor(
     private configService: ConfigService,
+    private prisma: PrismaService,
   ) {
     const apiKey = this.configService.get('GEMINI_API_KEY');
     if (!apiKey) {
@@ -30,12 +38,74 @@ export class OcrGeminiService {
     this.genAI = new GoogleGenerativeAI(apiKey);
   }
 
+  private modelFor(strategy: 'flash' | 'pro'): string {
+    return strategy === 'pro'
+      ? this.configService.get<string>('GEMINI_PRO_MODEL', GEMINI_MODELS.PRO)
+      : this.configService.get<string>('GEMINI_FLASH_MODEL', GEMINI_MODELS.FLASH);
+  }
+
+  /**
+   * Detecta dorsales y deja constancia de la llamada, sea cual sea su resultado.
+   * El registro incluye las llamadas fallidas y las que no encuentran dorsal:
+   * son las que disparan el reintento con el modelo mayor y, por tanto, las que
+   * más pesan en el coste real por fotografía.
+   */
   async detectBibs(
     imageUrl: string,
     bibRules?: BibRules,
     strategy: 'flash' | 'pro' = 'flash',
+    context?: AiCallContext,
   ): Promise<GeminiOCRResponse> {
-    return await this.performOCR(imageUrl, bibRules, strategy);
+    const startedAt = Date.now();
+    const model = this.modelFor(strategy);
+    try {
+      const result = await this.performOCR(imageUrl, bibRules, strategy);
+      void this.logCall({
+        context, model, strategy, success: true, bibsFound: result.bibs?.length ?? 0,
+        usage: result.usage, durationMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      void this.logCall({
+        context, model, strategy, success: false, bibsFound: 0,
+        durationMs: Date.now() - startedAt,
+        errorCode: (error instanceof Error ? error.message : 'error').slice(0, 80),
+      });
+      throw error;
+    }
+  }
+
+  private async logCall(entry: {
+    context?: AiCallContext;
+    model: string;
+    strategy: string;
+    success: boolean;
+    bibsFound: number;
+    usage?: GeminiOCRResponse['usage'];
+    durationMs: number;
+    errorCode?: string;
+  }): Promise<void> {
+    try {
+      await this.prisma.aiUsageLog.create({
+        data: {
+          workspaceId: entry.context?.workspaceId ?? null,
+          eventId: entry.context?.eventId ?? null,
+          photoId: entry.context?.photoId ?? null,
+          model: entry.model,
+          strategy: entry.strategy,
+          success: entry.success,
+          bibsFound: entry.bibsFound,
+          promptTokens: entry.usage?.promptTokens ?? null,
+          outputTokens: entry.usage?.candidatesTokens ?? null,
+          totalTokens: entry.usage?.totalTokens ?? null,
+          durationMs: entry.durationMs,
+          errorCode: entry.errorCode ?? null,
+        },
+      });
+    } catch (error) {
+      // El registro de costes nunca debe romper el procesamiento de una foto.
+      this.logger.warn(`No se pudo registrar el uso de IA: ${error instanceof Error ? error.message : 'error'}`);
+    }
   }
 
   private async performOCR(
@@ -44,9 +114,7 @@ export class OcrGeminiService {
     strategy: 'flash' | 'pro' = 'flash',
   ): Promise<GeminiOCRResponse> {
     try {
-      const modelName = strategy === 'pro'
-        ? this.configService.get<string>('GEMINI_PRO_MODEL', GEMINI_MODELS.PRO)
-        : this.configService.get<string>('GEMINI_FLASH_MODEL', GEMINI_MODELS.FLASH);
+      const modelName = this.modelFor(strategy);
       const model = this.genAI.getGenerativeModel({
         model: modelName,
       });

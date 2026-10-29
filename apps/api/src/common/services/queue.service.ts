@@ -5,6 +5,9 @@ import IORedis from 'ioredis';
 import { QUEUES, JOBS } from '@shared/constants';
 import { ProcessPhotoJob, SendBibEmailJob, ReprocessPhotoJob } from '@shared/types';
 
+/** Prioridad de un trabajo normal. Ver `PROCESSING_PRIORITY` para el porqué de no usar 0. */
+const NORMAL_PRIORITY = 10;
+
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private connection: IORedis;
@@ -86,7 +89,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.connection?.disconnect();
   }
 
-  async addProcessPhotoJob(job: ProcessPhotoJob, priority = 0) {
+  async addProcessPhotoJob(job: ProcessPhotoJob, priority = NORMAL_PRIORITY) {
     if (!this.processPhotoQueue) {
       throw new Error('Process photo queue not initialized');
     }

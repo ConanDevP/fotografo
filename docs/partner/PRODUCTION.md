@@ -8,6 +8,9 @@
 - Rotación y revocación ensayadas con responsable asignado.
 - Nunca compartir una clave entre empresas o workspaces.
 
+- Al pasar de piloto a contrato, crear claves `lm_live_…` y retirar las `lm_test_…`.
+- Alertas propias al 80 % del cupo (`GET /usage` o el webhook `usage.threshold`).
+
 ## Cliente HTTP
 
 - Timeouts de conexión y respuesta explícitos.

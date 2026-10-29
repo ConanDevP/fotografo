@@ -3,6 +3,7 @@ import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
+import { aiCallCostUsd, resolveAiPrices } from './ai-pricing';
 
 @Injectable()
 export class AdminSystemService {
@@ -352,6 +353,89 @@ export class AdminSystemService {
       message: `Logs antiguos eliminados`,
       deletedCount: result.count,
       cutoffDate: cutoffDate.toISOString(),
+    };
+  }
+
+  /**
+   * Coste real de la IA por fotografía y por espacio.
+   *
+   * Es el número que decide los precios: sale de las llamadas registradas en
+   * `ai_usage_logs`, incluidas las que fallan o no encuentran dorsal y suben al
+   * modelo mayor. Los precios por modelo se configuran con `AI_PRICING_JSON`.
+   */
+  async getAiCostReport(userRole: UserRole, days = 30) {
+    if (userRole !== UserRole.ADMIN) {
+      throw new ForbiddenException({ code: ERROR_CODES.FORBIDDEN, message: 'Solo administradores pueden ver los costes' });
+    }
+    const since = new Date(Date.now() - Math.min(Math.max(days, 1), 365) * 24 * 60 * 60 * 1000);
+    const prices = resolveAiPrices(process.env.AI_PRICING_JSON);
+
+    const byModel = await this.prisma.$queryRaw<Array<{
+      model: string; strategy: string; calls: bigint; ok: bigint; with_tokens: bigint; prompt: bigint | null; output: bigint | null;
+    }>>`
+      SELECT model, strategy, COUNT(*) AS calls,
+             COUNT(*) FILTER (WHERE success) AS ok,
+             COUNT(*) FILTER (WHERE total_tokens IS NOT NULL) AS with_tokens,
+             SUM(prompt_tokens) AS prompt, SUM(output_tokens) AS output
+      FROM ai_usage_logs WHERE created_at >= ${since}
+      GROUP BY model, strategy ORDER BY model, strategy`;
+    const photos = await this.prisma.$queryRaw<Array<{ photos: bigint; escalated: bigint }>>`
+      SELECT COUNT(DISTINCT photo_id) AS photos,
+             COUNT(DISTINCT photo_id) FILTER (WHERE strategy = 'pro') AS escalated
+      FROM ai_usage_logs WHERE created_at >= ${since} AND photo_id IS NOT NULL`;
+    const byWorkspace = await this.prisma.$queryRaw<Array<{
+      workspace_id: string | null; model: string; photos: bigint; prompt: bigint | null; output: bigint | null;
+    }>>`
+      SELECT workspace_id, model, COUNT(DISTINCT photo_id) AS photos, SUM(prompt_tokens) AS prompt, SUM(output_tokens) AS output
+      FROM ai_usage_logs WHERE created_at >= ${since} GROUP BY workspace_id, model`;
+
+    let totalCost = 0;
+    let unpriced = 0;
+    const models = byModel.map(row => {
+      const cost = aiCallCostUsd(prices, row.model, Number(row.prompt ?? 0), Number(row.output ?? 0));
+      if (cost == null) unpriced += Number(row.calls);
+      totalCost += cost ?? 0;
+      return {
+        model: row.model,
+        strategy: row.strategy,
+        calls: Number(row.calls),
+        successfulCalls: Number(row.ok),
+        callsWithoutTokenData: Number(row.calls) - Number(row.with_tokens),
+        promptTokens: Number(row.prompt ?? 0),
+        outputTokens: Number(row.output ?? 0),
+        estimatedCostUsd: cost == null ? null : Number(cost.toFixed(4)),
+      };
+    });
+    const distinctPhotos = Number(photos[0]?.photos ?? 0);
+
+    const workspaces = new Map<string, { photos: number; cost: number }>();
+    for (const row of byWorkspace) {
+      const key = row.workspace_id ?? 'sin-espacio';
+      const entry = workspaces.get(key) ?? { photos: 0, cost: 0 };
+      entry.photos = Math.max(entry.photos, Number(row.photos));
+      entry.cost += aiCallCostUsd(prices, row.model, Number(row.prompt ?? 0), Number(row.output ?? 0)) ?? 0;
+      workspaces.set(key, entry);
+    }
+
+    return {
+      since: since.toISOString(),
+      days,
+      distinctPhotos,
+      escalatedToProPhotos: Number(photos[0]?.escalated ?? 0),
+      escalationRate: distinctPhotos ? Number((Number(photos[0]?.escalated ?? 0) / distinctPhotos).toFixed(4)) : null,
+      estimatedTotalCostUsd: Number(totalCost.toFixed(4)),
+      estimatedCostPerPhotoUsd: distinctPhotos ? Number((totalCost / distinctPhotos).toFixed(6)) : null,
+      estimatedCostPer1000PhotosUsd: distinctPhotos ? Number(((totalCost / distinctPhotos) * 1000).toFixed(2)) : null,
+      unpricedCalls: unpriced,
+      models,
+      topWorkspaces: [...workspaces.entries()]
+        .map(([workspaceId, v]) => ({ workspaceId, photos: v.photos, estimatedCostUsd: Number(v.cost.toFixed(4)) }))
+        .sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd)
+        .slice(0, 20),
+      notes: [
+        'Solo cubre el OCR de dorsales. No incluye almacenamiento, cómputo del servicio de rostros ni el procesamiento de miniaturas.',
+        'Los precios por modelo son configurables con AI_PRICING_JSON y deben contrastarse con la tarifa vigente del proveedor.',
+      ],
     };
   }
 }

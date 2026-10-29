@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: LucilaMon Partner API
-  version: 1.3.0
+  version: 1.4.0
   description: API servidor-a-servidor para eventos y cargas de fotografías.
 servers:
   - url: https://api.lucilamon.com/v1/partner
@@ -442,6 +442,26 @@ paths:
   /events/{eventId}/exports/audience:
     parameters: [{ $ref: '#/components/parameters/EventId' }]
     get: { summary: Exportar audiencia CSV, responses: { '200': { description: CSV en data.content } } }
+  /usage:
+    get:
+      summary: Consultar el consumo del contrato
+      description: Fotografías procesadas por año contractual, solicitudes y búsquedas faciales por mes, frente a los topes acordados. Requiere el scope workspace:read.
+      responses:
+        '200':
+          description: Consumo actual
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      period: { type: string, example: '2026-10' }
+                      contract: { type: object, nullable: true }
+                      photos: { $ref: '#/components/schemas/UsageCounter' }
+                      apiRequests: { $ref: '#/components/schemas/UsageCounter' }
+                      faceSearches: { $ref: '#/components/schemas/UsageCounter' }
   /workspace:
     get: { summary: Consultar white-label, responses: { '200': { description: Workspace y branding } } }
     patch:
@@ -536,6 +556,15 @@ components:
       in: query
       schema: { type: string, maxLength: 40 }
   schemas:
+    UsageCounter:
+      type: object
+      properties:
+        used: { type: integer }
+        limit: { type: integer, nullable: true, description: Nulo si el contrato no fija tope }
+        remaining: { type: integer, nullable: true }
+        percentUsed: { type: number, nullable: true }
+        windowStart: { type: string, format: date-time }
+        windowEnd: { type: string, format: date-time }
     EventInput:
       type: object
       required: [name, date]

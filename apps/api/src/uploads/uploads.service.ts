@@ -10,6 +10,8 @@ import { InitiateBatchUploadDto } from './dto/initiate-batch-upload.dto';
 import { BatchStatusDetailed, ProcessingPerformance, UserDashboardStats } from './dto/batch-status-detailed.dto';
 import { EventsService } from '../events/events.service';
 import { BillingService } from '../billing/billing.service';
+import { MeteringService } from '../billing/metering.service';
+import { ProcessingPriorityService } from '../billing/processing-priority.service';
 import { createHash } from 'crypto';
 
 
@@ -24,6 +26,8 @@ export class UploadsService {
     private jobRecoveryService: JobRecoveryService,
     private eventsService: EventsService,
     private billingService: BillingService,
+    private meteringService: MeteringService,
+    private processingPriority: ProcessingPriorityService,
   ) {}
 
   async initiateBatchUpload(initiateDto: InitiateBatchUploadDto, ownerId: string, userRole: UserRole) {
@@ -574,6 +578,7 @@ export class UploadsService {
     // El cupo se comprueba antes de escribir en R2: subir y borrar después
     // costaría dinero y dejaría objetos huérfanos.
     await this.billingService.assertStorageAvailable(photographerWorkspace?.id, file.size);
+    await this.meteringService.assertPhotoCapacity(await this.meteringService.meteredWorkspace(eventId, photographerWorkspace?.id), 1);
 
     const contentHash =
       metadata?.contentHash ?? createHash('sha256').update(file.buffer).digest('hex');
@@ -699,6 +704,9 @@ export class UploadsService {
         },
       });
 
+      const metered = await this.meteringService.meteredWorkspace(eventId, photographerWorkspace?.id);
+      await this.meteringService.recordPhoto(metered, photo.id, eventId);
+
       // El objeto ya está en R2: contabilizarlo. Si esto fallara, el medidor
       // quedaría corto, no largo, y `recalculateStorage` lo corrige.
       await this.billingService
@@ -724,12 +732,13 @@ export class UploadsService {
 
 
       // Enqueue photo for processing with retry
+      const queuePriority = await this.processingPriority.forWorkspace(await this.meteringService.meteredWorkspace(eventId, photographerWorkspace?.id));
       try {
         const enqueuedJob = await this.queueService.addProcessPhotoJob({
           photoId: updatedPhoto.id,
           eventId: eventId,
           objectKey: uploadResult.cloudinaryId,
-        });
+        }, queuePriority);
         
         this.logger.log(`✅ JOB ENCOLADO INMEDIATAMENTE - Foto: ${updatedPhoto.id}, Job ID: ${enqueuedJob.id}, Delay: 0ms`);
       } catch (error) {
@@ -741,7 +750,7 @@ export class UploadsService {
             photoId: updatedPhoto.id,
             eventId: eventId,
             objectKey: uploadResult.cloudinaryId,
-          });
+          }, queuePriority);
           this.logger.log(`🔄 JOB RE-ENCOLADO EXITOSAMENTE - Foto: ${updatedPhoto.id}, Job ID: ${retryJob.id}`);
         } catch (retryError) {
           this.logger.error(`FALLÓ retry para foto ${updatedPhoto.id}: ${getErrorMessage(retryError)}`);
@@ -1069,6 +1078,8 @@ export class UploadsService {
     if (currentItemCount + newCount > job.totalFiles) {
       throw new BadRequestException('El lote excede el total de archivos declarado');
     }
+    // Cupo anual del contrato: se comprueba antes de firmar URLs de carga.
+    await this.meteringService.assertPhotoCapacity(await this.meteringService.meteredWorkspace(job.eventId, workspace?.id), newCount);
 
     if (job.status === 'PENDING') {
       await this.prisma.batchUploadJob.update({ where: { id: jobId }, data: { status: 'UPLOADING' } });
@@ -1215,6 +1226,8 @@ export class UploadsService {
             },
           });
           confirmedInDatabase = true;
+          const meteredWorkspaceId = await this.meteringService.meteredWorkspace(photo.eventId, photo.photographerWorkspaceId);
+          await this.meteringService.recordPhoto(meteredWorkspaceId, photo.id, photo.eventId);
 
           // El consumo se contabiliza con el tamaño verificado, nunca con el
           // declarado por el cliente.
@@ -1240,7 +1253,10 @@ export class UploadsService {
           // conserva en PENDING para que JobRecoveryService la vuelva a encolar;
           // nunca se borra un original valido por un fallo de la cola.
           await this.queueService
-            .addProcessPhotoJob({ photoId: updated.id, eventId: updated.eventId, objectKey })
+            .addProcessPhotoJob(
+              { photoId: updated.id, eventId: updated.eventId, objectKey },
+              await this.processingPriority.forWorkspace(await this.meteringService.meteredWorkspace(photo.eventId, photo.photographerWorkspaceId)),
+            )
             .catch(error => this.logger.error(
               `Foto ${updated.id} confirmada, pendiente de recovery porque no se pudo encolar: ${getErrorMessage(error)}`,
             ));

@@ -81,6 +81,27 @@ const PLANS = [
     isDefault: false,
     sortOrder: 2,
   },
+  {
+    slug: 'business',
+    name: 'Business',
+    audience: PlanAudience.ANY,
+    description: 'Para cronometradores y organizadores que operan como negocio y venden a sus clientes con su marca.',
+    priceCents: 14900,
+    commissionPercent: 6,
+    // Mismo precio por foto que Organización: el valor de Business está en la
+    // comisión baja, el almacenamiento y los administradores, no en regalar IA.
+    sharePhotoCents: 0.8,
+    includedStorageBytes: BigInt(2048) * GB,
+    extraStorageBlockBytes: BigInt(500) * GB,
+    extraStorageBlockCents: 3500,
+    sponsoredEventFeeCents: 0,
+    maxAdmins: 25,
+    allowsCustomDomain: true,
+    allowsSponsors: true,
+    allowsAdvancedMetrics: true,
+    isDefault: false,
+    sortOrder: 3,
+  },
 ];
 
 async function main() {

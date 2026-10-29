@@ -3,6 +3,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 
 import { BatchProgressService } from '../services/batch-progress.service';
 import { PrismaService } from '../../../api/src/common/services/prisma.service';
+import { PartnerWebhooksService } from '../../../api/src/partner-api/partner-webhooks.service';
 import { QUEUES } from '@shared/constants';
 
 describe('Repaso de inferencia al cerrar el lote', () => {
@@ -12,7 +13,7 @@ describe('Repaso de inferencia al cerrar el lote', () => {
 
   /** Lote con `done` de `total` elementos terminados y ninguno fallido. */
   const givenBatch = (status: string, total: number, done: number) => {
-    prisma.batchUploadJob.findUnique.mockResolvedValue({ status, totalFiles: total, eventId: 'ev-1' });
+    prisma.batchUploadJob.findUnique.mockResolvedValue({ status, totalFiles: total, eventId: 'ev-1', event: { workspaceId: 'ws-1' } });
     prisma.batchUploadItem.count.mockImplementation(({ where }: any) => {
       if (where?.status?.in) return Promise.resolve(done);
       if (where?.status === 'FAILED') return Promise.resolve(0);
@@ -34,6 +35,7 @@ describe('Repaso de inferencia al cerrar el lote', () => {
       providers: [
         BatchProgressService,
         { provide: PrismaService, useValue: prisma },
+        { provide: PartnerWebhooksService, useValue: { emit: jest.fn().mockResolvedValue(undefined) } },
         { provide: getQueueToken(QUEUES.INFER_BIBS), useValue: queue },
       ],
     }).compile();

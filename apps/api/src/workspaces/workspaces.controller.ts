@@ -157,4 +157,41 @@ export class WorkspacesController {
   ): Promise<ApiResponse> {
     return { data: await this.workspaces.updateMember(workspaceId, memberId, dto, req.user.id) };
   }
+  @UseGuards(AuthGuard('jwt'))
+  @Delete(':workspaceId/members/:memberId')
+  async removeMember(
+    @Param('workspaceId') workspaceId: string,
+    @Param('memberId') memberId: string,
+    @Req() req: any,
+  ): Promise<ApiResponse> {
+    return { data: await this.workspaces.removeMember(workspaceId, memberId, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Get(':workspaceId/invitations')
+  async listInvitations(@Param('workspaceId') workspaceId: string, @Req() req: any): Promise<ApiResponse> {
+    return { data: await this.workspaces.listInvitations(workspaceId, req.user.id) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Delete(':workspaceId/invitations/:invitationId')
+  async revokeInvitation(
+    @Param('workspaceId') workspaceId: string,
+    @Param('invitationId') invitationId: string,
+    @Req() req: any,
+  ): Promise<ApiResponse> {
+    return { data: await this.workspaces.revokeInvitation(workspaceId, invitationId, req.user.id) };
+  }
+
+  /** Vista previa pública del enlace del correo: no revela nada que el token no dé ya. */
+  @Get('team-invitations/:token')
+  async getInvitation(@Param('token') token: string): Promise<ApiResponse> {
+    return { data: await this.workspaces.getInvitation(token) };
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Post('team-invitations/:token/accept')
+  async acceptInvitation(@Param('token') token: string, @Req() req: any): Promise<ApiResponse> {
+    return { data: await this.workspaces.acceptInvitation(token, req.user.id) };
+  }
 }

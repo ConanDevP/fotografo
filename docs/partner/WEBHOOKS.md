@@ -117,6 +117,7 @@ def verify(raw_body: bytes, timestamp: str, signature: str, secret: str) -> bool
 | `photo.free_downloaded` | Se completó una descarga gratuita o patrocinada |
 | `photo.bulk.completed` | Terminó una operación masiva |
 | `workspace.brand.updated` | Cambió la configuración o activo de marca |
+| `usage.threshold` | El consumo del contrato cruzó el 80 % o el 100 % de un tope (`data.metric`: `photos`, `apiRequests` o `faceSearches`) |
 
 ## Gestión y rotación
 

@@ -8,11 +8,12 @@ import { CloudinaryService } from '../common/services/cloudinary.service';
 import { SharpTransformService } from '../common/services/sharp-transform.service';
 import { BillingModule } from '../billing/billing.module';
 import { RailwayDomainsService } from './railway-domains.service';
+import { MailerService } from '../common/services/mailer.service';
 
 @Module({
   imports: [forwardRef(() => BillingModule)],
   controllers: [WorkspacesController],
-  providers: [WorkspacesService, RailwayDomainsService, PrismaService, StorageService, R2Service, CloudinaryService, SharpTransformService],
+  providers: [WorkspacesService, RailwayDomainsService, MailerService, PrismaService, StorageService, R2Service, CloudinaryService, SharpTransformService],
   exports: [WorkspacesService],
 })
 export class WorkspacesModule {}

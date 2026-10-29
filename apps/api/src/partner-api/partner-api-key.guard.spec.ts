@@ -23,6 +23,7 @@ describe('PartnerApiKeyGuard', () => {
     keyPrefix: PREFIX,
     secretHash: createHash('sha256').update(KEY).digest('hex'),
     scopes: ['events:read'],
+    environment: 'LIVE',
     expiresAt: null,
     revokedAt: null,
     lastUsedAt: new Date(),
@@ -76,8 +77,35 @@ describe('PartnerApiKeyGuard', () => {
     const request = { headers: { authorization: `Bearer ${KEY}` } };
     await guard.canActivate(context(request));
     expect(enterpriseAccess.authorizeExistingClient).toHaveBeenCalledWith(
-      'workspace-1', ['events:read'], ['events:read'],
+      'workspace-1', ['events:read'], ['events:read'], 'LIVE',
     );
+  });
+
+  describe('claves de prueba (lm_test_)', () => {
+    const TEST_KEY = `lm_test_${PREFIX}_${'b'.repeat(43)}`;
+    const testClient = { ...client, environment: 'TEST', secretHash: createHash('sha256').update(TEST_KEY).digest('hex') };
+
+    function setupTest(found: any) {
+      const { guard, prisma, enterpriseAccess } = setup(['events:read']);
+      prisma.apiClient.findUnique.mockResolvedValue(found);
+      return { guard, enterpriseAccess };
+    }
+
+    it('acepta una clave de prueba registrada como TEST y avisa del entorno', async () => {
+      const { guard, enterpriseAccess } = setupTest(testClient);
+      await guard.canActivate(context({ headers: { authorization: `Bearer ${TEST_KEY}` } }));
+      expect(enterpriseAccess.authorizeExistingClient).toHaveBeenCalledWith('workspace-1', ['events:read'], ['events:read'], 'TEST');
+    });
+
+    it('rechaza una clave lm_test_ cuyo registro es de producción', async () => {
+      const { guard } = setupTest({ ...testClient, environment: 'LIVE' });
+      await expect(guard.canActivate(context({ headers: { authorization: `Bearer ${TEST_KEY}` } }))).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('rechaza una clave lm_live_ cuyo registro es de prueba', async () => {
+      const { guard } = setupTest({ ...client, environment: 'TEST' });
+      await expect(guard.canActivate(context({ headers: { authorization: `Bearer ${KEY}` } }))).rejects.toBeInstanceOf(UnauthorizedException);
+    });
   });
 
   it('invalida la clave si su creador fue degradado a un rol sin administración', async () => {
