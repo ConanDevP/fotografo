@@ -17,7 +17,13 @@ export class MetricsService {
     private readonly billing: BillingService,
   ) {}
 
-  async record(dto: RecordMetricDto, req: Request, userId?: string) {
+  /**
+   * Registra una métrica de audiencia.
+   *
+   * `options.trustedWorkspaceId` lo fija la Partner API: el evento puede estar sin publicar (el socio
+   * tiene su propia tienda) pero debe pertenecer a ese espacio.
+   */
+  async record(dto: RecordMetricDto, req: Request, userId?: string, options: { trustedWorkspaceId?: string } = {}) {
     const publicTypes = new Set([
       'WORKSPACE_VIEW',
       'EVENT_VIEW',
@@ -43,11 +49,13 @@ export class MetricsService {
         where: {
           id: eventId,
           deletedAt: null,
-          isPublished: true,
-                  },
+          ...(options.trustedWorkspaceId ? {} : { isPublished: true }),
+        },
         select: { workspaceId: true },
       });
-      if (!event) throw new NotFoundException('Evento no encontrado');
+      if (!event || (options.trustedWorkspaceId && event.workspaceId !== options.trustedWorkspaceId)) {
+        throw new NotFoundException('Evento no encontrado');
+      }
       if (workspaceId && event.workspaceId !== workspaceId) {
         throw new BadRequestException('El evento no pertenece al espacio indicado');
       }
@@ -64,14 +72,15 @@ export class MetricsService {
           event: { select: { workspaceId: true, isPublished: true, commerceMode: true, deletedAt: true } },
         },
       });
-      if (
-        !photo ||
-        photo.status !== 'PROCESSED' ||
-        photo.publicationStatus !== 'APPROVED' ||
-        !photo.event.isPublished ||
-        photo.event.deletedAt ||
-        (eventId && photo.eventId !== eventId)
-      ) {
+      const publiclyVisible = photo
+        && photo.status === 'PROCESSED'
+        && photo.publicationStatus === 'APPROVED'
+        && photo.event.isPublished
+        && !photo.event.deletedAt;
+      const visible = options.trustedWorkspaceId
+        ? Boolean(photo && !photo.event.deletedAt && photo.event.workspaceId === options.trustedWorkspaceId)
+        : Boolean(publiclyVisible);
+      if (!photo || !visible || (eventId && photo.eventId !== eventId)) {
         throw new NotFoundException('Fotografía no encontrada');
       }
       if (workspaceId && photo.event.workspaceId !== workspaceId) {

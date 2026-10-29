@@ -1,4 +1,8 @@
 import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { PartnerResponseInterceptor } from './partner-response.sanitizer';
+import { PartnerCommerceService } from './partner-commerce.service';
+import { PartnerInsightsService } from './partner-insights.service';
+import { PartnerDateRangeQueryDto, PartnerEarningsQueryDto, PartnerMetricsBatchDto, PartnerOrderListQueryDto } from './dto/partner-commerce.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { ApiResponse } from '@shared/types';
@@ -23,9 +27,15 @@ import { UpdateWorkspaceDto } from '../workspaces/dto/update-workspace.dto';
 
 @Controller('partner')
 @UseGuards(PartnerApiKeyGuard)
+@UseInterceptors(PartnerResponseInterceptor)
 @Throttle(600, 60)
 export class PartnerApiController {
-  constructor(private readonly partner: PartnerApiService, private readonly webhooks: PartnerWebhooksService) {}
+  constructor(
+    private readonly partner: PartnerApiService,
+    private readonly webhooks: PartnerWebhooksService,
+    private readonly commerce: PartnerCommerceService,
+    private readonly insights: PartnerInsightsService,
+  ) {}
 
   @Get('events')
   @RequirePartnerScopes('events:read')
@@ -424,5 +434,74 @@ export class PartnerApiController {
   @RequirePartnerScopes('webhooks:manage')
   async retryWebhook(@Req() req: PartnerRequest, @Param('deliveryId') deliveryId: string): Promise<ApiResponse> {
     return { data: await this.webhooks.retry(req.partner, deliveryId) };
+  }
+  // ── Pedidos y liquidaciones ──────────────────────────────────────────────
+
+  @Get('orders')
+  @RequirePartnerScopes('orders:read')
+  async listOrders(@Req() req: PartnerRequest, @Query() query: PartnerOrderListQueryDto): Promise<ApiResponse> {
+    const result = await this.commerce.listOrders(req.partner, query);
+    return { data: result.items, meta: { pagination: result.pagination } };
+  }
+
+  @Get('orders/:orderId')
+  @RequirePartnerScopes('orders:read')
+  async getOrder(@Req() req: PartnerRequest, @Param('orderId') orderId: string): Promise<ApiResponse> {
+    return { data: await this.commerce.getOrder(req.partner, orderId) };
+  }
+
+  @Get('earnings')
+  @RequirePartnerScopes('orders:read')
+  async earnings(@Req() req: PartnerRequest, @Query() query: PartnerEarningsQueryDto): Promise<ApiResponse> {
+    return { data: await this.commerce.earnings(req.partner, query) };
+  }
+
+  // ── Métricas de una tienda propia ────────────────────────────────────────
+
+  @Post('events/:eventId/metrics')
+  @RequirePartnerScopes('metrics:write')
+  @Throttle(300, 60)
+  async recordMetrics(@Req() req: PartnerRequest, @Param('eventId') eventId: string, @Body() dto: PartnerMetricsBatchDto): Promise<ApiResponse> {
+    return { data: await this.insights.recordMetrics(req.partner, eventId, dto.events) };
+  }
+
+  // ── Informes y métricas ampliadas ────────────────────────────────────────
+
+  @Get('events/:eventId/analytics/report-link')
+  @RequirePartnerScopes('events:analytics')
+  async reportLink(@Req() req: PartnerRequest, @Param('eventId') eventId: string): Promise<ApiResponse> {
+    return { data: await this.insights.reportLink(req.partner, eventId) };
+  }
+
+  @Post('events/:eventId/analytics/report-link/rotate')
+  @RequirePartnerScopes('events:analytics')
+  @Throttle(10, 60)
+  async rotateReportLink(@Req() req: PartnerRequest, @Param('eventId') eventId: string): Promise<ApiResponse> {
+    return { data: await this.insights.rotateReportLink(req.partner, eventId) };
+  }
+
+  @Post('events/:eventId/analytics/report')
+  @RequirePartnerScopes('events:analytics')
+  @Throttle(6, 60)
+  async sendReport(@Req() req: PartnerRequest, @Param('eventId') eventId: string): Promise<ApiResponse> {
+    return { data: await this.insights.sendReport(req.partner, eventId) };
+  }
+
+  @Get('events/:eventId/sponsors/analytics')
+  @RequirePartnerScopes('events:analytics')
+  async eventSponsorAnalytics(@Req() req: PartnerRequest, @Param('eventId') eventId: string): Promise<ApiResponse> {
+    return { data: await this.insights.eventSponsorAnalytics(req.partner, eventId) };
+  }
+
+  @Get('sponsors/:sponsorId/analytics')
+  @RequirePartnerScopes('events:analytics')
+  async sponsorAnalytics(@Req() req: PartnerRequest, @Param('sponsorId') sponsorId: string, @Query() query: PartnerDateRangeQueryDto): Promise<ApiResponse> {
+    return { data: await this.insights.sponsorOverview(req.partner, sponsorId, query.from, query.to) };
+  }
+
+  @Get('analytics/overview')
+  @RequirePartnerScopes('events:analytics')
+  async workspaceOverview(@Req() req: PartnerRequest, @Query() query: PartnerDateRangeQueryDto): Promise<ApiResponse> {
+    return { data: await this.insights.workspaceOverview(req.partner, query.from, query.to) };
   }
 }

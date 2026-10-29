@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
 import { BillingService } from '../billing/billing.service';
@@ -120,8 +120,8 @@ export class PhotosService {
     
     // Only allow processing of PENDING or FAILED photos
     if (photo.status === 'PROCESSED') {
-      throw new ForbiddenException({
-        code: ERROR_CODES.VALIDATION_ERROR,
+      throw new ConflictException({
+        code: 'ALREADY_PROCESSED',
         message: 'La foto ya está procesada',
       });
     }

@@ -22,11 +22,14 @@ import { PartnerDocsController } from './partner-docs.controller';
 import { EnterpriseBillingService } from './enterprise-billing.service';
 import { UsageAlertsService } from './usage-alerts.service';
 import { DataRetentionService } from './data-retention.service';
+import { PartnerCommerceService } from './partner-commerce.service';
+import { PartnerInsightsService } from './partner-insights.service';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
-  imports: [WorkspacesModule, EventsModule, UploadsModule, PhotosModule, SearchModule, SponsorsModule, MetricsModule, forwardRef(() => AnalyticsModule)],
+  imports: [WorkspacesModule, EventsModule, UploadsModule, PhotosModule, SearchModule, SponsorsModule, MetricsModule, BillingModule, forwardRef(() => AnalyticsModule)],
   controllers: [ApiClientsController, PartnerApiController, PartnerDocsController, WorkspaceWebhooksController, EnterpriseAccessController],
-  providers: [PrismaService, MailerService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService, EnterpriseBillingService, UsageAlertsService, DataRetentionService],
-  exports: [PartnerWebhooksService, EnterpriseAccessService, EnterpriseBillingService],
+  providers: [PrismaService, MailerService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService, EnterpriseBillingService, UsageAlertsService, DataRetentionService, PartnerCommerceService, PartnerInsightsService],
+  exports: [PartnerWebhooksService, EnterpriseAccessService, EnterpriseBillingService, PartnerCommerceService],
 })
 export class PartnerApiModule {}

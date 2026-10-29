@@ -9,6 +9,13 @@ import {
 import { Request, Response } from 'express';
 import { ERROR_CODES } from '@shared/constants';
 
+/** Prisma rechaza con P2023 los valores que no tienen forma de UUID (p. ej. `/events/abc`). */
+export function isMalformedIdentifier(exception: unknown): boolean {
+  const e = exception as { code?: string; message?: string; name?: string } | null;
+  if (!e || typeof e !== 'object') return false;
+  return e.code === 'P2023' || (e.name === 'PrismaClientKnownRequestError' && /Error creating UUID|invalid character in UUID/i.test(e.message ?? ''));
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -33,11 +40,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
         const errorObj = exceptionResponse as any;
         errorCode = errorObj.code || this.getErrorCodeFromStatus(status);
         message = errorObj.message || exception.message;
-        details = errorObj.details;
+        // Los datos extra de la excepción (p. ej. `limit`, `used`, `resetsAt` en los topes del
+        // contrato) viajan en `details`: antes se descartaban y el cliente solo veía el texto.
+        const { code: _code, message: _message, details: explicit, statusCode: _status, error: _error, ...extra } = errorObj;
+        details = explicit ?? (Object.keys(extra).length ? extra : undefined);
       } else {
         errorCode = this.getErrorCodeFromStatus(status);
         message = exceptionResponse as string;
       }
+    } else if (isMalformedIdentifier(exception)) {
+      // Un id que no es UUID no es un fallo del servidor: es una petición mal formada.
+      status = HttpStatus.BAD_REQUEST;
+      errorCode = ERROR_CODES.VALIDATION_ERROR;
+      message = 'Identificador inválido: debe ser un UUID';
     } else {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       errorCode = ERROR_CODES.INTERNAL_ERROR;
@@ -76,6 +91,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return ERROR_CODES.VALIDATION_ERROR;
       case HttpStatus.TOO_MANY_REQUESTS:
         return ERROR_CODES.RATE_LIMITED;
+      case HttpStatus.CONFLICT:
+        return 'CONFLICT';
+      case HttpStatus.PAYLOAD_TOO_LARGE:
+        return 'PAYLOAD_TOO_LARGE';
+      case HttpStatus.SERVICE_UNAVAILABLE:
+        return 'SERVICE_UNAVAILABLE';
       default:
         return ERROR_CODES.INTERNAL_ERROR;
     }

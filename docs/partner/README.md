@@ -24,7 +24,11 @@ integración.
 2. [Referencia funcional](REFERENCE.md): endpoints, scopes, estados, límites y errores.
 3. [Webhooks](WEBHOOKS.md): eventos, firma, reintentos y operación.
 4. [Salida a producción](PRODUCTION.md): checklist técnico y de seguridad.
-5. [Contrato OpenAPI](../partner-openapi.yaml): especificación legible por herramientas y generadores de SDK.
+5. [Pagos](PAGOS.md): cómo cobrar con tu pasarela, con la nuestra o con patrocinadores, y qué ves de cada pago.
+6. [Contrato OpenAPI](../partner-openapi.yaml): especificación legible por herramientas y generadores de SDK (73 operaciones y 28 eventos de webhook, con esquemas y ejemplos reales).
+7. Referencia interactiva (`/developers/reference.html`) y colección de Postman (`/developers/lucilamon-partner.postman_collection.json`), publicadas en el sitio.
+
+La especificación, la referencia y las cargas de webhook se **generan** (`npm run docs:partner`); ver `scripts/partner-docs/README.md`.
 
 La entrada pública para equipos técnicos se publica en `/developers`. El portal,
 este índice y `info.version` del OpenAPI deben actualizarse juntos en cada release.

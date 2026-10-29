@@ -20,9 +20,9 @@ export class UserThrottlerGuard extends ThrottlerGuard {
     // copiar el secreto al tracker ni a Redis y evita que integraciones detrás
     // de la misma NAT compartan accidentalmente el cupo.
     const authorization = String(req?.headers?.authorization || '');
-    const apiKeyMatch = /(?:^Bearer\s+)?lm_live_([a-f0-9]{16})_/i.exec(authorization);
+    const apiKeyMatch = /(?:^Bearer\s+)?lm_(?:live|test)_([a-f0-9]{16})_/i.exec(authorization);
     if (apiKeyMatch) return `api:${apiKeyMatch[1].toLowerCase()}`;
-    const headerKeyMatch = /^lm_live_([a-f0-9]{16})_/i.exec(String(req?.headers?.['x-api-key'] || ''));
+    const headerKeyMatch = /^lm_(?:live|test)_([a-f0-9]{16})_/i.exec(String(req?.headers?.['x-api-key'] || ''));
     if (headerKeyMatch) return `api:${headerKeyMatch[1].toLowerCase()}`;
 
     return `ip:${req.ip}`;

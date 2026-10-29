@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { PartnerCommerceService } from '../partner-api/partner-commerce.service';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import * as archiver from 'archiver';
@@ -33,6 +34,8 @@ export class PaymentsService {
     private configService: ConfigService,
     private paymentGatewayFactory: PaymentGatewayFactory,
     private billingService: BillingService,
+    // Opcional: avisa por webhook a los socios de la API cuando un pedido cambia de estado.
+    @Optional() private partnerCommerce?: PartnerCommerceService,
   ) { }
 
   async createOrder(orderData: CreateOrderDto, userId?: string) {
@@ -799,6 +802,7 @@ export class PaymentsService {
         settlementError: reversalErrors.length ? reversalErrors.join('; ').slice(0, 1000) : null,
       },
     });
+    await this.partnerCommerce?.emitOrderEvent(order.id, 'order.refunded');
     if (reversalErrors.length) throw new Error(reversalErrors.join('; '));
   }
 
@@ -1275,6 +1279,7 @@ export class PaymentsService {
     });
     if (!current) throw new NotFoundException('Pedido no encontrado');
     if (current.status === 'REFUNDED') throw new BadRequestException('Un pedido reembolsado no puede volver a pagarse');
+    const justPaid = current.status !== 'PAID';
     if (current.status !== 'PAID') {
       await this.prisma.order.update({
         where: { id: orderId },
@@ -1288,6 +1293,7 @@ export class PaymentsService {
     }
     await this.createLedgerForOrder(orderId);
     await this.recordPurchaseMetric(orderId);
+    if (justPaid) await this.partnerCommerce?.emitOrderEvent(orderId, 'order.paid');
     if (current.paymentGateway === PaymentGateway.STRIPE) {
       await this.settleStripeOrder(orderId);
     } else {
@@ -1380,6 +1386,7 @@ export class PaymentsService {
       });
     }
     await this.prisma.ledgerEntry.createMany({ data: entries, skipDuplicates: true });
+    await this.partnerCommerce?.emitOrderEvent(order.id, 'order.disputed');
 
     await this.submitDisputeEvidence(input.disputeId, order.id);
     if (reversalErrors.length) throw new Error(`Reversiones pendientes: ${reversalErrors.join('; ')}`);
@@ -1413,6 +1420,7 @@ export class PaymentsService {
       });
       await this.settleStripeOrder(order.id, `dispute-won-${disputeId}`);
     }
+    await this.partnerCommerce?.emitOrderEvent(order.id, 'order.dispute.closed');
     this.logger.log(`Contracargo ${disputeId} cerrado como "${status}" en el pedido ${order.id}`);
   }
 
@@ -1860,6 +1868,7 @@ export class PaymentsService {
         });
       });
 
+      await this.partnerCommerce?.emitOrderEvent(orderId, 'order.refunded');
       return { orderId, status: 'REFUNDED', refundId: refund.id };
     } catch (error) {
       const message = (error instanceof Error ? error.message : 'Error procesando el reembolso').slice(0, 1000);

@@ -30,6 +30,6 @@ import { PostEventReportService } from './post-event-report.service';
     MailerService,
     PrismaService,
   ],
-  exports: [AnalyticsService, AnalyticsRollupService],
+  exports: [AnalyticsService, AnalyticsRollupService, SponsorAnalyticsService, PostEventReportService],
 })
 export class AnalyticsModule {}

@@ -1,0 +1,21 @@
+# Configuración de la página de referencia (npx @redocly/cli build-docs).
+theme:
+  openapi:
+    expandResponses: '200,201'
+    hideDownloadButton: false
+    jsonSampleExpandLevel: 2
+    requiredPropsFirst: true
+    sortPropsAlphabetically: false
+    showExtensions: false
+    pathInMiddlePanel: true
+    theme:
+      colors:
+        primary:
+          main: '#6d4fe0'
+      typography:
+        fontSize: '15px'
+        fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+        headings:
+          fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+      sidebar:
+        backgroundColor: '#faf8ff'

@@ -182,6 +182,33 @@ describe('BillingService', () => {
     });
   });
 
+  describe('modo compartir con contrato Enterprise', () => {
+    const ENTERPRISE = { status: 'ACTIVE', contractStart: null, contractEnd: null };
+    const negocio = { ...profesional, id: 'plan-business', slug: 'business', name: 'Business', sharePhotoCents: 0.8, isDefault: false };
+
+    beforeEach(() => {
+      prisma.plan.findFirst.mockImplementation(async (args: any) => (args?.where?.slug === 'business' ? negocio : arranque));
+    });
+
+    it('un contrato activo no acumula cargo por fotografía', async () => {
+      prisma.workspace.findUnique.mockResolvedValue({ storageBytesUsed: BigInt(0), subscription: null, enterpriseAccount: ENTERPRISE });
+      await expect(service.accrueSharePhotoCharge(WORKSPACE, 100)).resolves.toBe(0);
+      expect(prisma.workspace.update).not.toHaveBeenCalled();
+    });
+
+    it('sin contrato sí se acumula el cargo del plan', async () => {
+      prisma.workspace.findUnique.mockResolvedValue({ storageBytesUsed: BigInt(0), subscription: null, enterpriseAccount: null });
+      await expect(service.accrueSharePhotoCharge(WORKSPACE, 100)).resolves.toBe(200);
+    });
+
+    it('publicar un evento gratuito con contrato no cuesta nada ni pide tarjeta', async () => {
+      prisma.event.findUnique.mockResolvedValue({ id: 'ev', name: 'Carrera', commerceMode: 'FREE', workspaceId: WORKSPACE, shareChargedAt: null, shareChargeCents: null, _count: { photos: 3000 } });
+      prisma.workspace.findUnique.mockResolvedValue({ storageBytesUsed: BigInt(0), subscription: null, enterpriseAccount: ENTERPRISE });
+      const estimate = await service.estimatePublication('ev');
+      expect(estimate).toMatchObject({ billable: true, perPhotoCents: 0, totalCents: 0, upgrade: null });
+    });
+  });
+
   describe('cupo de almacenamiento', () => {
     it('deja subir cuando el archivo cabe justo', async () => {
       givenWorkspace(null, BigInt(5) * GB - BigInt(1000));

@@ -333,8 +333,10 @@ export class BillingService {
   ): Promise<number> {
     if (!workspaceId || photos <= 0) return 0;
 
-    const { plan } = await this.resolveForWorkspace(workspaceId);
-    const perPhoto = Number(plan.sharePhotoCents);
+    const { plan, enterprise } = await this.resolveForWorkspace(workspaceId);
+    // Con un contrato Enterprise (o piloto) las fotografías ya se miden contra el cupo anual y
+    // se facturan por contrato: cobrar además por foto con tarjeta sería cobrar dos veces.
+    const perPhoto = enterprise ? 0 : Number(plan.sharePhotoCents);
     if (!perPhoto) return 0;
 
     const amount = perPhoto * photos;
@@ -384,8 +386,9 @@ export class BillingService {
       };
     }
 
-    const { plan } = await this.resolveForWorkspace(event.workspaceId);
-    const perPhoto = Number(plan.sharePhotoCents);
+    const { plan, enterprise } = await this.resolveForWorkspace(event.workspaceId);
+    // Contrato Enterprise o piloto: sin cargo por foto ni tarjeta obligatoria (ver accrueSharePhotoCharge).
+    const perPhoto = enterprise ? 0 : Number(plan.sharePhotoCents);
     const photos = event._count.photos;
     const totalCents = Math.round(perPhoto * photos);
 
@@ -396,7 +399,7 @@ export class BillingService {
       orderBy: { priceCents: 'asc' },
     });
     let upgrade: { slug: string; name: string; priceCents: number; totalCents: number } | null = null;
-    if (cheaper) {
+    if (cheaper && !enterprise) {
       const upgradeTotal = Math.round(Number(cheaper.sharePhotoCents) * photos);
       if (upgradeTotal + cheaper.priceCents < totalCents) {
         upgrade = {

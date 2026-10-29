@@ -1,0 +1,3738 @@
+{
+ "caps": [
+  {
+   "op": "createWebhook (todos los eventos)",
+   "method": "POST",
+   "path": "/webhooks",
+   "query": null,
+   "request": {
+    "url": "https://example.com/lucilamon/webhooks",
+    "events": [
+     "event.created",
+     "event.updated",
+     "event.deleted",
+     "event.restored",
+     "event.cover.updated",
+     "event.cover.removed",
+     "event.gallery.updated",
+     "event.contributor.invited",
+     "event.contributor.revoked",
+     "event.sponsor.attached",
+     "event.sponsor.detached",
+     "upload.batch.created",
+     "upload.batch.completed",
+     "upload.batch.failed",
+     "photo.processing.completed",
+     "photo.processing.failed",
+     "photo.deleted",
+     "photo.reviewed",
+     "photo.download_url.created",
+     "photo.free_downloaded",
+     "photo.bulk.completed",
+     "workspace.brand.updated",
+     "analytics.report.ready",
+     "usage.threshold"
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "b76224dd-086c-4e17-bff7-a1d169a42281",
+     "url": "https://example.com/lucilamon/webhooks",
+     "events": [
+      "event.created",
+      "event.updated",
+      "event.deleted",
+      "event.restored",
+      "event.cover.updated",
+      "event.cover.removed",
+      "event.gallery.updated",
+      "event.contributor.invited",
+      "event.contributor.revoked",
+      "event.sponsor.attached",
+      "event.sponsor.detached",
+      "upload.batch.created",
+      "upload.batch.completed",
+      "upload.batch.failed",
+      "photo.processing.completed",
+      "photo.processing.failed",
+      "photo.deleted",
+      "photo.reviewed",
+      "photo.download_url.created",
+      "photo.free_downloaded",
+      "photo.bulk.completed",
+      "workspace.brand.updated",
+      "analytics.report.ready",
+      "usage.threshold"
+     ],
+     "active": true,
+     "createdAt": "2026-10-29T08:33:05.936Z",
+     "signingSecret": "whsec_qb1kRXAi08Gd6ZtvLU4uOonYK_crwwUfXFzxIMVHEN0"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "usage",
+   "method": "GET",
+   "path": "/usage",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "period": "2026-10",
+     "contract": {
+      "status": "ACTIVE",
+      "start": "2026-10-28T08:33:05.734Z",
+      "end": "2027-08-25T08:33:05.734Z"
+     },
+     "photos": {
+      "used": 0,
+      "limit": 100000,
+      "remaining": 100000,
+      "percentUsed": 0,
+      "windowStart": "2026-10-28T08:33:05.734Z",
+      "windowEnd": "2027-10-28T08:33:05.734Z"
+     },
+     "apiRequests": {
+      "used": 2,
+      "limit": 100000,
+      "percentUsed": 0
+     },
+     "faceSearches": {
+      "used": 0,
+      "limit": 10000,
+      "percentUsed": 0
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "getWorkspace",
+   "method": "GET",
+   "path": "/workspace",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "name": "Cronos Demo",
+     "slug": "cronos-demo",
+     "description": null,
+     "logoUrl": null,
+     "coverUrl": null,
+     "contactEmail": null,
+     "website": null,
+     "instagram": null,
+     "facebook": null,
+     "customDomain": null,
+     "customDomainVerificationToken": null,
+     "customDomainVerifiedAt": null,
+     "isPublished": false,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "storageBytesUsed": "0",
+     "postEventReportsEnabled": true,
+     "createdAt": "2026-10-29T08:33:05.722Z",
+     "updatedAt": "2026-10-29T08:33:05.722Z",
+     "deletedAt": null,
+     "brandTheme": null,
+     "members": [
+      {
+       "id": "71090e97-2803-4809-b0b4-a14b5e5821ca",
+       "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+       "userId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+       "role": "OWNER",
+       "status": "ACTIVE",
+       "joinedAt": "2026-10-29T08:33:05.729Z",
+       "user": {
+        "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+        "name": "Cronos Demo",
+        "email": "owner@docs.test",
+        "profileImageUrl": null
+       }
+      }
+     ],
+     "_count": {
+      "events": 0,
+      "members": 1,
+      "sponsors": 0
+     },
+     "events": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "updateWorkspace",
+   "method": "PATCH",
+   "path": "/workspace",
+   "query": null,
+   "request": {
+    "description": "Cronometraje y fotos de carreras en el norte de Mexico.",
+    "contactEmail": "hola@cronos.example",
+    "brand": {
+     "primaryColor": "#3B2A7A",
+     "accentColor": "#D7F500",
+     "template": "editorial"
+    }
+   },
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "name": "Cronos Demo",
+     "slug": "cronos-demo",
+     "description": "Cronometraje y fotos de carreras en el norte de Mexico.",
+     "logoUrl": null,
+     "coverUrl": null,
+     "contactEmail": "hola@cronos.example",
+     "website": null,
+     "instagram": null,
+     "facebook": null,
+     "customDomain": null,
+     "customDomainVerificationToken": null,
+     "customDomainVerifiedAt": null,
+     "isPublished": false,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "storageBytesUsed": "0",
+     "postEventReportsEnabled": true,
+     "createdAt": "2026-10-29T08:33:05.722Z",
+     "updatedAt": "2026-10-29T08:33:06.143Z",
+     "deletedAt": null,
+     "brandTheme": {
+      "id": "c522a71a-3a51-4654-8144-bb711dddbe7d",
+      "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+      "template": "editorial",
+      "primaryColor": "#3B2A7A",
+      "secondaryColor": "#F5F1E8",
+      "accentColor": "#D7F500",
+      "fontFamily": "Inter",
+      "heroTitle": null,
+      "heroSubtitle": null,
+      "showPastEvents": true,
+      "settings": null,
+      "createdAt": "2026-10-29T08:33:06.137Z",
+      "updatedAt": "2026-10-29T08:33:06.137Z"
+     },
+     "members": [
+      {
+       "id": "71090e97-2803-4809-b0b4-a14b5e5821ca",
+       "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+       "userId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+       "role": "OWNER",
+       "status": "ACTIVE",
+       "joinedAt": "2026-10-29T08:33:05.729Z",
+       "user": {
+        "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+        "name": "Cronos Demo",
+        "email": "owner@docs.test",
+        "profileImageUrl": null
+       }
+      }
+     ],
+     "_count": {
+      "events": 0,
+      "members": 1,
+      "sponsors": 0
+     },
+     "events": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "createEvent",
+   "method": "POST",
+   "path": "/events",
+   "query": null,
+   "request": {
+    "name": "Maraton Ciudad Demo 2027",
+    "date": "2027-03-14T07:00:00.000Z",
+    "location": "Monterrey, Mexico",
+    "commerceMode": "PAID",
+    "pricing": {
+     "singlePhoto": 800,
+     "pack5": 3000,
+     "pack10": 5000,
+     "currency": "USD"
+    },
+    "bibRules": {
+     "minLen": 3,
+     "maxLen": 5
+    },
+    "requiresPhotoApproval": true
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "date": "2027-03-14T00:00:00.000Z",
+     "location": "Monterrey, Mexico",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "deletedAt": null,
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "isFreeDownload": false,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": null,
+     "totalFreeDownloads": 0,
+     "commerceMode": "PAID",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": true,
+     "isPublished": false,
+     "publishedAt": null,
+     "owner": {
+      "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "email": "owner@docs.test",
+      "role": "PHOTOGRAPHER"
+     },
+     "_count": {
+      "photos": 0
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "createEvent (repetida con la misma Idempotency-Key)",
+   "method": "POST",
+   "path": "/events",
+   "query": null,
+   "request": {
+    "name": "Maraton Ciudad Demo 2027",
+    "date": "2027-03-14T07:00:00.000Z",
+    "location": "Monterrey, Mexico",
+    "commerceMode": "PAID",
+    "pricing": {
+     "singlePhoto": 800,
+     "pack5": 3000,
+     "pack10": 5000,
+     "currency": "USD"
+    },
+    "bibRules": {
+     "minLen": 3,
+     "maxLen": 5
+    },
+    "requiresPhotoApproval": true
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "date": "2027-03-14T00:00:00.000Z",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "owner": {
+      "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "role": "PHOTOGRAPHER",
+      "email": "owner@docs.test"
+     },
+     "_count": {
+      "photos": 0
+     },
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "imageUrl": null,
+     "location": "Monterrey, Mexico",
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "deletedAt": null,
+     "isPublished": false,
+     "publishedAt": null,
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "commerceMode": "PAID",
+     "isFreeDownload": false,
+     "freeDownloadLimit": null,
+     "freeDownloadUntil": null,
+     "totalFreeDownloads": 0,
+     "requireEmailForFree": true,
+     "requiresPhotoApproval": true,
+     "sponsorOverlayEnabled": false,
+     "organizerCommissionPercent": "0"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": "replay"
+  },
+  {
+   "op": "createEvent (misma clave, cuerpo distinto)",
+   "method": "POST",
+   "path": "/events",
+   "query": null,
+   "request": {
+    "name": "Otro nombre distinto",
+    "date": "2027-03-14T07:00:00.000Z"
+   },
+   "status": 409,
+   "response": {
+    "error": {
+     "code": "CONFLICT",
+     "message": "Idempotency-Key ya fue utilizada con otra solicitud"
+    },
+    "timestamp": "2026-10-29T08:33:06.247Z",
+    "path": "/v1/partner/events"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "597"
+   },
+   "note": "conflict"
+  },
+  {
+   "op": "listEvents",
+   "method": "GET",
+   "path": "/events",
+   "query": {
+    "page": 1,
+    "limit": 20
+   },
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "name": "Maraton Ciudad Demo 2027",
+      "slug": "maraton-ciudad-demo-2027-1793262786180",
+      "date": "2027-03-14T00:00:00.000Z",
+      "location": "Monterrey, Mexico",
+      "imageUrl": null,
+      "commerceMode": "PAID",
+      "pricing": {
+       "pack5": 3000,
+       "pack10": 5000,
+       "currency": "USD",
+       "singlePhoto": 800
+      },
+      "bibRules": {
+       "maxLen": 5,
+       "minLen": 3
+      },
+      "requiresPhotoApproval": true,
+      "isPublished": false,
+      "publishedAt": null,
+      "deletedAt": null,
+      "createdAt": "2026-10-29T08:33:06.181Z",
+      "_count": {
+       "photos": 0
+      }
+     }
+    ],
+    "meta": {
+     "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 1,
+      "pages": 1
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "getEvent",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "date": "2027-03-14T00:00:00.000Z",
+     "location": "Monterrey, Mexico",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "deletedAt": null,
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "isFreeDownload": false,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": null,
+     "totalFreeDownloads": 0,
+     "commerceMode": "PAID",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": true,
+     "isPublished": false,
+     "publishedAt": null,
+     "owner": {
+      "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "email": "owner@docs.test",
+      "role": "PHOTOGRAPHER"
+     },
+     "workspace": {
+      "id": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+      "name": "Cronos Demo",
+      "slug": "cronos-demo",
+      "description": "Cronometraje y fotos de carreras en el norte de Mexico.",
+      "logoUrl": null,
+      "coverUrl": null,
+      "contactEmail": "hola@cronos.example",
+      "website": null,
+      "instagram": null,
+      "facebook": null,
+      "customDomain": null,
+      "customDomainVerificationToken": null,
+      "customDomainVerifiedAt": null,
+      "isPublished": false,
+      "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "storageBytesUsed": "0",
+      "postEventReportsEnabled": true,
+      "createdAt": "2026-10-29T08:33:05.722Z",
+      "updatedAt": "2026-10-29T08:33:06.143Z",
+      "deletedAt": null,
+      "brandTheme": {
+       "id": "c522a71a-3a51-4654-8144-bb711dddbe7d",
+       "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+       "template": "editorial",
+       "primaryColor": "#3B2A7A",
+       "secondaryColor": "#F5F1E8",
+       "accentColor": "#D7F500",
+       "fontFamily": "Inter",
+       "heroTitle": null,
+       "heroSubtitle": null,
+       "showPastEvents": true,
+       "settings": null,
+       "createdAt": "2026-10-29T08:33:06.137Z",
+       "updatedAt": "2026-10-29T08:33:06.137Z"
+      }
+     },
+     "_count": {
+      "photos": 0,
+      "photoBibs": 0,
+      "bibSubscriptions": 0
+     },
+     "viewer": {
+      "relation": "OWNER",
+      "workspaceRole": "OWNER",
+      "contributorRole": null,
+      "canManage": true,
+      "canUpload": true
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "updateEvent",
+   "method": "PATCH",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "query": null,
+   "request": {
+    "location": "Parque Fundidora, Monterrey",
+    "requiresPhotoApproval": false
+   },
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "date": "2027-03-14T00:00:00.000Z",
+     "location": "Parque Fundidora, Monterrey",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "deletedAt": null,
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "isFreeDownload": false,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": null,
+     "totalFreeDownloads": 0,
+     "commerceMode": "PAID",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": false,
+     "isPublished": false,
+     "publishedAt": null,
+     "owner": {
+      "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "email": "owner@docs.test",
+      "role": "PHOTOGRAPHER"
+     },
+     "_count": {
+      "photos": 0
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "getGallery",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/gallery",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "imageUrl": null,
+     "isPublished": false,
+     "publishedAt": null,
+     "commerceMode": "PAID",
+     "isFreeDownload": false,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": null,
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": false,
+     "totalFreeDownloads": 0
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "updateGallery",
+   "method": "PATCH",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/gallery",
+   "query": null,
+   "request": {
+    "isFreeDownload": true,
+    "requireEmailForFree": true,
+    "freeDownloadLimit": 500,
+    "sponsorOverlayEnabled": false
+   },
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "date": "2027-03-14T00:00:00.000Z",
+     "location": "Parque Fundidora, Monterrey",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "deletedAt": null,
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "isFreeDownload": true,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": 500,
+     "totalFreeDownloads": 0,
+     "commerceMode": "PAID",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": false,
+     "isPublished": false,
+     "publishedAt": null,
+     "owner": {
+      "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "email": "owner@docs.test",
+      "role": "PHOTOGRAPHER"
+     },
+     "_count": {
+      "photos": 0
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "publishEvent (modo PAID)",
+   "method": "PATCH",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "query": null,
+   "request": {
+    "isPublished": true
+   },
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "date": "2027-03-14T00:00:00.000Z",
+     "location": "Parque Fundidora, Monterrey",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "deletedAt": null,
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "isFreeDownload": true,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": 500,
+     "totalFreeDownloads": 0,
+     "commerceMode": "PAID",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": false,
+     "isPublished": true,
+     "publishedAt": "2026-10-29T08:33:06.410Z",
+     "owner": {
+      "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "email": "owner@docs.test",
+      "role": "PHOTOGRAPHER"
+     },
+     "_count": {
+      "photos": 0
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "createEvent (modo gratuito, publicado)",
+   "method": "POST",
+   "path": "/events",
+   "query": null,
+   "request": {
+    "name": "Carrera Familiar Demo",
+    "date": "2027-05-02T08:00:00.000Z",
+    "location": "Guadalajara, Mexico",
+    "commerceMode": "FREE",
+    "isPublished": true
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "dd40533c-15c4-4e8a-bec3-1e488fbf66d2",
+     "name": "Carrera Familiar Demo",
+     "slug": "carrera-familiar-demo-1793262786442",
+     "date": "2027-05-02T00:00:00.000Z",
+     "location": "Guadalajara, Mexico",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": null,
+     "pricing": null,
+     "deletedAt": null,
+     "createdAt": "2026-10-29T08:33:06.442Z",
+     "isFreeDownload": true,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": null,
+     "totalFreeDownloads": 0,
+     "commerceMode": "FREE",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": false,
+     "isPublished": true,
+     "publishedAt": "2026-10-29T08:33:06.442Z",
+     "owner": {
+      "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "email": "owner@docs.test",
+      "role": "PHOTOGRAPHER"
+     },
+     "_count": {
+      "photos": 0
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "596"
+   },
+   "note": ""
+  },
+  {
+   "op": "listPhotos",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photos",
+   "query": {
+    "page": 1,
+    "limit": 20
+   },
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "bf5b8717-31a3-4a72-9035-ed1d659776fb",
+      "thumbUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-3-thumb.jpg",
+      "watermarkUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-3-wm.jpg",
+      "width": 4000,
+      "height": 2667,
+      "status": "PROCESSED",
+      "takenAt": "2026-10-29T08:33:06.622Z",
+      "createdAt": "2026-10-29T08:33:06.623Z",
+      "photographer": null,
+      "detectedBibs": [
+       {
+        "id": "10",
+        "bib": "1003",
+        "confidence": 0.62,
+        "bbox": [
+         812,
+         1340,
+         220,
+         120
+        ],
+        "source": "GEMINI"
+       }
+      ],
+      "bibCount": 1,
+      "detectedFaces": [],
+      "faceCount": 0
+     },
+     {
+      "id": "b63dc508-0872-4a8c-8231-ff77c36bb526",
+      "thumbUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-2-thumb.jpg",
+      "watermarkUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-2-wm.jpg",
+      "width": 4000,
+      "height": 2667,
+      "status": "PROCESSED",
+      "takenAt": "2026-10-29T08:33:06.617Z",
+      "createdAt": "2026-10-29T08:33:06.618Z",
+      "photographer": null,
+      "detectedBibs": [
+       {
+        "id": "9",
+        "bib": "1002",
+        "confidence": 0.97,
+        "bbox": [
+         812,
+         1340,
+         220,
+         120
+        ],
+        "source": "GEMINI"
+       }
+      ],
+      "bibCount": 1,
+      "detectedFaces": [],
+      "faceCount": 0
+     },
+     {
+      "id": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+      "thumbUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-1-thumb.jpg",
+      "watermarkUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-1-wm.jpg",
+      "width": 4000,
+      "height": 2667,
+      "status": "PROCESSED",
+      "takenAt": "2026-10-29T08:33:06.568Z",
+      "createdAt": "2026-10-29T08:33:06.604Z",
+      "photographer": null,
+      "detectedBibs": [
+       {
+        "id": "8",
+        "bib": "1001",
+        "confidence": 0.97,
+        "bbox": [
+         812,
+         1340,
+         220,
+         120
+        ],
+        "source": "GEMINI"
+       }
+      ],
+      "bibCount": 1,
+      "detectedFaces": [],
+      "faceCount": 0
+     }
+    ],
+    "meta": {
+     "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 3,
+      "pages": 1
+     },
+     "total": 3,
+     "pending": 0,
+     "processed": 3,
+     "failed": 0
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "getPhoto",
+   "method": "GET",
+   "path": "/photos/b30b95dd-b127-4922-97de-cc08dbc77a86",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "batchJobId": null,
+     "width": 4000,
+     "height": 2667,
+     "takenAt": "2026-10-29T08:33:06.568Z",
+     "status": "PROCESSED",
+     "publicationStatus": "APPROVED",
+     "reviewNote": null,
+     "reviewedAt": null,
+     "derivativesProcessedAt": "2026-10-29T08:33:06.568Z",
+     "ocrProcessedAt": "2026-10-29T08:33:06.568Z",
+     "faceProcessedAt": "2026-10-29T08:33:06.568Z",
+     "processingCompletedAt": "2026-10-29T08:33:06.568Z",
+     "watermarkFailedAt": null,
+     "ocrFailedAt": null,
+     "faceFailedAt": null,
+     "createdAt": "2026-10-29T08:33:06.604Z",
+     "bibs": [
+      {
+       "id": "8",
+       "bib": "1001",
+       "confidence": 0.97,
+       "bbox": [
+        812,
+        1340,
+        220,
+        120
+       ],
+       "source": "GEMINI"
+      }
+     ],
+     "faces": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "getPhotoAssets",
+   "method": "GET",
+   "path": "/photos/b30b95dd-b127-4922-97de-cc08dbc77a86/assets",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "photoId": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "status": "PROCESSED",
+     "width": 4000,
+     "height": 2667,
+     "ready": true,
+     "assets": {
+      "thumbnail": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-1-thumb.jpg",
+      "watermark": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-1-wm.jpg",
+      "watermarkThumbnail": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-1-wm-thumb.jpg"
+     },
+     "derivativesProcessedAt": "2026-10-29T08:33:06.568Z",
+     "watermarkFailedAt": null
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "lowConfidenceBibs",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/bibs/low-confidence",
+   "query": {
+    "threshold": 0.8
+   },
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "10",
+      "photoId": "bf5b8717-31a3-4a72-9035-ed1d659776fb",
+      "bib": "1003",
+      "confidence": 0.62,
+      "bbox": [
+       812,
+       1340,
+       220,
+       120
+      ],
+      "source": "GEMINI",
+      "photo": {
+       "id": "bf5b8717-31a3-4a72-9035-ed1d659776fb",
+       "thumbUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-3-thumb.jpg",
+       "watermarkUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-3-wm.jpg",
+       "takenAt": "2026-10-29T08:33:06.622Z",
+       "width": 4000,
+       "height": 2667
+      }
+     }
+    ],
+    "meta": {
+     "pagination": {
+      "page": 1,
+      "limit": 50,
+      "total": 1,
+      "pages": 1
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "addBib",
+   "method": "POST",
+   "path": "/photos/b30b95dd-b127-4922-97de-cc08dbc77a86/bibs",
+   "query": null,
+   "request": {
+    "bib": "2045",
+    "confidence": 0.9,
+    "bbox": [
+     700,
+     1300,
+     200,
+     110
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "11",
+     "photoId": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "bib": "2045",
+     "confidence": "0.9",
+     "bbox": [
+      700,
+      1300,
+      200,
+      110
+     ],
+     "source": "MANUAL"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "getPhoto (tras añadir dorsal)",
+   "method": "GET",
+   "path": "/photos/b30b95dd-b127-4922-97de-cc08dbc77a86",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "batchJobId": null,
+     "width": 4000,
+     "height": 2667,
+     "takenAt": "2026-10-29T08:33:06.568Z",
+     "status": "PROCESSED",
+     "publicationStatus": "APPROVED",
+     "reviewNote": null,
+     "reviewedAt": null,
+     "derivativesProcessedAt": "2026-10-29T08:33:06.568Z",
+     "ocrProcessedAt": "2026-10-29T08:33:06.568Z",
+     "faceProcessedAt": "2026-10-29T08:33:06.568Z",
+     "processingCompletedAt": "2026-10-29T08:33:06.568Z",
+     "watermarkFailedAt": null,
+     "ocrFailedAt": null,
+     "faceFailedAt": null,
+     "createdAt": "2026-10-29T08:33:06.604Z",
+     "bibs": [
+      {
+       "id": "8",
+       "bib": "1001",
+       "confidence": 0.97,
+       "bbox": [
+        812,
+        1340,
+        220,
+        120
+       ],
+       "source": "GEMINI"
+      },
+      {
+       "id": "11",
+       "bib": "2045",
+       "confidence": 0.9,
+       "bbox": [
+        700,
+        1300,
+        200,
+        110
+       ],
+       "source": "MANUAL"
+      }
+     ],
+     "faces": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "removeBib",
+   "method": "DELETE",
+   "path": "/photos/b30b95dd-b127-4922-97de-cc08dbc77a86/bibs/11",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "message": "Dorsal eliminado"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "reviewPhoto",
+   "method": "PATCH",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photos/bf5b8717-31a3-4a72-9035-ed1d659776fb/review",
+   "query": null,
+   "request": {
+    "status": "APPROVED",
+    "note": "Dorsal confirmado a mano"
+   },
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "bf5b8717-31a3-4a72-9035-ed1d659776fb",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "photographerId": null,
+     "photographerWorkspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "thumbUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-3-thumb.jpg",
+     "watermarkUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-3-wm.jpg",
+     "watermarkThumbUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-3-wm-thumb.jpg",
+     "width": 4000,
+     "height": 2667,
+     "takenAt": "2026-10-29T08:33:06.622Z",
+     "status": "PROCESSED",
+     "derivativesProcessedAt": "2026-10-29T08:33:06.622Z",
+     "ocrProcessedAt": "2026-10-29T08:33:06.622Z",
+     "faceProcessedAt": "2026-10-29T08:33:06.622Z",
+     "processingCompletedAt": "2026-10-29T08:33:06.622Z",
+     "watermarkFailedAt": null,
+     "ocrFailedAt": null,
+     "faceFailedAt": null,
+     "publicationStatus": "APPROVED",
+     "originalBytes": 4200000,
+     "derivedBytes": 380000,
+     "reviewNote": "Dorsal confirmado a mano",
+     "reviewedAt": "2026-10-29T08:33:06.849Z",
+     "reviewedById": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "createdAt": "2026-10-29T08:33:06.623Z",
+     "batchJobId": null
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "processPhoto",
+   "method": "POST",
+   "path": "/photos/b63dc508-0872-4a8c-8231-ff77c36bb526/process",
+   "query": null,
+   "request": null,
+   "status": 409,
+   "response": {
+    "error": {
+     "code": "ALREADY_PROCESSED",
+     "message": "La foto ya está procesada"
+    },
+    "timestamp": "2026-10-29T08:33:06.881Z",
+    "path": "/v1/partner/photos/b63dc508-0872-4a8c-8231-ff77c36bb526/process"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "downloadUrl",
+   "method": "POST",
+   "path": "/photos/b30b95dd-b127-4922-97de-cc08dbc77a86/download-url",
+   "query": null,
+   "request": {
+    "expiresIn": 300
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "downloadUrl": "https://docs-private.docsaccount.r2.cloudflarestorage.com/docs-1?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=docskey%2F20261029%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261029T083306Z&X-Amz-Expires=300&X-Amz-Signature=c18c17f37f5ce4af0cf72ce66aed68a499158b8c5f3b1c99e36f26fe03df73b8&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3D%22docs-1%22&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+     "expiresIn": 300
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "120",
+    "X-RateLimit-Remaining": "119"
+   },
+   "note": ""
+  },
+  {
+   "op": "freeDownload",
+   "method": "POST",
+   "path": "/events/dd40533c-15c4-4e8a-bec3-1e488fbf66d2/photos/9061ef16-c749-44db-8141-539d24a33cbd/download-free",
+   "query": null,
+   "request": {
+    "email": "corredor@example.com",
+    "name": "Ana Perez",
+    "bibNumber": "1001"
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "downloadUrl": "https://docs-private.docsaccount.r2.cloudflarestorage.com/docs-1?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=docskey%2F20261029%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261029T083307Z&X-Amz-Expires=900&X-Amz-Signature=392782f8e26e78eb890b76720e87571ee3a10311f423d2e353cf660da72e2804&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3D%22docs-1%22&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+     "expiresIn": 900,
+     "variant": "CLEAN",
+     "sponsors": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "120",
+    "X-RateLimit-Remaining": "119"
+   },
+   "note": ""
+  },
+  {
+   "op": "bulkReview",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photos/bulk/review",
+   "query": null,
+   "request": {
+    "photoIds": [
+     "b30b95dd-b127-4922-97de-cc08dbc77a86",
+     "b63dc508-0872-4a8c-8231-ff77c36bb526"
+    ],
+    "status": "APPROVED"
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "requested": 2,
+     "affected": 2,
+     "status": "APPROVED"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "bulkProcess",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photos/bulk/process",
+   "query": null,
+   "request": {
+    "photoIds": [
+     "b30b95dd-b127-4922-97de-cc08dbc77a86",
+     "b63dc508-0872-4a8c-8231-ff77c36bb526"
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "operation": "process",
+     "results": [
+      {
+       "photoId": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+       "ok": false,
+       "error": "La foto ya está procesada"
+      },
+      {
+       "photoId": "b63dc508-0872-4a8c-8231-ff77c36bb526",
+       "ok": false,
+       "error": "La foto ya está procesada"
+      }
+     ]
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "bulkDownloadUrls",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photos/bulk/download-urls",
+   "query": null,
+   "request": {
+    "photoIds": [
+     "b30b95dd-b127-4922-97de-cc08dbc77a86",
+     "b63dc508-0872-4a8c-8231-ff77c36bb526"
+    ],
+    "expiresIn": 300
+   },
+   "status": 201,
+   "response": {
+    "data": [
+     {
+      "photoId": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+      "downloadUrl": "https://docs-private.docsaccount.r2.cloudflarestorage.com/docs-1?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=docskey%2F20261029%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261029T083307Z&X-Amz-Expires=300&X-Amz-Signature=39b765cfaa4c4cd1f92e78fb87e4274c79115164c781a79cc0971a23e9cafa4e&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3D%22docs-1%22&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "expiresIn": 300
+     },
+     {
+      "photoId": "b63dc508-0872-4a8c-8231-ff77c36bb526",
+      "downloadUrl": "https://docs-private.docsaccount.r2.cloudflarestorage.com/docs-2?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=docskey%2F20261029%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261029T083307Z&X-Amz-Expires=300&X-Amz-Signature=5e5335f48a81f760c2abc8b7d656a9f8ed59bdcb1debe8133edd53c8143c0539&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3B%20filename%3D%22docs-2%22&x-amz-checksum-mode=ENABLED&x-id=GetObject",
+      "expiresIn": 300
+     }
+    ]
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "searchBib",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/search/bib",
+   "query": {
+    "bib": "1001",
+    "limit": 20
+   },
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "photoId": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+      "thumbUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-1-thumb.jpg",
+      "watermarkUrl": "https://pub.docs.example/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photo-1-wm.jpg",
+      "confidence": 0.97,
+      "type": "DETECTED",
+      "takenAt": "2026-10-29T08:33:06.568Z"
+     }
+    ],
+    "meta": {
+     "total": 1
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "searchFace",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/search/face",
+   "query": null,
+   "request": {
+    "userImageBase64": "data:image/jpeg;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+   },
+   "status": 503,
+   "response": {
+    "error": {
+     "code": "SERVICE_UNAVAILABLE",
+     "message": "Face recognition service is not available"
+    },
+    "timestamp": "2026-10-29T08:33:07.363Z",
+    "path": "/v1/partner/events/2ea23dd8-1803-4128-9e9d-6c7603766931/search/face"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "30",
+    "X-RateLimit-Remaining": "29"
+   },
+   "note": "servicio facial no disponible en la captura"
+  },
+  {
+   "op": "faceStats",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/search/face/stats",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "totalPhotos": 3,
+     "photosWithFaces": 0,
+     "totalFacesDetected": 0,
+     "averageFacesPerPhoto": 0
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "createUploadBatch",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/upload-batches",
+   "query": null,
+   "request": {
+    "totalFiles": 2
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "f6ddfaa7-03d0-41be-bba7-293bbb97ff8d",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "totalFiles": 2,
+     "status": "PENDING",
+     "createdAt": "2026-10-29T08:33:07.405Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "presignFiles",
+   "method": "POST",
+   "path": "/upload-batches/f6ddfaa7-03d0-41be-bba7-293bbb97ff8d/files",
+   "query": null,
+   "request": {
+    "files": [
+     {
+      "clientFileId": "img-0001",
+      "fileName": "IMG_0001.jpg",
+      "contentType": "image/jpeg",
+      "sizeBytes": 4200000,
+      "contentHash": "214a4556efe3f438751bddaca030cd064f8f96573c64f6597defffbd7f50cbbd"
+     },
+     {
+      "clientFileId": "img-0002",
+      "fileName": "IMG_0002.jpg",
+      "contentType": "image/jpeg",
+      "sizeBytes": 3900000,
+      "contentHash": "a84c24914d4c2463b5ccc9529d2bafa2bfc7bfa39dd25c871e429238516a3ab5"
+     }
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": [
+     {
+      "clientFileId": "img-0001",
+      "duplicate": false,
+      "photoId": "094141e1-0a0d-4302-b465-496ab341c350",
+      "uploadUrl": "https://docs-private.docsaccount.r2.cloudflarestorage.com/events/2ea23dd8-1803-4128-9e9d-6c7603766931/original/094141e1-0a0d-4302-b465-496ab341c350.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=docskey%2F20261029%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261029T083307Z&X-Amz-Expires=3600&X-Amz-Signature=90aae4c3465e18c0cf301d0ee7b53f5b293a611cc4c9e4d00d5ced07613ee1cd&X-Amz-SignedHeaders=host&x-amz-checksum-crc32=AAAAAA%3D%3D&x-amz-meta-uploadedat=2026-10-29T08%3A33%3A07.471Z&x-amz-sdk-checksum-algorithm=CRC32&x-id=PutObject",
+      "objectKey": "events/2ea23dd8-1803-4128-9e9d-6c7603766931/original/094141e1-0a0d-4302-b465-496ab341c350.jpg"
+     },
+     {
+      "clientFileId": "img-0002",
+      "duplicate": false,
+      "photoId": "45114b0e-b9cc-4e62-b277-b24ad321020e",
+      "uploadUrl": "https://docs-private.docsaccount.r2.cloudflarestorage.com/events/2ea23dd8-1803-4128-9e9d-6c7603766931/original/45114b0e-b9cc-4e62-b277-b24ad321020e.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=docskey%2F20261029%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261029T083307Z&X-Amz-Expires=3600&X-Amz-Signature=eeaf13d9d349b4ca711b798e4502f259379fcbc7b3cd8a21ac2f3a86227fdea7&X-Amz-SignedHeaders=host&x-amz-checksum-crc32=AAAAAA%3D%3D&x-amz-meta-uploadedat=2026-10-29T08%3A33%3A07.473Z&x-amz-sdk-checksum-algorithm=CRC32&x-id=PutObject",
+      "objectKey": "events/2ea23dd8-1803-4128-9e9d-6c7603766931/original/45114b0e-b9cc-4e62-b277-b24ad321020e.jpg"
+     }
+    ]
+   },
+   "headers": {
+    "X-RateLimit-Limit": "300",
+    "X-RateLimit-Remaining": "299"
+   },
+   "note": ""
+  },
+  {
+   "op": "completeFiles",
+   "method": "POST",
+   "path": "/upload-batches/f6ddfaa7-03d0-41be-bba7-293bbb97ff8d/complete",
+   "query": null,
+   "request": {
+    "clientFileIds": [
+     "img-0001"
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "confirmed": [],
+     "errors": [
+      {
+       "fileName": "IMG_0001.jpg",
+       "error": "El archivo no llegó a subirse a almacenamiento"
+      }
+     ],
+     "jobStatus": {
+      "id": "f6ddfaa7-03d0-41be-bba7-293bbb97ff8d",
+      "status": "PROCESSING",
+      "totalFiles": 2,
+      "uploadedFiles": 1,
+      "processedFiles": 1,
+      "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "createdAt": "2026-10-29T08:33:07.405Z",
+      "updatedAt": "2026-10-29T08:33:07.597Z",
+      "faceFiles": 0,
+      "failedFaces": 0,
+      "failedGemini": 0,
+      "failedWatermarks": 0,
+      "geminiFiles": 0,
+      "watermarkFiles": 0
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "300",
+    "X-RateLimit-Remaining": "299"
+   },
+   "note": "el archivo no se subió a almacenamiento en esta captura"
+  },
+  {
+   "op": "getBatch",
+   "method": "GET",
+   "path": "/upload-batches/f6ddfaa7-03d0-41be-bba7-293bbb97ff8d",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "f6ddfaa7-03d0-41be-bba7-293bbb97ff8d",
+     "status": "PROCESSING",
+     "totalFiles": 2,
+     "uploadedFiles": 1,
+     "processedFiles": 1,
+     "watermarkFiles": 0,
+     "geminiFiles": 0,
+     "faceFiles": 0,
+     "failedWatermarks": 0,
+     "failedGemini": 0,
+     "failedFaces": 0,
+     "progressPercentage": 50,
+     "uploadProgress": 50,
+     "processingProgress": 50,
+     "startedAt": "2026-10-29T08:33:07.405Z",
+     "estimatedCompletion": "2026-10-29T08:33:07.843Z",
+     "processingSpeed": 273.97,
+     "currentStep": "Procesando imágenes",
+     "isStuck": false,
+     "recentErrors": [],
+     "avgProcessingTime": 0,
+     "bottleneck": "Ninguno",
+     "throughput": {
+      "last5min": 1,
+      "last15min": 1,
+      "overall": 16438
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "finalizeBatch",
+   "method": "POST",
+   "path": "/upload-batches/f6ddfaa7-03d0-41be-bba7-293bbb97ff8d/finalize",
+   "query": null,
+   "request": {
+    "skipped": [
+     {
+      "clientFileId": "img-0002",
+      "fileName": "IMG_0002.jpg",
+      "reason": "Archivo corrupto en origen"
+     }
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "f6ddfaa7-03d0-41be-bba7-293bbb97ff8d",
+     "status": "FAILED",
+     "totalFiles": 2,
+     "uploadedFiles": 0,
+     "processedFiles": 2,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "createdAt": "2026-10-29T08:33:07.405Z",
+     "updatedAt": "2026-10-29T08:33:07.734Z",
+     "faceFiles": 0,
+     "failedFaces": 0,
+     "failedGemini": 0,
+     "failedWatermarks": 0,
+     "geminiFiles": 0,
+     "watermarkFiles": 0
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "listUploadBatches",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/upload-batches",
+   "query": {
+    "page": 1,
+    "limit": 20
+   },
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "f6ddfaa7-03d0-41be-bba7-293bbb97ff8d",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "status": "FAILED",
+      "totalFiles": 2,
+      "uploadedFiles": 0,
+      "processedFiles": 2,
+      "faceFiles": 0,
+      "failedFaces": 0,
+      "failedGemini": 0,
+      "failedWatermarks": 0,
+      "createdAt": "2026-10-29T08:33:07.405Z",
+      "updatedAt": "2026-10-29T08:33:07.734Z"
+     }
+    ],
+    "meta": {
+     "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 1,
+      "pages": 1
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "createSponsor",
+   "method": "POST",
+   "path": "/sponsors",
+   "query": null,
+   "request": {
+    "name": "Banco Norte",
+    "logoUrl": "https://cdn.example.com/banco-norte.png",
+    "websiteUrl": "https://banconorte.example.com"
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "name": "Banco Norte",
+     "logoUrl": "https://cdn.example.com/banco-norte.png",
+     "websiteUrl": "https://banconorte.example.com",
+     "isActive": true,
+     "createdAt": "2026-10-29T08:33:07.773Z",
+     "updatedAt": "2026-10-29T08:33:07.773Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "listSponsors",
+   "method": "GET",
+   "path": "/sponsors",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+      "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+      "name": "Banco Norte",
+      "logoUrl": "https://cdn.example.com/banco-norte.png",
+      "websiteUrl": "https://banconorte.example.com",
+      "isActive": true,
+      "createdAt": "2026-10-29T08:33:07.773Z",
+      "updatedAt": "2026-10-29T08:33:07.773Z",
+      "events": []
+     }
+    ]
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "sponsorAnalytics",
+   "method": "GET",
+   "path": "/sponsors/8b46b7df-55dd-4577-adf0-f9f94b84269d/analytics",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "sponsor": {
+      "id": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+      "name": "Banco Norte",
+      "logoUrl": "https://cdn.example.com/banco-norte.png",
+      "websiteUrl": "https://banconorte.example.com"
+     },
+     "period": {
+      "from": "2026-07-31T08:33:07.820Z",
+      "to": "2026-10-29T08:33:07.820Z"
+     },
+     "totals": {
+      "impressions": 0,
+      "clicks": 0,
+      "uniqueReach": 0,
+      "ctrPct": null
+     },
+     "dailySeries": [],
+     "byEvent": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "updateSponsor",
+   "method": "PATCH",
+   "path": "/sponsors/8b46b7df-55dd-4577-adf0-f9f94b84269d",
+   "query": null,
+   "request": {
+    "name": "Banco Norte Seguros"
+   },
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "name": "Banco Norte Seguros",
+     "logoUrl": "https://cdn.example.com/banco-norte.png",
+     "websiteUrl": "https://banconorte.example.com",
+     "isActive": true,
+     "createdAt": "2026-10-29T08:33:07.773Z",
+     "updatedAt": "2026-10-29T08:33:07.838Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "attachSponsor",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/sponsors",
+   "query": null,
+   "request": {
+    "sponsorId": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+    "priority": 80,
+    "requiredOnFreeDownloads": true,
+    "placement": {
+     "position": "bottom",
+     "opacity": 0.9,
+     "maxHeightPercent": 8
+    }
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "28153a69-5c6a-4563-9266-abb1f06af688",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "sponsorId": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+     "status": "ACTIVE",
+     "priority": 80,
+     "requiredOnFreeDownloads": true,
+     "placement": {
+      "opacity": 0.9,
+      "position": "bottom",
+      "maxHeightPercent": 8
+     },
+     "startsAt": null,
+     "endsAt": null,
+     "createdAt": "2026-10-29T08:33:07.857Z",
+     "sponsor": {
+      "id": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+      "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+      "name": "Banco Norte Seguros",
+      "logoUrl": "https://cdn.example.com/banco-norte.png",
+      "websiteUrl": "https://banconorte.example.com",
+      "isActive": true,
+      "createdAt": "2026-10-29T08:33:07.773Z",
+      "updatedAt": "2026-10-29T08:33:07.838Z"
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "listEventSponsors",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/sponsors",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "28153a69-5c6a-4563-9266-abb1f06af688",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "sponsorId": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+      "status": "ACTIVE",
+      "priority": 80,
+      "requiredOnFreeDownloads": true,
+      "placement": {
+       "opacity": 0.9,
+       "position": "bottom",
+       "maxHeightPercent": 8
+      },
+      "startsAt": null,
+      "endsAt": null,
+      "createdAt": "2026-10-29T08:33:07.857Z",
+      "sponsor": {
+       "id": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+       "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+       "name": "Banco Norte Seguros",
+       "logoUrl": "https://cdn.example.com/banco-norte.png",
+       "websiteUrl": "https://banconorte.example.com",
+       "isActive": true,
+       "createdAt": "2026-10-29T08:33:07.773Z",
+       "updatedAt": "2026-10-29T08:33:07.838Z"
+      }
+     }
+    ]
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "detachSponsor",
+   "method": "DELETE",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/sponsors/8b46b7df-55dd-4577-adf0-f9f94b84269d",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "detached": true
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "removeSponsor",
+   "method": "DELETE",
+   "path": "/sponsors/8b46b7df-55dd-4577-adf0-f9f94b84269d",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "8b46b7df-55dd-4577-adf0-f9f94b84269d",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "name": "Banco Norte Seguros",
+     "logoUrl": "https://cdn.example.com/banco-norte.png",
+     "websiteUrl": "https://banconorte.example.com",
+     "isActive": false,
+     "createdAt": "2026-10-29T08:33:07.773Z",
+     "updatedAt": "2026-10-29T08:33:07.939Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "inviteContributor",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/contributors/invitations",
+   "query": null,
+   "request": {
+    "email": "fotografo@example.com",
+    "role": "PHOTOGRAPHER",
+    "organizerCommissionPercent": 30,
+    "rightsTerms": "El fotografo conserva la autoria; el organizador recibe 30% de cada venta."
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "invitation": {
+      "id": "d5b12b92-dfa2-4563-a7a6-946367be46a4",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "userId": null,
+      "photographerWorkspaceId": null,
+      "invitedEmail": "fotografo@example.com",
+      "role": "PHOTOGRAPHER",
+      "status": "INVITED",
+      "organizerCommissionPercent": "30",
+      "rightsTerms": "El fotografo conserva la autoria; el organizador recibe 30% de cada venta.",
+      "rightsAcceptedAt": null,
+      "invitedById": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "expiresAt": "2026-11-12T08:33:07.964Z",
+      "lastInvitedAt": "2026-10-29T08:33:07.964Z",
+      "acceptedAt": null,
+      "declinedAt": null,
+      "revokedAt": null,
+      "createdAt": "2026-10-29T08:33:07.965Z",
+      "updatedAt": "2026-10-29T08:33:07.965Z"
+     },
+     "invitationToken": "001846bc0804f4e59ec49dec211dcb7deb8c3914609f5c6fbd09e3de8b5d8391",
+     "acceptanceUrl": "http://localhost:3000/invitations/events#token=001846bc0804f4e59ec49dec211dcb7deb8c3914609f5c6fbd09e3de8b5d8391",
+     "emailQueued": true,
+     "emailSent": false
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "listContributors",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/contributors",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "d5b12b92-dfa2-4563-a7a6-946367be46a4",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "userId": null,
+      "photographerWorkspaceId": null,
+      "invitedEmail": "fotografo@example.com",
+      "role": "PHOTOGRAPHER",
+      "status": "INVITED",
+      "organizerCommissionPercent": "30",
+      "rightsTerms": "El fotografo conserva la autoria; el organizador recibe 30% de cada venta.",
+      "rightsAcceptedAt": null,
+      "invitedById": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+      "expiresAt": "2026-11-12T08:33:07.964Z",
+      "lastInvitedAt": "2026-10-29T08:33:07.964Z",
+      "acceptedAt": null,
+      "declinedAt": null,
+      "revokedAt": null,
+      "createdAt": "2026-10-29T08:33:07.965Z",
+      "updatedAt": "2026-10-29T08:33:07.965Z",
+      "user": null,
+      "photographerWorkspace": null
+     }
+    ]
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "revokeContributor",
+   "method": "DELETE",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/contributors/d5b12b92-dfa2-4563-a7a6-946367be46a4",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "d5b12b92-dfa2-4563-a7a6-946367be46a4",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "userId": null,
+     "photographerWorkspaceId": null,
+     "invitedEmail": "fotografo@example.com",
+     "role": "PHOTOGRAPHER",
+     "status": "REVOKED",
+     "organizerCommissionPercent": "30",
+     "rightsTerms": "El fotografo conserva la autoria; el organizador recibe 30% de cada venta.",
+     "rightsAcceptedAt": null,
+     "invitedById": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "expiresAt": "2026-11-12T08:33:07.964Z",
+     "lastInvitedAt": "2026-10-29T08:33:07.964Z",
+     "acceptedAt": null,
+     "declinedAt": null,
+     "revokedAt": "2026-10-29T08:33:08.017Z",
+     "createdAt": "2026-10-29T08:33:07.965Z",
+     "updatedAt": "2026-10-29T08:33:08.017Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "eventAnalytics",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/analytics",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "event": {
+      "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "name": "Maraton Ciudad Demo 2027",
+      "slug": "maraton-ciudad-demo-2027-1793262786180",
+      "date": "2027-03-14T00:00:00.000Z"
+     },
+     "computedAt": "2026-10-29T08:33:08.070Z",
+     "advanced": true,
+     "pipeline": {
+      "totalPhotos": 3,
+      "processedPhotos": 3,
+      "photosWithBib": 3,
+      "photosWithFace": 0,
+      "photosNoBib": 0,
+      "distinctBibs": 3,
+      "distinctInferredBibs": 0,
+      "ocrHitRatePct": 100,
+      "faceCoveragePct": 0
+     },
+     "coverage": {
+      "fieldSize": null,
+      "athletesWithPhotos": 3,
+      "coveragePct": null,
+      "athletesWhoSearched": 0,
+      "claimRatePct": 0,
+      "athletesWhoBought": 0,
+      "buyerRatePct": 0
+     },
+     "engagement": {
+      "eventViews": 0,
+      "uniqueVisitors": 0,
+      "photoViews": 0,
+      "bibSearches": 0,
+      "faceSearches": 0,
+      "searches": 0,
+      "noResultSearches": 0,
+      "discoveryRatePct": null
+     },
+     "funnel": [
+      {
+       "step": "Vistas del evento",
+       "count": 0,
+       "fromPrevPct": 100,
+       "fromTopPct": null
+      },
+      {
+       "step": "Búsquedas",
+       "count": 0,
+       "fromPrevPct": null,
+       "fromTopPct": null
+      },
+      {
+       "step": "Añadir al carrito",
+       "count": 0,
+       "fromPrevPct": null,
+       "fromTopPct": null
+      },
+      {
+       "step": "Checkout iniciado",
+       "count": 0,
+       "fromPrevPct": null,
+       "fromTopPct": null
+      },
+      {
+       "step": "Compra / descarga",
+       "count": 0,
+       "fromPrevPct": null,
+       "fromTopPct": null
+      }
+     ],
+     "commerce": {
+      "grossCents": 0,
+      "netPlatformCents": 0,
+      "organizerCommissionCents": 0,
+      "photographerEarningCents": 0,
+      "refundCents": 0,
+      "purchases": 0,
+      "freeDownloads": 0,
+      "paidDownloads": 0,
+      "conversionRatePct": null
+     },
+     "sponsors": {
+      "impressions": 0,
+      "clicks": 0,
+      "ctrPct": null
+     },
+     "dailySeries": [],
+     "topCountries": [],
+     "deviceSplit": [],
+     "channelSplit": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "analyticsEvents",
+   "method": "GET",
+   "path": "/analytics/events",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "events": [
+      {
+       "id": "dd40533c-15c4-4e8a-bec3-1e488fbf66d2",
+       "name": "Carrera Familiar Demo",
+       "slug": "carrera-familiar-demo-1793262786442",
+       "date": "2027-05-02T00:00:00.000Z",
+       "commerceMode": "FREE",
+       "hasData": false,
+       "totalPhotos": 0,
+       "distinctBibs": 0,
+       "coveragePct": null,
+       "eventViews": 0,
+       "uniqueVisitors": 0,
+       "claimRatePct": null,
+       "purchases": 0,
+       "freeDownloads": 0,
+       "grossCents": 0,
+       "conversionRatePct": null,
+       "computedAt": null
+      },
+      {
+       "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+       "name": "Maraton Ciudad Demo 2027",
+       "slug": "maraton-ciudad-demo-2027-1793262786180",
+       "date": "2027-03-14T00:00:00.000Z",
+       "commerceMode": "PAID",
+       "hasData": true,
+       "totalPhotos": 3,
+       "distinctBibs": 3,
+       "coveragePct": null,
+       "eventViews": 0,
+       "uniqueVisitors": 0,
+       "claimRatePct": 0,
+       "purchases": 0,
+       "freeDownloads": 0,
+       "grossCents": 0,
+       "conversionRatePct": null,
+       "computedAt": "2026-10-29T08:33:08.070Z"
+      }
+     ]
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "exportAnalytics",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/exports/analytics",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "filename": "analytics-2ea23dd8-1803-4128-9e9d-6c7603766931.csv",
+     "contentType": "text/csv; charset=utf-8",
+     "content": "\"metric\",\"value\"\n\"event\",\"Maraton Ciudad Demo 2027\"\n\"computedAt\",\"2026-10-29T08:33:08.070Z\"\n\"totalPhotos\",\"3\"\n\"processedPhotos\",\"3\"\n\"photosWithBib\",\"3\"\n\"photosWithFace\",\"0\"\n\"ocrHitRatePct\",\"100\"\n\"fieldSize\",\"\"\n\"athletesWithPhotos\",\"3\"\n\"coveragePct\",\"\"\n\"athletesWhoSearched\",\"0\"\n\"claimRatePct\",\"0\"\n\"athletesWhoBought\",\"0\"\n\"eventViews\",\"0\"\n\"uniqueVisitors\",\"0\"\n\"searches\",\"0\"\n\"noResultSearches\",\"0\"\n\"discoveryRatePct\",\"\"\n\"purchases\",\"0\"\n\"freeDownloads\",\"0\"\n\"grossCents\",\"0\"\n\"organizerCommissionCents\",\"0\"\n\"sponsorImpressions\",\"0\"\n\"sponsorClicks\",\"0\""
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "exportPhotos",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/exports/photos",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "filename": "photos-2ea23dd8-1803-4128-9e9d-6c7603766931.csv",
+     "contentType": "text/csv; charset=utf-8",
+     "content": "\"photoId\",\"status\",\"publicationStatus\",\"bibs\",\"takenAt\",\"createdAt\",\"width\",\"height\"\n\"b30b95dd-b127-4922-97de-cc08dbc77a86\",\"PROCESSED\",\"APPROVED\",\"1001\",\"2026-10-29T08:33:06.568Z\",\"2026-10-29T08:33:06.604Z\",\"4000\",\"2667\"\n\"b63dc508-0872-4a8c-8231-ff77c36bb526\",\"PROCESSED\",\"APPROVED\",\"1002\",\"2026-10-29T08:33:06.617Z\",\"2026-10-29T08:33:06.618Z\",\"4000\",\"2667\"\n\"bf5b8717-31a3-4a72-9035-ed1d659776fb\",\"PROCESSED\",\"APPROVED\",\"1003\",\"2026-10-29T08:33:06.622Z\",\"2026-10-29T08:33:06.623Z\",\"4000\",\"2667\""
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "exportAudience",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/exports/audience",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "filename": "audience-2ea23dd8-1803-4128-9e9d-6c7603766931.csv",
+     "contentType": "text/csv; charset=utf-8",
+     "content": "Email,Nombre,Teléfono,Dorsal,Fecha Descarga"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "createWebhook",
+   "method": "POST",
+   "path": "/webhooks",
+   "query": null,
+   "request": {
+    "url": "https://example.com/lucilamon/webhooks",
+    "events": [
+     "photo.processing.completed",
+     "upload.batch.completed",
+     "usage.threshold"
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2",
+     "url": "https://example.com/lucilamon/webhooks",
+     "events": [
+      "photo.processing.completed",
+      "upload.batch.completed",
+      "usage.threshold"
+     ],
+     "active": true,
+     "createdAt": "2026-10-29T08:33:08.181Z",
+     "signingSecret": "whsec_hIxPM0-BXtueXvytqj_o_pjaGLaJzR4viHdP0NmyhIE"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "listWebhooks",
+   "method": "GET",
+   "path": "/webhooks",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2",
+      "url": "https://example.com/lucilamon/webhooks",
+      "events": [
+       "photo.processing.completed",
+       "upload.batch.completed",
+       "usage.threshold"
+      ],
+      "active": true,
+      "createdAt": "2026-10-29T08:33:08.181Z",
+      "updatedAt": "2026-10-29T08:33:08.181Z"
+     },
+     {
+      "id": "b76224dd-086c-4e17-bff7-a1d169a42281",
+      "url": "https://hook.invalid/lucilamon",
+      "events": [
+       "event.created",
+       "event.updated",
+       "event.deleted",
+       "event.restored",
+       "event.cover.updated",
+       "event.cover.removed",
+       "event.gallery.updated",
+       "event.contributor.invited",
+       "event.contributor.revoked",
+       "event.sponsor.attached",
+       "event.sponsor.detached",
+       "upload.batch.created",
+       "upload.batch.completed",
+       "upload.batch.failed",
+       "photo.processing.completed",
+       "photo.processing.failed",
+       "photo.deleted",
+       "photo.reviewed",
+       "photo.download_url.created",
+       "photo.free_downloaded",
+       "photo.bulk.completed",
+       "workspace.brand.updated",
+       "analytics.report.ready",
+       "usage.threshold"
+      ],
+      "active": true,
+      "createdAt": "2026-10-29T08:33:05.936Z",
+      "updatedAt": "2026-10-29T08:33:06.059Z"
+     }
+    ]
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "updateWebhook",
+   "method": "PATCH",
+   "path": "/webhooks/4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2",
+   "query": null,
+   "request": {
+    "events": [
+     "photo.processing.completed",
+     "photo.processing.failed"
+    ]
+   },
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2",
+     "url": "https://example.com/lucilamon/webhooks",
+     "events": [
+      "photo.processing.completed",
+      "photo.processing.failed"
+     ],
+     "active": true,
+     "createdAt": "2026-10-29T08:33:08.181Z",
+     "updatedAt": "2026-10-29T08:33:08.214Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "rotateWebhookSecret",
+   "method": "POST",
+   "path": "/webhooks/4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2/rotate-secret",
+   "query": null,
+   "request": null,
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2",
+     "signingSecret": "whsec_XLkT4YVNF3sVf4aUd8OP2ChCrY75laQyulZR8T7xdi4"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "listDeliveries",
+   "method": "GET",
+   "path": "/webhooks/4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2/deliveries",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": []
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "deleteWebhook",
+   "method": "DELETE",
+   "path": "/webhooks/4e14d59e-ed2e-4953-9ca7-d3a0c3ea24a2",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "deleted": true
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "removeWorkspaceAsset",
+   "method": "DELETE",
+   "path": "/workspace/assets/logo",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "logoUrl": null,
+     "coverUrl": null
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "verifyDomain",
+   "method": "POST",
+   "path": "/workspace/domain/verify",
+   "query": null,
+   "request": null,
+   "status": 400,
+   "response": {
+    "error": {
+     "code": "VALIDATION_ERROR",
+     "message": "Configura un dominio antes de verificarlo"
+    },
+    "timestamp": "2026-10-29T08:33:08.325Z",
+    "path": "/v1/partner/workspace/domain/verify"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "disconnectDomain",
+   "method": "DELETE",
+   "path": "/workspace/domain",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "disconnected": true,
+     "domain": null
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "removeCover",
+   "method": "DELETE",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/cover",
+   "query": null,
+   "request": null,
+   "status": 400,
+   "response": {
+    "error": {
+     "code": "VALIDATION_ERROR",
+     "message": "El evento no tiene imagen para eliminar"
+    },
+    "timestamp": "2026-10-29T08:33:08.365Z",
+    "path": "/v1/partner/events/2ea23dd8-1803-4128-9e9d-6c7603766931/cover"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "deletePhoto",
+   "method": "DELETE",
+   "path": "/photos/b63dc508-0872-4a8c-8231-ff77c36bb526",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "message": "Foto eliminada"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "bulkDelete",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/photos/bulk/delete",
+   "query": null,
+   "request": {
+    "photoIds": [
+     "bf5b8717-31a3-4a72-9035-ed1d659776fb"
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "operation": "delete",
+     "results": [
+      {
+       "photoId": "bf5b8717-31a3-4a72-9035-ed1d659776fb",
+       "ok": true
+      }
+     ]
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "deleteEvent",
+   "method": "DELETE",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "date": "2027-03-14T00:00:00.000Z",
+     "location": "Parque Fundidora, Monterrey",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "deletedAt": "2026-10-29T08:33:08.525Z",
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "isFreeDownload": true,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": 500,
+     "totalFreeDownloads": 0,
+     "commerceMode": "PAID",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": false,
+     "isPublished": false,
+     "publishedAt": "2026-10-29T08:33:06.410Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "restoreEvent",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/restore",
+   "query": null,
+   "request": null,
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "name": "Maraton Ciudad Demo 2027",
+     "slug": "maraton-ciudad-demo-2027-1793262786180",
+     "date": "2027-03-14T00:00:00.000Z",
+     "location": "Parque Fundidora, Monterrey",
+     "imageUrl": null,
+     "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "bibRules": {
+      "maxLen": 5,
+      "minLen": 3
+     },
+     "pricing": {
+      "pack5": 3000,
+      "pack10": 5000,
+      "currency": "USD",
+      "singlePhoto": 800
+     },
+     "deletedAt": null,
+     "createdAt": "2026-10-29T08:33:06.181Z",
+     "isFreeDownload": true,
+     "freeDownloadUntil": null,
+     "requireEmailForFree": true,
+     "freeDownloadLimit": 500,
+     "totalFreeDownloads": 0,
+     "commerceMode": "PAID",
+     "organizerCommissionPercent": "0",
+     "sponsorOverlayEnabled": false,
+     "requiresPhotoApproval": false,
+     "isPublished": false,
+     "publishedAt": "2026-10-29T08:33:06.410Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "listOrders",
+   "method": "GET",
+   "path": "/orders",
+   "query": {
+    "page": 1,
+    "limit": 20
+   },
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "e6a49515-100b-4679-ae0d-1805f0c89d5d",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "eventName": "Maraton Ciudad Demo 2027",
+      "status": "REFUNDED",
+      "amountCents": 3000,
+      "currency": "USD",
+      "paymentGateway": "STRIPE",
+      "buyerEmail": "corredor@example.com",
+      "itemCount": 1,
+      "paidAt": "2026-10-29T08:33:08.702Z",
+      "refundedAt": "2026-10-29T08:33:08.702Z",
+      "disputedAt": null,
+      "disputeOutcome": null,
+      "settlementStatus": "NOT_REQUIRED",
+      "settledAt": "2026-10-29T08:33:08.702Z",
+      "createdAt": "2026-10-29T08:33:08.703Z"
+     },
+     {
+      "id": "bdec8927-0e42-4a26-bd8f-1e167fa5edaa",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "eventName": "Maraton Ciudad Demo 2027",
+      "status": "PAID",
+      "amountCents": 800,
+      "currency": "USD",
+      "paymentGateway": "STRIPE",
+      "buyerEmail": "corredor@example.com",
+      "itemCount": 1,
+      "paidAt": "2026-10-29T08:33:08.649Z",
+      "refundedAt": null,
+      "disputedAt": null,
+      "disputeOutcome": null,
+      "settlementStatus": "SETTLED",
+      "settledAt": "2026-10-29T08:33:08.649Z",
+      "createdAt": "2026-10-29T08:33:08.686Z"
+     }
+    ],
+    "meta": {
+     "pagination": {
+      "page": 1,
+      "limit": 20,
+      "total": 2,
+      "pages": 1
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "getOrder",
+   "method": "GET",
+   "path": "/orders/bdec8927-0e42-4a26-bd8f-1e167fa5edaa",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "id": "bdec8927-0e42-4a26-bd8f-1e167fa5edaa",
+     "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+     "eventName": "Maraton Ciudad Demo 2027",
+     "status": "PAID",
+     "amountCents": 800,
+     "currency": "USD",
+     "paymentGateway": "STRIPE",
+     "buyerEmail": "corredor@example.com",
+     "itemCount": 1,
+     "paidAt": "2026-10-29T08:33:08.649Z",
+     "refundedAt": null,
+     "disputedAt": null,
+     "disputeOutcome": null,
+     "settlementStatus": "SETTLED",
+     "settledAt": "2026-10-29T08:33:08.649Z",
+     "createdAt": "2026-10-29T08:33:08.686Z",
+     "items": [
+      {
+       "id": "71c0a090-6f27-4f62-b6e7-98d6123a55f3",
+       "photoId": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+       "itemType": "PHOTO",
+       "priceCents": 800
+      }
+     ],
+     "breakdown": {
+      "grossCents": 800,
+      "processorFeeCents": 54,
+      "platformFeeCents": 48,
+      "organizerCommissionCents": 0,
+      "photographerEarningCents": 698,
+      "refundedCents": 0,
+      "disputedCents": 0,
+      "disputeFeeCents": 0,
+      "yourShareCents": 698,
+      "yourShareStatus": "PAID_OUT"
+     }
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "earnings",
+   "method": "GET",
+   "path": "/earnings",
+   "query": {
+    "limit": 5
+   },
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "summary": {
+      "paidOutCents": 698,
+      "pendingCents": 0,
+      "reversedCents": 2703,
+      "platformFeeCents": 228,
+      "processorFeeCents": 171,
+      "grossCents": 3800,
+      "currency": "USD"
+     },
+     "entries": [
+      {
+       "id": "e606f1d6-be89-4217-907c-06731b197c76",
+       "orderId": "bdec8927-0e42-4a26-bd8f-1e167fa5edaa",
+       "type": "GROSS_SALE",
+       "status": "AVAILABLE",
+       "amountCents": 800,
+       "currency": "USD",
+       "createdAt": "2026-10-29T08:33:08.710Z",
+       "paidOutAt": null,
+       "failureReason": null,
+       "event": {
+        "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+        "name": "Maraton Ciudad Demo 2027"
+       }
+      },
+      {
+       "id": "80ead9ee-1405-49b7-9b65-2823b9a4b68f",
+       "orderId": "e6a49515-100b-4679-ae0d-1805f0c89d5d",
+       "type": "GROSS_SALE",
+       "status": "AVAILABLE",
+       "amountCents": 3000,
+       "currency": "USD",
+       "createdAt": "2026-10-29T08:33:08.710Z",
+       "paidOutAt": null,
+       "failureReason": null,
+       "event": {
+        "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+        "name": "Maraton Ciudad Demo 2027"
+       }
+      },
+      {
+       "id": "034a6b45-0c08-4757-9a6d-dee6c782f71a",
+       "orderId": "bdec8927-0e42-4a26-bd8f-1e167fa5edaa",
+       "type": "PHOTOGRAPHER_EARNING",
+       "status": "PAID_OUT",
+       "amountCents": 698,
+       "currency": "USD",
+       "createdAt": "2026-10-29T08:33:08.710Z",
+       "paidOutAt": null,
+       "failureReason": null,
+       "event": {
+        "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+        "name": "Maraton Ciudad Demo 2027"
+       }
+      },
+      {
+       "id": "a0f126ff-f382-4508-b5d9-669c062dfd1e",
+       "orderId": "e6a49515-100b-4679-ae0d-1805f0c89d5d",
+       "type": "PHOTOGRAPHER_EARNING",
+       "status": "REVERSED",
+       "amountCents": 2703,
+       "currency": "USD",
+       "createdAt": "2026-10-29T08:33:08.710Z",
+       "paidOutAt": null,
+       "failureReason": null,
+       "event": {
+        "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+        "name": "Maraton Ciudad Demo 2027"
+       }
+      }
+     ]
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "recordMetrics",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/metrics",
+   "query": null,
+   "request": {
+    "events": [
+     {
+      "type": "EVENT_VIEW",
+      "sessionId": "sess-1",
+      "visitor": {
+       "ip": "203.0.113.7",
+       "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+       "country": "MX",
+       "referrer": "https://www.instagram.com/"
+      }
+     },
+     {
+      "type": "BIB_SEARCH",
+      "sessionId": "sess-1",
+      "metadata": {
+       "bib": "1001"
+      },
+      "visitor": {
+       "ip": "203.0.113.7",
+       "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"
+      }
+     }
+    ]
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "recorded": 2
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "300",
+    "X-RateLimit-Remaining": "299"
+   },
+   "note": ""
+  },
+  {
+   "op": "reportLink",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/analytics/report-link",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "url": "http://localhost:3000/reporte/2ea23dd8-1803-4128-9e9d-6c7603766931?token=1.f0f77964cd9cac84f45e4493141ab7ec5703739c"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "rotateReportLink",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/analytics/report-link/rotate",
+   "query": null,
+   "request": null,
+   "status": 201,
+   "response": {
+    "data": {
+     "rotated": true,
+     "version": 2,
+     "url": "http://localhost:3000/reporte/2ea23dd8-1803-4128-9e9d-6c7603766931?token=2.7951514da5217516dc430ec55e89634ca622b964"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "10",
+    "X-RateLimit-Remaining": "9"
+   },
+   "note": ""
+  },
+  {
+   "op": "sendReport",
+   "method": "POST",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/analytics/report",
+   "query": null,
+   "request": null,
+   "status": 201,
+   "response": {
+    "data": {
+     "sent": 0,
+     "recipients": 2,
+     "reportUrl": "http://localhost:3000/reporte/2ea23dd8-1803-4128-9e9d-6c7603766931?token=2.7951514da5217516dc430ec55e89634ca622b964"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "6",
+    "X-RateLimit-Remaining": "5"
+   },
+   "note": ""
+  },
+  {
+   "op": "eventSponsorAnalytics",
+   "method": "GET",
+   "path": "/events/2ea23dd8-1803-4128-9e9d-6c7603766931/sponsors/analytics",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "sponsors": []
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "workspaceOverview",
+   "method": "GET",
+   "path": "/analytics/overview",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": {
+     "period": {
+      "from": "2026-09-29T08:33:09.065Z",
+      "to": "2026-10-29T08:33:09.065Z"
+     },
+     "advanced": true,
+     "totals": {
+      "uniqueVisitors": 0,
+      "workspaceViews": 0,
+      "eventViews": 0,
+      "photoViews": 0,
+      "searches": 0,
+      "noResultSearches": 0,
+      "addToCart": 0,
+      "purchases": 1,
+      "freeDownloads": 0,
+      "grossCents": 3800,
+      "platformNetCents": 0,
+      "conversionRatePct": null,
+      "sponsorImpressions": 0,
+      "sponsorClicks": 0
+     },
+     "events": [
+      {
+       "id": "dd40533c-15c4-4e8a-bec3-1e488fbf66d2",
+       "name": "Carrera Familiar Demo",
+       "slug": "carrera-familiar-demo-1793262786442",
+       "date": "2027-05-02T00:00:00.000Z",
+       "commerceMode": "FREE",
+       "hasData": false,
+       "totalPhotos": 0,
+       "distinctBibs": 0,
+       "coveragePct": null,
+       "eventViews": 0,
+       "uniqueVisitors": 0,
+       "claimRatePct": null,
+       "purchases": 0,
+       "freeDownloads": 0,
+       "grossCents": 0,
+       "conversionRatePct": null,
+       "computedAt": null
+      },
+      {
+       "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+       "name": "Maraton Ciudad Demo 2027",
+       "slug": "maraton-ciudad-demo-2027-1793262786180",
+       "date": "2027-03-14T00:00:00.000Z",
+       "commerceMode": "PAID",
+       "hasData": true,
+       "totalPhotos": 1,
+       "distinctBibs": 1,
+       "coveragePct": null,
+       "eventViews": 0,
+       "uniqueVisitors": 1,
+       "claimRatePct": 100,
+       "purchases": 1,
+       "freeDownloads": 0,
+       "grossCents": 3800,
+       "conversionRatePct": null,
+       "computedAt": "2026-10-29T08:33:08.989Z"
+      }
+     ],
+     "ledger": {
+      "GROSS_SALE": 3800,
+      "PHOTOGRAPHER_EARNING": 3401
+     },
+     "dailySeries": [],
+     "channelSplit": [
+      {
+       "channel": "direct",
+       "count": 1
+      },
+      {
+       "channel": "referral:instagram.com",
+       "count": 1
+      }
+     ],
+     "topCountries": [
+      {
+       "country": "MX",
+       "count": 1
+      }
+     ]
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "listDeliveries (con historial)",
+   "method": "GET",
+   "path": "/webhooks/b76224dd-086c-4e17-bff7-a1d169a42281/deliveries",
+   "query": null,
+   "request": null,
+   "status": 200,
+   "response": {
+    "data": [
+     {
+      "id": "d8b2caf2-7c5a-4e84-98d3-8d542cc189da",
+      "eventId": "ac558d6e-7e82-49e1-b416-b1cb5517e498",
+      "eventType": "analytics.report.ready",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:09.012Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:09.012Z"
+     },
+     {
+      "id": "41b430d2-b806-4702-93eb-6ead8634238e",
+      "eventId": "aa611982-402c-4219-8e60-1ece704c35cd",
+      "eventType": "event.restored",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:08.550Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:08.550Z"
+     },
+     {
+      "id": "c1f3cfb7-cb9f-4658-b2a9-342582fbbdad",
+      "eventId": "8f06004f-8af4-44ba-8449-d8b5dd50430b",
+      "eventType": "event.deleted",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:08.530Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:08.530Z"
+     },
+     {
+      "id": "894a85c3-9470-4b87-8e0d-6329d4929861",
+      "eventId": "8b8bd2b8-7fc9-4c80-95b5-fa2892210244",
+      "eventType": "photo.bulk.completed",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:08.510Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:08.510Z"
+     },
+     {
+      "id": "041f1d54-3b49-400f-8551-c55498ce177f",
+      "eventId": "94dfb667-ffbf-4dfb-98b9-9ec6ae10c0c5",
+      "eventType": "photo.deleted",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:08.442Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:08.442Z"
+     },
+     {
+      "id": "441af89c-bf93-4568-8d8e-17409038d924",
+      "eventId": "e94f73bc-327c-4903-a0b5-9ac024826944",
+      "eventType": "workspace.brand.updated",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:08.342Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:08.342Z"
+     },
+     {
+      "id": "c0b8635a-ad37-47f2-8bff-3f2fcff51e91",
+      "eventId": "adb4ba51-ed8b-4c6c-a08f-2258481a3086",
+      "eventType": "workspace.brand.updated",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:08.307Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:08.307Z"
+     },
+     {
+      "id": "91f2ca57-1816-422c-a144-2e1b3255cf60",
+      "eventId": "cc59df77-b9ef-465e-a270-3ec547240ead",
+      "eventType": "event.contributor.revoked",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:08.023Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:08.023Z"
+     },
+     {
+      "id": "bfbd4f37-7e41-419b-88f0-08858d31febe",
+      "eventId": "2e81c10d-01df-46de-80d0-6e824d61a7f1",
+      "eventType": "event.contributor.invited",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.974Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.974Z"
+     },
+     {
+      "id": "a49f396d-3a32-4006-9650-f70b59b91d81",
+      "eventId": "a617cab7-1eeb-42a1-8796-f09897f834dc",
+      "eventType": "event.sponsor.detached",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.923Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.923Z"
+     },
+     {
+      "id": "ac6e4b10-aadc-4d5d-8582-3052fecc79e5",
+      "eventId": "1b55b2c6-c391-4629-b261-99de2e108080",
+      "eventType": "event.sponsor.attached",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.868Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.868Z"
+     },
+     {
+      "id": "8cdce546-6452-440e-8ea2-d3236f53ca99",
+      "eventId": "12f4b318-3af5-4e6c-9651-25b6b4486da0",
+      "eventType": "upload.batch.created",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.410Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.410Z"
+     },
+     {
+      "id": "a1bd7ebd-418d-4936-8501-0c40dd1d4b48",
+      "eventId": "439d7d95-0c3d-4bf7-a6f4-5690b2cd7084",
+      "eventType": "photo.bulk.completed",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.310Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.310Z"
+     },
+     {
+      "id": "6af514da-99a1-4d27-a3ee-b765ff451e9a",
+      "eventId": "ae99a1b9-6e36-460a-9cf9-838906da339b",
+      "eventType": "photo.bulk.completed",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.272Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.272Z"
+     },
+     {
+      "id": "9e45514a-6136-4b97-b777-704fc9f83918",
+      "eventId": "0472a625-8a30-45e2-a8dc-e1a40db88ab3",
+      "eventType": "photo.bulk.completed",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.243Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.243Z"
+     },
+     {
+      "id": "45bf6e62-5ca0-48b5-8b40-20791f72f440",
+      "eventId": "4cc77f4b-8f5e-4397-9c3a-096a7e6145cc",
+      "eventType": "photo.free_downloaded",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:07.218Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:07.218Z"
+     },
+     {
+      "id": "1db02d3f-d6d1-47ed-9428-86974764053b",
+      "eventId": "82ab4dd8-d607-48f0-803c-21ccf8fbeb2b",
+      "eventType": "photo.download_url.created",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.906Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.906Z"
+     },
+     {
+      "id": "066a4356-ccfb-4507-98d1-9521743ba73a",
+      "eventId": "76d1450c-2f5b-4536-9a32-8cfbb2d898dc",
+      "eventType": "photo.reviewed",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.856Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.856Z"
+     },
+     {
+      "id": "df1bc7ea-44c7-4b72-b1a0-6f7272d4c03f",
+      "eventId": "35307f3f-5b3a-4407-9b06-55b17cfc2729",
+      "eventType": "event.created",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.472Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.472Z"
+     },
+     {
+      "id": "ea3e946a-d5f0-4289-a267-c589c8c8b0c3",
+      "eventId": "184aa714-b90e-43bf-875a-cbc6de54a005",
+      "eventType": "event.updated",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.418Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.418Z"
+     },
+     {
+      "id": "7c7dab33-8620-498e-929d-398694407e15",
+      "eventId": "bd3f9af2-8aea-4e62-8bbf-692b29e5e0ff",
+      "eventType": "event.gallery.updated",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.387Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.387Z"
+     },
+     {
+      "id": "69fb2d08-07aa-4c8b-8f15-2b25efa794a5",
+      "eventId": "c2f5eb23-1954-45d5-bed1-d76c6f53cb63",
+      "eventType": "event.updated",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.337Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.337Z"
+     },
+     {
+      "id": "eed49e9a-9dec-424d-987b-8a6f92dbcbc7",
+      "eventId": "677007b6-f61b-4a9d-9325-2ab2b994dc5b",
+      "eventType": "event.created",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.193Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.193Z"
+     },
+     {
+      "id": "287b251a-15c5-4b87-8ae3-9cb1bf5a4b6b",
+      "eventId": "734d3fab-67b5-4f5b-bdbb-a9ee04147fdb",
+      "eventType": "workspace.brand.updated",
+      "status": "PENDING",
+      "attempts": 0,
+      "responseStatus": null,
+      "lastError": null,
+      "nextAttemptAt": "2026-10-29T08:33:06.155Z",
+      "deliveredAt": null,
+      "createdAt": "2026-10-29T08:33:06.155Z"
+     }
+    ]
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "retryDelivery (con historial)",
+   "method": "POST",
+   "path": "/webhooks/deliveries/d8b2caf2-7c5a-4e84-98d3-8d542cc189da/retry",
+   "query": null,
+   "request": null,
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "d8b2caf2-7c5a-4e84-98d3-8d542cc189da",
+     "endpointId": "b76224dd-086c-4e17-bff7-a1d169a42281",
+     "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+     "eventId": "ac558d6e-7e82-49e1-b416-b1cb5517e498",
+     "eventType": "analytics.report.ready",
+     "payload": {
+      "name": "Maraton Ciudad Demo 2027",
+      "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+      "reportUrl": "http://localhost:3000/reporte/2ea23dd8-1803-4128-9e9d-6c7603766931?token=2.7951514da5217516dc430ec55e89634ca622b964",
+      "computedAt": "2026-10-29T08:33:08.989Z"
+     },
+     "status": "PENDING",
+     "attempts": 0,
+     "nextAttemptAt": "2026-10-29T08:33:09.102Z",
+     "responseStatus": null,
+     "lastError": null,
+     "deliveredAt": null,
+     "createdAt": "2026-10-29T08:33:09.012Z",
+     "updatedAt": "2026-10-29T08:33:09.102Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "EVENT_LIMIT_REACHED",
+   "method": "POST",
+   "path": "/events",
+   "query": null,
+   "request": {
+    "name": "Evento fuera de cupo",
+    "date": "2027-08-01T08:00:00.000Z"
+   },
+   "status": 403,
+   "response": {
+    "error": {
+     "code": "EVENT_LIMIT_REACHED",
+     "message": "Tu contrato incluye 2 eventos al año y ya has creado 2. Contacta con tu gestor para ampliar el cupo.",
+     "details": {
+      "limit": 2,
+      "used": 2,
+      "resetsAt": "2027-10-28T08:33:05.734Z"
+     }
+    },
+    "timestamp": "2026-10-29T08:33:09.277Z",
+    "path": "/v1/partner/events"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "595"
+   },
+   "note": ""
+  },
+  {
+   "op": "createUploadBatch (para probar el tope)",
+   "method": "POST",
+   "path": "/events/dd40533c-15c4-4e8a-bec3-1e488fbf66d2/upload-batches",
+   "query": null,
+   "request": {
+    "totalFiles": 1
+   },
+   "status": 201,
+   "response": {
+    "data": {
+     "id": "a2f06254-640a-44fe-8468-37ea0b0d56b2",
+     "eventId": "dd40533c-15c4-4e8a-bec3-1e488fbf66d2",
+     "totalFiles": 1,
+     "status": "PENDING",
+     "createdAt": "2026-10-29T08:33:09.305Z"
+    }
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "PHOTO_LIMIT_REACHED",
+   "method": "POST",
+   "path": "/upload-batches/a2f06254-640a-44fe-8468-37ea0b0d56b2/files",
+   "query": null,
+   "request": {
+    "files": [
+     {
+      "clientFileId": "img-9001",
+      "fileName": "IMG_9001.jpg",
+      "contentType": "image/jpeg",
+      "sizeBytes": 3000000,
+      "contentHash": "a138a1bc2fcb7314e0bb69dff5ff32c32851554476e3f65742649f2b7ae8beff"
+     }
+    ]
+   },
+   "status": 403,
+   "response": {
+    "error": {
+     "code": "PHOTO_LIMIT_REACHED",
+     "message": "Tu contrato incluye 0 fotografías al año y ya has usado 0. Contacta con tu gestor para ampliar el cupo.",
+     "details": {
+      "limit": 0,
+      "used": 0,
+      "requested": 1,
+      "resetsAt": "2027-10-28T08:33:05.734Z"
+     }
+    },
+    "timestamp": "2026-10-29T08:33:09.375Z",
+    "path": "/v1/partner/upload-batches/a2f06254-640a-44fe-8468-37ea0b0d56b2/files"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "300",
+    "X-RateLimit-Remaining": "298"
+   },
+   "note": ""
+  },
+  {
+   "op": "permiso insuficiente (scope)",
+   "method": "POST",
+   "path": "/events",
+   "query": null,
+   "request": {
+    "name": "Evento no permitido",
+    "date": "2027-06-01T08:00:00.000Z"
+   },
+   "status": 403,
+   "response": {
+    "error": {
+     "code": "FORBIDDEN",
+     "message": "Falta el permiso API: events:write"
+    },
+    "timestamp": "2026-10-29T08:33:09.382Z",
+    "path": "/v1/partner/events"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "599"
+   },
+   "note": ""
+  },
+  {
+   "op": "sin credencial",
+   "method": "GET",
+   "path": "/events",
+   "query": null,
+   "request": null,
+   "status": 401,
+   "response": {
+    "error": {
+     "code": "UNAUTHORIZED",
+     "message": "Incluye la credencial en Authorization: Bearer <api-key>"
+    },
+    "timestamp": "2026-10-29T08:33:09.384Z",
+    "path": "/v1/partner/events"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "credencial inválida",
+   "method": "GET",
+   "path": "/events",
+   "query": null,
+   "request": null,
+   "status": 401,
+   "response": {
+    "error": {
+     "code": "UNAUTHORIZED",
+     "message": "Credencial API inválida"
+    },
+    "timestamp": "2026-10-29T08:33:09.386Z",
+    "path": "/v1/partner/events"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "evento inexistente",
+   "method": "GET",
+   "path": "/events/00000000-0000-4000-8000-000000000000",
+   "query": null,
+   "request": null,
+   "status": 404,
+   "response": {
+    "error": {
+     "code": "NOT_FOUND",
+     "message": "Evento no encontrado"
+    },
+    "timestamp": "2026-10-29T08:33:09.404Z",
+    "path": "/v1/partner/events/00000000-0000-4000-8000-000000000000"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "598"
+   },
+   "note": ""
+  },
+  {
+   "op": "validación fallida",
+   "method": "POST",
+   "path": "/events",
+   "query": null,
+   "request": {
+    "name": "x",
+    "date": "ayer"
+   },
+   "status": 400,
+   "response": {
+    "error": {
+     "code": "VALIDATION_ERROR",
+     "message": [
+      "El nombre debe tener al menos 3 caracteres",
+      "La fecha debe ser válida"
+     ]
+    },
+    "timestamp": "2026-10-29T08:33:09.417Z",
+    "path": "/v1/partner/events"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "594"
+   },
+   "note": ""
+  },
+  {
+   "op": "uuid inválido",
+   "method": "GET",
+   "path": "/events/not-a-uuid",
+   "query": null,
+   "request": null,
+   "status": 400,
+   "response": {
+    "error": {
+     "code": "VALIDATION_ERROR",
+     "message": "Identificador inválido: debe ser un UUID"
+    },
+    "timestamp": "2026-10-29T08:33:09.445Z",
+    "path": "/v1/partner/events/not-a-uuid"
+   },
+   "headers": {
+    "X-RateLimit-Limit": "600",
+    "X-RateLimit-Remaining": "597"
+   },
+   "note": ""
+  }
+ ],
+ "state": {
+  "event": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+  "photos": [
+   "b30b95dd-b127-4922-97de-cc08dbc77a86",
+   "b63dc508-0872-4a8c-8231-ff77c36bb526",
+   "bf5b8717-31a3-4a72-9035-ed1d659776fb"
+  ],
+  "batch": "f6ddfaa7-03d0-41be-bba7-293bbb97ff8d"
+ }
+}

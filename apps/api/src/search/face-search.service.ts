@@ -46,8 +46,8 @@ export class FaceSearchService {
       }
 
       if (!(await this.pythonFaceApiService.isReady())) {
-        throw new BadRequestException({
-          code: ERROR_CODES.INTERNAL_ERROR,
+        throw new ServiceUnavailableException({
+          code: 'SERVICE_UNAVAILABLE',
           message: 'Face recognition service is not available',
         });
       }

@@ -18,6 +18,8 @@ export const PARTNER_API_SCOPES = [
   'search:bib',
   'search:face',
   'webhooks:manage',
+  'orders:read',
+  'metrics:write',
 ] as const;
 
 export type PartnerApiScope = typeof PARTNER_API_SCOPES[number];

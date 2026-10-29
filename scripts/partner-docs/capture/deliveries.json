@@ -1,0 +1,408 @@
+[
+ {
+  "eventType": "workspace.brand.updated",
+  "eventId": "734d3fab-67b5-4f5b-bdbb-a9ee04147fdb",
+  "createdAt": "2026-10-29T08:33:06.155Z",
+  "payload": {
+   "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3"
+  }
+ },
+ {
+  "eventType": "event.created",
+  "eventId": "677007b6-f61b-4a9d-9325-2ab2b994dc5b",
+  "createdAt": "2026-10-29T08:33:06.193Z",
+  "payload": {
+   "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "date": "2027-03-14T00:00:00.000Z",
+   "name": "Maraton Ciudad Demo 2027",
+   "slug": "maraton-ciudad-demo-2027-1793262786180",
+   "owner": {
+    "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+    "role": "PHOTOGRAPHER",
+    "email": "owner@docs.test"
+   },
+   "_count": {
+    "photos": 0
+   },
+   "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+   "pricing": {
+    "pack5": 3000,
+    "pack10": 5000,
+    "currency": "USD",
+    "singlePhoto": 800
+   },
+   "bibRules": {
+    "maxLen": 5,
+    "minLen": 3
+   },
+   "imageUrl": null,
+   "location": "Monterrey, Mexico",
+   "createdAt": "2026-10-29T08:33:06.181Z",
+   "deletedAt": null,
+   "isPublished": false,
+   "publishedAt": null,
+   "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+   "commerceMode": "PAID",
+   "isFreeDownload": false,
+   "freeDownloadLimit": null,
+   "freeDownloadUntil": null,
+   "totalFreeDownloads": 0,
+   "requireEmailForFree": true,
+   "requiresPhotoApproval": true,
+   "sponsorOverlayEnabled": false,
+   "organizerCommissionPercent": "0"
+  }
+ },
+ {
+  "eventType": "event.updated",
+  "eventId": "c2f5eb23-1954-45d5-bed1-d76c6f53cb63",
+  "createdAt": "2026-10-29T08:33:06.337Z",
+  "payload": {
+   "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "date": "2027-03-14T00:00:00.000Z",
+   "name": "Maraton Ciudad Demo 2027",
+   "slug": "maraton-ciudad-demo-2027-1793262786180",
+   "owner": {
+    "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+    "role": "PHOTOGRAPHER",
+    "email": "owner@docs.test"
+   },
+   "_count": {
+    "photos": 0
+   },
+   "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+   "pricing": {
+    "pack5": 3000,
+    "pack10": 5000,
+    "currency": "USD",
+    "singlePhoto": 800
+   },
+   "bibRules": {
+    "maxLen": 5,
+    "minLen": 3
+   },
+   "imageUrl": null,
+   "location": "Parque Fundidora, Monterrey",
+   "createdAt": "2026-10-29T08:33:06.181Z",
+   "deletedAt": null,
+   "isPublished": false,
+   "publishedAt": null,
+   "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+   "commerceMode": "PAID",
+   "isFreeDownload": false,
+   "freeDownloadLimit": null,
+   "freeDownloadUntil": null,
+   "totalFreeDownloads": 0,
+   "requireEmailForFree": true,
+   "requiresPhotoApproval": false,
+   "sponsorOverlayEnabled": false,
+   "organizerCommissionPercent": "0"
+  }
+ },
+ {
+  "eventType": "event.gallery.updated",
+  "eventId": "bd3f9af2-8aea-4e62-8bbf-692b29e5e0ff",
+  "createdAt": "2026-10-29T08:33:06.387Z",
+  "payload": {
+   "config": {
+    "isFreeDownload": true,
+    "freeDownloadLimit": 500,
+    "requireEmailForFree": true,
+    "sponsorOverlayEnabled": false
+   },
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931"
+  }
+ },
+ {
+  "eventType": "event.updated",
+  "eventId": "184aa714-b90e-43bf-875a-cbc6de54a005",
+  "createdAt": "2026-10-29T08:33:06.418Z",
+  "payload": {
+   "id": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "date": "2027-03-14T00:00:00.000Z",
+   "name": "Maraton Ciudad Demo 2027",
+   "slug": "maraton-ciudad-demo-2027-1793262786180",
+   "owner": {
+    "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+    "role": "PHOTOGRAPHER",
+    "email": "owner@docs.test"
+   },
+   "_count": {
+    "photos": 0
+   },
+   "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+   "pricing": {
+    "pack5": 3000,
+    "pack10": 5000,
+    "currency": "USD",
+    "singlePhoto": 800
+   },
+   "bibRules": {
+    "maxLen": 5,
+    "minLen": 3
+   },
+   "imageUrl": null,
+   "location": "Parque Fundidora, Monterrey",
+   "createdAt": "2026-10-29T08:33:06.181Z",
+   "deletedAt": null,
+   "isPublished": true,
+   "publishedAt": "2026-10-29T08:33:06.410Z",
+   "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+   "commerceMode": "PAID",
+   "isFreeDownload": true,
+   "freeDownloadLimit": 500,
+   "freeDownloadUntil": null,
+   "totalFreeDownloads": 0,
+   "requireEmailForFree": true,
+   "requiresPhotoApproval": false,
+   "sponsorOverlayEnabled": false,
+   "organizerCommissionPercent": "0"
+  }
+ },
+ {
+  "eventType": "event.created",
+  "eventId": "35307f3f-5b3a-4407-9b06-55b17cfc2729",
+  "createdAt": "2026-10-29T08:33:06.472Z",
+  "payload": {
+   "id": "dd40533c-15c4-4e8a-bec3-1e488fbf66d2",
+   "date": "2027-05-02T00:00:00.000Z",
+   "name": "Carrera Familiar Demo",
+   "slug": "carrera-familiar-demo-1793262786442",
+   "owner": {
+    "id": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+    "role": "PHOTOGRAPHER",
+    "email": "owner@docs.test"
+   },
+   "_count": {
+    "photos": 0
+   },
+   "ownerId": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+   "pricing": null,
+   "bibRules": null,
+   "imageUrl": null,
+   "location": "Guadalajara, Mexico",
+   "createdAt": "2026-10-29T08:33:06.442Z",
+   "deletedAt": null,
+   "isPublished": true,
+   "publishedAt": "2026-10-29T08:33:06.442Z",
+   "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+   "commerceMode": "FREE",
+   "isFreeDownload": true,
+   "freeDownloadLimit": null,
+   "freeDownloadUntil": null,
+   "totalFreeDownloads": 0,
+   "requireEmailForFree": true,
+   "requiresPhotoApproval": false,
+   "sponsorOverlayEnabled": false,
+   "organizerCommissionPercent": "0"
+  }
+ },
+ {
+  "eventType": "photo.reviewed",
+  "eventId": "76d1450c-2f5b-4536-9a32-8cfbb2d898dc",
+  "createdAt": "2026-10-29T08:33:06.856Z",
+  "payload": {
+   "status": "APPROVED",
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "photoId": "bf5b8717-31a3-4a72-9035-ed1d659776fb"
+  }
+ },
+ {
+  "eventType": "photo.download_url.created",
+  "eventId": "82ab4dd8-d607-48f0-803c-21ccf8fbeb2b",
+  "createdAt": "2026-10-29T08:33:06.906Z",
+  "payload": {
+   "photoId": "b30b95dd-b127-4922-97de-cc08dbc77a86",
+   "expiresIn": 300
+  }
+ },
+ {
+  "eventType": "photo.free_downloaded",
+  "eventId": "4cc77f4b-8f5e-4397-9c3a-096a7e6145cc",
+  "createdAt": "2026-10-29T08:33:07.218Z",
+  "payload": {
+   "eventId": "dd40533c-15c4-4e8a-bec3-1e488fbf66d2",
+   "photoId": "9061ef16-c749-44db-8141-539d24a33cbd",
+   "variant": "CLEAN",
+   "sponsors": []
+  }
+ },
+ {
+  "eventType": "photo.bulk.completed",
+  "eventId": "0472a625-8a30-45e2-a8dc-e1a40db88ab3",
+  "createdAt": "2026-10-29T08:33:07.243Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "affected": 2,
+   "operation": "review",
+   "requested": 2
+  }
+ },
+ {
+  "eventType": "photo.bulk.completed",
+  "eventId": "ae99a1b9-6e36-460a-9cf9-838906da339b",
+  "createdAt": "2026-10-29T08:33:07.272Z",
+  "payload": {
+   "failed": 2,
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "operation": "process",
+   "requested": 2,
+   "succeeded": 0
+  }
+ },
+ {
+  "eventType": "photo.bulk.completed",
+  "eventId": "439d7d95-0c3d-4bf7-a6f4-5690b2cd7084",
+  "createdAt": "2026-10-29T08:33:07.310Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "affected": 2,
+   "operation": "download",
+   "requested": 2
+  }
+ },
+ {
+  "eventType": "upload.batch.created",
+  "eventId": "12f4b318-3af5-4e6c-9651-25b6b4486da0",
+  "createdAt": "2026-10-29T08:33:07.410Z",
+  "payload": {
+   "id": "f6ddfaa7-03d0-41be-bba7-293bbb97ff8d",
+   "status": "PENDING",
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "createdAt": "2026-10-29T08:33:07.405Z",
+   "totalFiles": 2
+  }
+ },
+ {
+  "eventType": "event.sponsor.attached",
+  "eventId": "1b55b2c6-c391-4629-b261-99de2e108080",
+  "createdAt": "2026-10-29T08:33:07.868Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "sponsorId": "8b46b7df-55dd-4577-adf0-f9f94b84269d"
+  }
+ },
+ {
+  "eventType": "event.sponsor.detached",
+  "eventId": "a617cab7-1eeb-42a1-8796-f09897f834dc",
+  "createdAt": "2026-10-29T08:33:07.923Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "sponsorId": "8b46b7df-55dd-4577-adf0-f9f94b84269d"
+  }
+ },
+ {
+  "eventType": "event.contributor.invited",
+  "eventId": "2e81c10d-01df-46de-80d0-6e824d61a7f1",
+  "createdAt": "2026-10-29T08:33:07.974Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "contributor": {
+    "id": "d5b12b92-dfa2-4563-a7a6-946367be46a4",
+    "role": "PHOTOGRAPHER",
+    "status": "INVITED",
+    "userId": null,
+    "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+    "createdAt": "2026-10-29T08:33:07.965Z",
+    "expiresAt": "2026-11-12T08:33:07.964Z",
+    "revokedAt": null,
+    "updatedAt": "2026-10-29T08:33:07.965Z",
+    "acceptedAt": null,
+    "declinedAt": null,
+    "invitedById": "d1c21588-b433-4a15-bdf6-8d2b448fba92",
+    "rightsTerms": "El fotografo conserva la autoria; el organizador recibe 30% de cada venta.",
+    "invitedEmail": "fotografo@example.com",
+    "lastInvitedAt": "2026-10-29T08:33:07.964Z",
+    "rightsAcceptedAt": null,
+    "photographerWorkspaceId": null,
+    "organizerCommissionPercent": "30"
+   }
+  }
+ },
+ {
+  "eventType": "event.contributor.revoked",
+  "eventId": "cc59df77-b9ef-465e-a270-3ec547240ead",
+  "createdAt": "2026-10-29T08:33:08.023Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "contributorId": "d5b12b92-dfa2-4563-a7a6-946367be46a4"
+  }
+ },
+ {
+  "eventType": "workspace.brand.updated",
+  "eventId": "adb4ba51-ed8b-4c6c-a08f-2258481a3086",
+  "createdAt": "2026-10-29T08:33:08.307Z",
+  "payload": {
+   "kind": "logo",
+   "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3"
+  }
+ },
+ {
+  "eventType": "workspace.brand.updated",
+  "eventId": "e94f73bc-327c-4903-a0b5-9ac024826944",
+  "createdAt": "2026-10-29T08:33:08.342Z",
+  "payload": {
+   "workspaceId": "a9c6b6a2-af16-4c54-b283-46ff021b95f3",
+   "domainDisconnected": true
+  }
+ },
+ {
+  "eventType": "photo.deleted",
+  "eventId": "94dfb667-ffbf-4dfb-98b9-9ec6ae10c0c5",
+  "createdAt": "2026-10-29T08:33:08.442Z",
+  "payload": {
+   "photoId": "b63dc508-0872-4a8c-8231-ff77c36bb526"
+  }
+ },
+ {
+  "eventType": "photo.bulk.completed",
+  "eventId": "8b8bd2b8-7fc9-4c80-95b5-fa2892210244",
+  "createdAt": "2026-10-29T08:33:08.510Z",
+  "payload": {
+   "failed": 0,
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "operation": "delete",
+   "requested": 1,
+   "succeeded": 1
+  }
+ },
+ {
+  "eventType": "event.deleted",
+  "eventId": "8f06004f-8af4-44ba-8449-d8b5dd50430b",
+  "createdAt": "2026-10-29T08:33:08.530Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931"
+  }
+ },
+ {
+  "eventType": "event.restored",
+  "eventId": "aa611982-402c-4219-8e60-1ece704c35cd",
+  "createdAt": "2026-10-29T08:33:08.550Z",
+  "payload": {
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931"
+  }
+ },
+ {
+  "eventType": "analytics.report.ready",
+  "eventId": "ac558d6e-7e82-49e1-b416-b1cb5517e498",
+  "createdAt": "2026-10-29T08:33:09.012Z",
+  "payload": {
+   "name": "Maraton Ciudad Demo 2027",
+   "eventId": "2ea23dd8-1803-4128-9e9d-6c7603766931",
+   "reportUrl": "http://localhost:3000/reporte/2ea23dd8-1803-4128-9e9d-6c7603766931?token=2.7951514da5217516dc430ec55e89634ca622b964",
+   "computedAt": "2026-10-29T08:33:08.989Z"
+  }
+ },
+ {
+  "eventType": "upload.batch.created",
+  "eventId": "4d126294-9141-4660-ba2f-03872c36f79f",
+  "createdAt": "2026-10-29T08:33:09.311Z",
+  "payload": {
+   "id": "a2f06254-640a-44fe-8468-37ea0b0d56b2",
+   "status": "PENDING",
+   "eventId": "dd40533c-15c4-4e8a-bec3-1e488fbf66d2",
+   "createdAt": "2026-10-29T08:33:09.305Z",
+   "totalFiles": 1
+  }
+ }
+]

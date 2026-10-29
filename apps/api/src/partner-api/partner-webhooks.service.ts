@@ -9,6 +9,7 @@ import { PartnerPrincipal } from './partner-api.types';
 import { CreatePartnerWebhookDto, UpdatePartnerWebhookDto } from './dto/partner-webhook.dto';
 import { PartnerWebhookEvent } from './partner-webhook.events';
 import { EnterpriseAccessService } from './enterprise-access.service';
+import { stripInternalFields } from './partner-response.sanitizer';
 
 @Injectable()
 export class PartnerWebhooksService {
@@ -95,7 +96,7 @@ export class PartnerWebhooksService {
     if (!endpoints.length) return;
     const eventId = randomUUID();
     await this.prisma.partnerWebhookDelivery.createMany({
-      data: endpoints.map(endpoint => ({ endpointId: endpoint.id, workspaceId, eventId, eventType, payload: JSON.parse(JSON.stringify(data)) })),
+      data: endpoints.map(endpoint => ({ endpointId: endpoint.id, workspaceId, eventId, eventType, payload: JSON.parse(JSON.stringify(stripInternalFields(data))) })),
       skipDuplicates: true,
     });
   }

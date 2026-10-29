@@ -27,7 +27,8 @@
     "db:push": "prisma db push",
     "db:seed": "ts-node prisma/seed.ts",
     "seed:admin": "ts-node apps/api/prisma/seed-admin.ts",
-    "seed:plans": "ts-node apps/api/prisma/seed-plans.ts"
+    "seed:plans": "ts-node apps/api/prisma/seed-plans.ts",
+    "docs:partner": "bash scripts/partner-docs/publish.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.883.0",

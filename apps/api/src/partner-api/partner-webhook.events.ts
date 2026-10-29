@@ -8,6 +8,7 @@ export const PARTNER_WEBHOOK_EVENTS = [
   'photo.deleted', 'photo.reviewed', 'photo.download_url.created', 'photo.free_downloaded',
   'photo.bulk.completed', 'workspace.brand.updated',
   'analytics.report.ready', 'usage.threshold',
+  'order.paid', 'order.refunded', 'order.disputed', 'order.dispute.closed',
 ] as const;
 
 export type PartnerWebhookEvent = typeof PARTNER_WEBHOOK_EVENTS[number];
