@@ -97,7 +97,13 @@ export class MeteringService {
       && (!account.contractEnd || account.contractEnd > now);
     if (!active) return;
     const window = creditWindow(account.contractStart, now);
-    const used = await this.prisma.event.count({ where: { workspaceId, createdAt: { gte: window.start, lt: window.end > now ? window.end : new Date(now.getTime() + 1) } } });
+    // SQL directo: el cliente de Prisma descarta los eventos borrados en todo `count()`,
+    // y aquí deben contar (borrar un evento no devuelve el cupo).
+    const upTo = window.end > now ? window.end : new Date(now.getTime() + 1);
+    const rows = await this.prisma.$queryRaw<Array<{ total: bigint }>>`
+      SELECT COUNT(*)::bigint AS total FROM "events"
+      WHERE "workspace_id" = ${workspaceId}::uuid AND "created_at" >= ${window.start} AND "created_at" < ${upTo}`;
+    const used = Number(rows[0]?.total ?? 0);
     if (used >= account.annualEventLimit) {
       throw new ForbiddenException({
         code: 'EVENT_LIMIT_REACHED',

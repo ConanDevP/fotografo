@@ -4,7 +4,7 @@ import { MeteringService } from './metering.service';
 function build(account: any, created: number) {
   const prisma: any = {
     enterpriseAccount: { findUnique: jest.fn().mockResolvedValue(account) },
-    event: { count: jest.fn().mockResolvedValue(created) },
+    $queryRaw: jest.fn().mockResolvedValue([{ total: BigInt(created) }]),
   };
   return { prisma, service: new MeteringService(prisma) };
 }
@@ -15,7 +15,7 @@ describe('límite anual de eventos', () => {
   it('no limita a un espacio sin contrato', async () => {
     const { service, prisma } = build(null, 99);
     await expect(service.assertEventCapacity('ws')).resolves.toBeUndefined();
-    expect(prisma.event.count).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
   it('no limita si el contrato no fija tope', async () => {

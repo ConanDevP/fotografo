@@ -40,3 +40,21 @@ Guía interna: cómo se lleva un cliente de API desde la primera conversación h
 
 - Coste de IA: `GET /v1/admin/system/reports/ai-costs?days=30`.
 - Consumo del cliente: panel del cliente o `GET /v1/partner/usage`.
+
+## Pruebas de integración (PostgreSQL real)
+
+Además de las pruebas unitarias hay dos suites que corren contra una base real
+(`enterprise.integration.spec.ts` y `enterprise-lifecycle.integration.spec.ts`): cupo de fotos y
+eventos, facturación sin duplicados, avisos de uso, piloto, claves de prueba, prioridad, retención y
+equipo. Solo corren si defines `E2E_DATABASE_URL`, y se niegan a usar una base cuyo nombre no
+contenga `e2e` o `test`.
+
+```bash
+docker run -d --name lm-e2e-pg -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=lm_e2e -p 55432:5432 pgvector/pgvector:pg16
+DATABASE_URL=postgresql://postgres:e2e@localhost:55432/lm_e2e \
+  npx prisma migrate deploy --schema=./apps/api/prisma/schema.prisma
+E2E_DATABASE_URL=postgresql://postgres:e2e@localhost:55432/lm_e2e npx jest enterprise
+```
+
+Se pueden repetir sin limpiar la base. Stripe y el correo van simulados; lo que se prueba es la
+lógica y el SQL, no los servicios externos.
