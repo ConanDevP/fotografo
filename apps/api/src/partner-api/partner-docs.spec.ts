@@ -71,7 +71,7 @@ describe('documentación de la Partner API', () => {
     expect(weak).toEqual([]);
   });
 
-  it('documenta los 21 permisos y los 28 eventos de webhook', () => {
+  it('documenta los 22 permisos y los 30 eventos de webhook', () => {
     const scopesInSpec = new Set<string>();
     for (const item of Object.values<any>(spec.paths)) for (const op of Object.values<any>(item)) (op['x-required-scopes'] || []).forEach((s: string) => scopesInSpec.add(s));
     // `events:publish` no es el permiso de ninguna ruta: se suma a events:write al publicar (se documenta en el texto).

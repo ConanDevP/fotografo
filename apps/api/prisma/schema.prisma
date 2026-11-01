@@ -341,6 +341,13 @@ model Event {
   requiresPhotoApproval      Boolean              @default(false) @map("requires_photo_approval")
   isPublished                Boolean              @default(false) @map("is_published")
   publishedAt                DateTime?            @map("published_at") @db.Timestamptz(6)
+  /// Código corto del QR de registro de corredores (/r/{code}). Se crea al activarlo.
+  registrationCode           String?              @unique @map("registration_code") @db.VarChar(12)
+  registrationEnabled        Boolean              @default(false) @map("registration_enabled")
+  /// El QR usa el dominio propio del espacio (si está verificado) en vez de lucilamon.com.
+  registrationUseCustomDomain Boolean             @default(false) @map("registration_use_custom_domain")
+  /// País del evento (ISO 3166-1 alfa-2): país por defecto del selector de teléfono.
+  countryCode                String?              @map("country_code") @db.VarChar(2)
   /// Cobro del modo compartir liquidado al publicar. Se guarda para no volver a
   /// cobrar si el evento se despublica y se vuelve a publicar.
   shareChargeCents           Int?                 @map("share_charge_cents")
@@ -448,15 +455,49 @@ model PhotoBib {
 }
 
 model BibSubscription {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  eventId   String   @map("event_id") @db.Uuid
-  bib       String
-  email     String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  event     Event    @relation(fields: [eventId], references: [id])
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId            String    @map("event_id") @db.Uuid
+  bib                String
+  /// Nulo cuando el corredor solo dejó un teléfono.
+  email              String?
+  /// Teléfono en E.164 (+5215512345678). Nulo si solo dejó correo.
+  phone              String?   @db.VarChar(20)
+  phoneCountry       String?   @map("phone_country") @db.VarChar(2)
+  name               String?   @db.VarChar(120)
+  locale             String    @default("es") @db.VarChar(5)
+  /// QR | SEARCH | PARTNER
+  source             String    @default("SEARCH") @db.VarChar(16)
+  /// ACTIVE | UNSUBSCRIBED
+  status             String    @default("ACTIVE") @db.VarChar(16)
+  emailConsentAt     DateTime? @map("email_consent_at") @db.Timestamptz(6)
+  whatsappConsentAt  DateTime? @map("whatsapp_consent_at") @db.Timestamptz(6)
+  consentTextVersion String?   @map("consent_text_version") @db.VarChar(24)
+  /// Hash con sal de la IP, solo para frenar abuso. Nunca la IP.
+  ipHash             String?   @map("ip_hash") @db.VarChar(64)
+  unsubscribedAt     DateTime? @map("unsubscribed_at") @db.Timestamptz(6)
+  lastNotifiedAt     DateTime? @map("last_notified_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  event              Event     @relation(fields: [eventId], references: [id])
+  deliveries         BibNotificationLog[]
 
   @@unique([eventId, bib, email])
+  @@index([eventId, status])
   @@map("bib_subscriptions")
+}
+
+/// Qué foto se avisó, a quién y por qué canal. Es lo que impide repetir un aviso
+/// y lo que permite avisar de las fotos que se aprueban después.
+model BibNotificationLog {
+  id             BigInt          @id @default(autoincrement())
+  subscriptionId String          @map("subscription_id") @db.Uuid
+  photoId        String          @map("photo_id") @db.Uuid
+  /// EMAIL | WHATSAPP
+  channel        String          @db.VarChar(12)
+  sentAt         DateTime        @default(now()) @map("sent_at") @db.Timestamptz(6)
+  subscription   BibSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, photoId, channel])
+  @@map("bib_notification_log")
 }
 
 model Order {

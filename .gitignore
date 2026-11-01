@@ -149,3 +149,9 @@ coverage/
 .env.backup*
 !.env.example
 !.env.production.example
+
+# Capturas crudas de la documentación de la API (se regeneran; examples.json es la versión saneada)
+scripts/partner-docs/capture/*.json
+scripts/partner-docs/__pycache__/
+__pycache__/
+*.pyc

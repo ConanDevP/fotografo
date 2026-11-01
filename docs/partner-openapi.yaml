@@ -102,7 +102,7 @@ info:
     La firma es `HMAC_SHA256(signingSecret, "<timestamp>.<cuerpo crudo>")`. Verifícala con el cuerpo **sin reformatear** y
     rechaza marcas de tiempo con más de 5 minutos de diferencia. Responde `2xx` en menos de 10 segundos; si no, reintentamos
     con espera creciente hasta 8 veces. Los reintentos llevan el mismo `x-lucilamon-event-id`: úsalo para no procesar dos veces.
-    Los 28 eventos y sus cargas están en la sección **Webhooks** de esta referencia.
+    Los 30 eventos y sus cargas están en la sección **Webhooks** de esta referencia.
 
     ## Pagos
 
@@ -158,7 +158,7 @@ tags:
 - name: Uso y cuotas
   description: Consumo del contrato frente a sus topes.
 - name: Eventos de webhook
-  description: Los 28 eventos que puedes recibir. Cada uno llega como `POST` a tu URL con el sobre `{ id, type, createdAt,
+  description: Los 30 eventos que puedes recibir. Cada uno llega como `POST` a tu URL con el sobre `{ id, type, createdAt,
     data }`.
 - name: Errores
   x-displayName: Errores
@@ -200,6 +200,7 @@ tags:
     | `photos:read` | Consultar fotografías y lotes de carga. | 5 |
     | `photos:review` | Aprobar o rechazar fotografías y corregir dorsales. | 5 |
     | `photos:upload` | Crear lotes y firmar, confirmar y cerrar cargas. | 4 |
+    | `registrations:read` | Consultar y exportar los corredores registrados por QR. | 2 |
     | `search:bib` | Buscar por dorsal. | 1 |
     | `search:face` | Buscar por selfie. | 2 |
     | `webhooks:manage` | Registrar y administrar webhooks. | 7 |
@@ -2024,6 +2025,63 @@ paths:
       security:
       - PartnerApiKey: []
       - ApiKeyHeader: []
+  /events/{eventId}/exports/registrations:
+    get:
+      operationId: exportRegistrations
+      tags:
+      - Analítica y exportaciones
+      summary: Exportar corredores registrados en CSV
+      description: |-
+        Los mismos registros de «Listar corredores registrados» en un CSV. Devuelve el archivo dentro del JSON (`filename`, `contentType`, `content`).
+
+        **Permiso requerido:** `registrations:read`.
+
+        **Límite:** 600 peticiones por minuto por credencial.
+      x-required-scopes:
+      - registrations:read
+      x-rate-limit:
+        requests: 600
+        perSeconds: 60
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        description: Identificador (UUID) del evento. En pedidos y liquidaciones, filtra por ese evento.
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Operación correcta.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CsvExport'
+              example:
+                data:
+                  filename: registrations-5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11.csv
+                  contentType: text/csv; charset=utf-8
+                  content: |-
+                    "bib","name","email","phone","phoneCountry","locale","source","status","emailConsentAt","whatsappConsentAt","createdAt"
+                    "1001","Ana Pérez","ana@example.com","+525512345678","MX","es","QR","ACTIVE","2027-03-10T18:20:00.000Z","2027-03-10T18:20:00.000Z","2027-03-10T18:20:00.000Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+      - PartnerApiKey: []
+      - ApiKeyHeader: []
   /events/{eventId}/gallery:
     get:
       operationId: getGallery
@@ -2849,6 +2907,124 @@ paths:
                   reviewedById: 535c0e5c-a75f-56c5-83d0-d30627bc5f8c
                   createdAt: '2026-10-29T08:33:06.623Z'
                   batchJobId: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+      - PartnerApiKey: []
+      - ApiKeyHeader: []
+  /events/{eventId}/registrations:
+    get:
+      operationId: listRegistrations
+      tags:
+      - Analítica y exportaciones
+      summary: Listar corredores registrados
+      description: |-
+        Corredores que dejaron su dorsal y su contacto en el QR del evento (o al pedir un aviso al buscar), del más reciente al más antiguo. Incluye correo y teléfono (E.164) **solo de quienes dieron su consentimiento** a ese canal, y su estado: `ACTIVE` o `UNSUBSCRIBED`. Respeta las bajas: no escribas a quien esté en `UNSUBSCRIBED`. Trata estos datos según tu propia política de privacidad.
+
+        **Permiso requerido:** `registrations:read`.
+
+        **Límite:** 600 peticiones por minuto por credencial.
+      x-required-scopes:
+      - registrations:read
+      x-rate-limit:
+        requests: 600
+        perSeconds: 60
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        description: Identificador (UUID) del evento. En pedidos y liquidaciones, filtra por ese evento.
+        schema:
+          type: string
+          format: uuid
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+        description: Página, desde 1.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        description: Elementos por página, de 1 a 100.
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 40
+        description: 'Filtra por estado. En fotografías: `PENDING`, `PROCESSED` o `FAILED`. En pedidos: `PAID`, `REFUNDED`,
+          `DISPUTED`, `CREATED` o `CANCELLED`.'
+      - name: publicationStatus
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 40
+        description: 'Filtra por estado de publicación: `PENDING_REVIEW`, `APPROVED` o `REJECTED`.'
+      - name: archived
+        in: query
+        required: false
+        schema:
+          pattern: ^(true|false)$
+          type: string
+        description: '`true` lista solo los eventos archivados.'
+      responses:
+        '200':
+          description: Operación correcta.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Registration'
+                  meta:
+                    type: object
+                    properties:
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'
+              example:
+                data:
+                - id: 0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30
+                  bib: '1001'
+                  name: Ana Pérez
+                  email: ana@example.com
+                  phone: '+525512345678'
+                  phoneCountry: MX
+                  locale: es
+                  source: QR
+                  status: ACTIVE
+                  emailConsentAt: '2027-03-10T18:20:00.000Z'
+                  whatsappConsentAt: '2027-03-10T18:20:00.000Z'
+                  lastNotifiedAt: null
+                  createdAt: '2027-03-10T18:20:00.000Z'
+                meta:
+                  pagination:
+                    page: 1
+                    limit: 50
+                    total: 1
+                    pages: 1
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -8340,6 +8516,151 @@ x-webhooks:
       responses:
         2XX:
           description: Entrega aceptada. Cualquier otra respuesta, o no responder a tiempo, provoca un reintento.
+  runner.registered:
+    post:
+      operationId: webhook_runner_registered
+      tags:
+      - Eventos de webhook
+      summary: runner.registered
+      description: |-
+        Un corredor se registró en el QR del evento y quiere recibir sus fotos. No incluye correo ni teléfono: consúltalos con `GET /events/{eventId}/registrations` (permiso `registrations:read`).
+
+        Tu endpoint recibe un `POST` con el cuerpo de abajo y las cabeceras `x-lucilamon-signature`, `x-lucilamon-timestamp` y `x-lucilamon-event-id`. Responde `2xx` en menos de 10 segundos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - id
+              - type
+              - createdAt
+              - data
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                  description: 'Identificador único del evento. Es el mismo en los reintentos: úsalo para no procesar dos
+                    veces.'
+                type:
+                  type: string
+                  enum:
+                  - runner.registered
+                  description: Tipo de evento.
+                createdAt:
+                  type: string
+                  format: date-time
+                  description: Cuándo se generó el evento.
+                data:
+                  type: object
+                  properties:
+                    eventId:
+                      type: string
+                      format: uuid
+                      description: Evento.
+                    registrationId:
+                      type: string
+                      format: uuid
+                      description: Identificador del registro del corredor.
+                    bib:
+                      type: string
+                      description: Dorsal (solo dígitos).
+                    channels:
+                      type: array
+                      items:
+                        type: string
+                      description: 'Canales por los que aceptó recibir avisos: `EMAIL` y/o `WHATSAPP`.'
+                    source:
+                      type: string
+                      description: 'De dónde viene el registro: `QR` (formulario del evento) o `SEARCH` (aviso pedido al buscar
+                        su dorsal).'
+                  required:
+                  - eventId
+                  - registrationId
+                  - bib
+                  - channels
+                  - source
+            example:
+              id: 0b6f6a5e-7a8c-4f4e-9b1d-2a3c4e5f6a7b
+              type: runner.registered
+              createdAt: '2027-03-14T09:12:44.318Z'
+              data:
+                eventId: 5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11
+                registrationId: 0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30
+                bib: '1001'
+                channels:
+                - EMAIL
+                - WHATSAPP
+                source: QR
+      responses:
+        2XX:
+          description: Entrega aceptada. Cualquier otra respuesta, o no responder a tiempo, provoca un reintento.
+  runner.unsubscribed:
+    post:
+      operationId: webhook_runner_unsubscribed
+      tags:
+      - Eventos de webhook
+      summary: runner.unsubscribed
+      description: |-
+        Un corredor se dio de baja de los avisos. Deja de escribirle.
+
+        Tu endpoint recibe un `POST` con el cuerpo de abajo y las cabeceras `x-lucilamon-signature`, `x-lucilamon-timestamp` y `x-lucilamon-event-id`. Responde `2xx` en menos de 10 segundos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - id
+              - type
+              - createdAt
+              - data
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                  description: 'Identificador único del evento. Es el mismo en los reintentos: úsalo para no procesar dos
+                    veces.'
+                type:
+                  type: string
+                  enum:
+                  - runner.unsubscribed
+                  description: Tipo de evento.
+                createdAt:
+                  type: string
+                  format: date-time
+                  description: Cuándo se generó el evento.
+                data:
+                  type: object
+                  properties:
+                    eventId:
+                      type: string
+                      format: uuid
+                      description: Evento.
+                    registrationId:
+                      type: string
+                      format: uuid
+                      description: Identificador del registro del corredor.
+                    bib:
+                      type: string
+                      description: Dorsal (solo dígitos).
+                  required:
+                  - eventId
+                  - registrationId
+                  - bib
+            example:
+              id: 0b6f6a5e-7a8c-4f4e-9b1d-2a3c4e5f6a7b
+              type: runner.unsubscribed
+              createdAt: '2027-03-14T09:12:44.318Z'
+              data:
+                eventId: 5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11
+                registrationId: 0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30
+                bib: '1001'
+      responses:
+        2XX:
+          description: Entrega aceptada. Cualquier otra respuesta, o no responder a tiempo, provoca un reintento.
   order.dispute.closed:
     post:
       operationId: webhook_order_dispute_closed
@@ -9403,7 +9724,7 @@ components:
           description: URL HTTPS pública que recibirá los eventos.
         events:
           minItems: 1
-          maxItems: 28
+          maxItems: 30
           type: array
           items:
             type: string
@@ -9436,7 +9757,9 @@ components:
             - order.refunded
             - order.disputed
             - order.dispute.closed
-          description: Eventos a recibir (de los 28 disponibles).
+            - runner.registered
+            - runner.unsubscribed
+          description: Eventos a recibir (de los 30 disponibles).
       required:
       - events
       - url
@@ -11109,7 +11432,7 @@ components:
           description: Recuadro `[x, y, ancho, alto]` en píxeles.
         source:
           type: string
-          description: 'Origen del dorsal: `GEMINI` (lectura automática) o `MANUAL`.'
+          description: 'De dónde viene el registro: `QR` (formulario del evento) o `SEARCH` (aviso pedido al buscar su dorsal).'
         photo:
           type: object
           properties:
@@ -11568,7 +11891,8 @@ components:
                 description: Recuadro `[x, y, ancho, alto]` en píxeles.
               source:
                 type: string
-                description: 'Origen del dorsal: `GEMINI` (lectura automática) o `MANUAL`.'
+                description: 'De dónde viene el registro: `QR` (formulario del evento) o `SEARCH` (aviso pedido al buscar
+                  su dorsal).'
             required:
             - id
             - bib
@@ -11691,7 +12015,7 @@ components:
           description: Recuadro `[x, y, ancho, alto]` en píxeles.
         source:
           type: string
-          description: 'Origen del dorsal: `GEMINI` (lectura automática) o `MANUAL`.'
+          description: 'De dónde viene el registro: `QR` (formulario del evento) o `SEARCH` (aviso pedido al buscar su dorsal).'
           enum:
           - GEMINI
           - MANUAL
@@ -11765,7 +12089,8 @@ components:
                 description: Recuadro `[x, y, ancho, alto]` en píxeles.
               source:
                 type: string
-                description: 'Origen del dorsal: `GEMINI` (lectura automática) o `MANUAL`.'
+                description: 'De dónde viene el registro: `QR` (formulario del evento) o `SEARCH` (aviso pedido al buscar
+                  su dorsal).'
             required:
             - id
             - bib
@@ -12007,6 +12332,69 @@ components:
       - photoId
       - uploadUrl
       - objectKey
+    Registration:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Identificador.
+        bib:
+          type: string
+          description: Dorsal (solo dígitos).
+        name:
+          type: string
+          description: Nombre.
+        email:
+          type: string
+          description: Correo.
+        phone:
+          type: string
+          description: Teléfono. En los registros de corredores va en formato internacional E.164 (`+525512345678`) y es nulo
+            si no dejó teléfono.
+        phoneCountry:
+          type: string
+          description: País del teléfono (ISO 3166-1 alfa-2).
+        locale:
+          type: string
+          description: 'Idioma de los avisos: `es` o `en`.'
+        source:
+          type: string
+          description: 'De dónde viene el registro: `QR` (formulario del evento) o `SEARCH` (aviso pedido al buscar su dorsal).'
+        status:
+          type: string
+          description: Estado.
+        emailConsentAt:
+          type: string
+          format: date-time
+          description: Cuándo aceptó recibir avisos por correo. Nulo si no los aceptó.
+        whatsappConsentAt:
+          type: string
+          format: date-time
+          description: Cuándo aceptó recibir avisos por WhatsApp. Nulo si no los aceptó.
+        lastNotifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Cuándo se le avisó por última vez de fotos nuevas.
+        createdAt:
+          type: string
+          format: date-time
+          description: Cuándo se creó.
+      required:
+      - id
+      - bib
+      - name
+      - email
+      - phone
+      - phoneCountry
+      - locale
+      - source
+      - status
+      - emailConsentAt
+      - whatsappConsentAt
+      - lastNotifiedAt
+      - createdAt
     ReportLink:
       type: object
       properties:
@@ -12394,7 +12782,7 @@ components:
           description: Nueva URL HTTPS pública.
         events:
           minItems: 1
-          maxItems: 28
+          maxItems: 30
           type: array
           items:
             type: string
@@ -12427,6 +12815,8 @@ components:
             - order.refunded
             - order.disputed
             - order.dispute.closed
+            - runner.registered
+            - runner.unsubscribed
           description: Nueva lista de eventos a recibir.
         active:
           type: boolean

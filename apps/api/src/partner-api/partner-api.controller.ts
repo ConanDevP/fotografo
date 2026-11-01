@@ -306,6 +306,18 @@ export class PartnerApiController {
     return { data: await this.partner.exportAudience(req.partner, eventId) };
   }
 
+  @Get('events/:eventId/registrations')
+  @RequirePartnerScopes('registrations:read')
+  async listRegistrations(@Req() req: PartnerRequest, @Param('eventId') eventId: string, @Query() query: PartnerListQueryDto): Promise<ApiResponse> {
+    return { data: await this.partner.listRegistrations(req.partner, eventId, query) };
+  }
+
+  @Get('events/:eventId/exports/registrations')
+  @RequirePartnerScopes('registrations:read')
+  async exportRegistrations(@Req() req: PartnerRequest, @Param('eventId') eventId: string): Promise<ApiResponse> {
+    return { data: await this.partner.exportRegistrations(req.partner, eventId) };
+  }
+
   @Get('sponsors')
   @RequirePartnerScopes('events:sponsors')
   async listSponsors(@Req() req: PartnerRequest): Promise<ApiResponse> { return { data: await this.partner.listSponsors(req.partner) }; }

@@ -122,7 +122,7 @@ def verify(raw_body: bytes, timestamp: str, signature: str, secret: str) -> bool
 
 ## Carga de cada evento
 
-Ejemplo del objeto `data` de cada uno de los 28 eventos (los de eventos y fotografías con datos reales de una API de prueba;
+Ejemplo del objeto `data` de cada uno de los 30 eventos (los de eventos y fotografías con datos reales de una API de prueba;
 los que emite un proceso en segundo plano, escritos a partir del código que los emite).
 
 <!-- payloads:start -->
@@ -715,6 +715,45 @@ El banco del comprador abrió un contracargo. Se corta el acceso a la descarga m
     "settlementStatus": "PENDING",
     "settledAt": null,
     "createdAt": "2027-03-14T10:01:40.000Z"
+  }
+}
+```
+
+### `runner.registered`
+
+Un corredor se registró en el QR del evento y quiere recibir sus fotos. No incluye correo ni teléfono: consúltalos con `GET /events/{eventId}/registrations` (permiso `registrations:read`).
+
+```json
+{
+  "id": "0b6f6a5e-7a8c-4f4e-9b1d-2a3c4e5f6a7b",
+  "type": "runner.registered",
+  "createdAt": "2027-03-14T09:12:44.318Z",
+  "data": {
+    "eventId": "5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11",
+    "registrationId": "0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30",
+    "bib": "1001",
+    "channels": [
+      "EMAIL",
+      "WHATSAPP"
+    ],
+    "source": "QR"
+  }
+}
+```
+
+### `runner.unsubscribed`
+
+Un corredor se dio de baja de los avisos. Deja de escribirle.
+
+```json
+{
+  "id": "0b6f6a5e-7a8c-4f4e-9b1d-2a3c4e5f6a7b",
+  "type": "runner.unsubscribed",
+  "createdAt": "2027-03-14T09:12:44.318Z",
+  "data": {
+    "eventId": "5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11",
+    "registrationId": "0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30",
+    "bib": "1001"
   }
 }
 ```

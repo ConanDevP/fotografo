@@ -101,7 +101,7 @@ x-lucilamon-event-id:  <id del evento>
 La firma es `HMAC_SHA256(signingSecret, "<timestamp>.<cuerpo crudo>")`. Verifícala con el cuerpo **sin reformatear** y
 rechaza marcas de tiempo con más de 5 minutos de diferencia. Responde `2xx` en menos de 10 segundos; si no, reintentamos
 con espera creciente hasta 8 veces. Los reintentos llevan el mismo `x-lucilamon-event-id`: úsalo para no procesar dos veces.
-Los 28 eventos y sus cargas están en la sección **Webhooks** de esta referencia.
+Los 30 eventos y sus cargas están en la sección **Webhooks** de esta referencia.
 
 ## Pagos
 
@@ -177,6 +177,8 @@ WEBHOOKS = {
     'order.paid': 'Un pedido de tu evento se pagó en la tienda de LucilaMon. Se emite una sola vez por pedido.',
     'order.refunded': 'Un pedido de tu evento se reembolsó (por ti con nuestro equipo, o por la pasarela).',
     'order.disputed': 'El banco del comprador abrió un contracargo. Se corta el acceso a la descarga mientras dure.',
+    'runner.registered': 'Un corredor se registró en el QR del evento y quiere recibir sus fotos. No incluye correo ni teléfono: consúltalos con `GET /events/{eventId}/registrations` (permiso `registrations:read`).',
+    'runner.unsubscribed': 'Un corredor se dio de baja de los avisos. Deja de escribirle.',
     'order.dispute.closed': 'Se resolvió el contracargo: `disputeOutcome` es `won` (el pedido vuelve a `PAID`) o `lost` (queda `REFUNDED`).',
 }
 
@@ -194,5 +196,7 @@ WEBHOOK_MANUAL_PAYLOADS = {
     'order.refunded': {"id": "a3c1e5f7-2b4d-4c6e-8a90-1b2c3d4e5f60", "eventId": "5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11", "eventName": "Maratón Ciudad Demo 2027", "status": "REFUNDED", "amountCents": 800, "currency": "USD", "paymentGateway": "STRIPE", "buyerEmail": "corredor@example.com", "itemCount": 1, "paidAt": "2027-03-14T10:02:11.000Z", "refundedAt": "2027-03-15T09:00:00.000Z", "disputedAt": None, "disputeOutcome": None, "settlementStatus": "NOT_REQUIRED", "settledAt": None, "createdAt": "2027-03-14T10:01:40.000Z"},
     'order.disputed': {"id": "a3c1e5f7-2b4d-4c6e-8a90-1b2c3d4e5f60", "eventId": "5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11", "eventName": "Maratón Ciudad Demo 2027", "status": "DISPUTED", "amountCents": 800, "currency": "USD", "paymentGateway": "STRIPE", "buyerEmail": "corredor@example.com", "itemCount": 1, "paidAt": "2027-03-14T10:02:11.000Z", "refundedAt": None, "disputedAt": "2027-03-20T12:00:00.000Z", "disputeOutcome": "needs_response", "settlementStatus": "PENDING", "settledAt": None, "createdAt": "2027-03-14T10:01:40.000Z"},
     'order.dispute.closed': {"id": "a3c1e5f7-2b4d-4c6e-8a90-1b2c3d4e5f60", "eventId": "5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11", "eventName": "Maratón Ciudad Demo 2027", "status": "PAID", "amountCents": 800, "currency": "USD", "paymentGateway": "STRIPE", "buyerEmail": "corredor@example.com", "itemCount": 1, "paidAt": "2027-03-14T10:02:11.000Z", "refundedAt": None, "disputedAt": "2027-03-20T12:00:00.000Z", "disputeOutcome": "won", "settlementStatus": "PENDING", "settledAt": None, "createdAt": "2027-03-14T10:01:40.000Z"},
+    'runner.registered': {'eventId': '5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11', 'registrationId': '0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30', 'bib': '1001', 'channels': ['EMAIL', 'WHATSAPP'], 'source': 'QR'},
+    'runner.unsubscribed': {'eventId': '5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11', 'registrationId': '0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30', 'bib': '1001'},
     'usage.threshold': {'metric': 'photos', 'threshold': 80, 'used': 80000, 'limit': 100000, 'period': '2026-10-28'},
 }

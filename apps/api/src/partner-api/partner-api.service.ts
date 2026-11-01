@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
 import { UserRole } from '@shared/types';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -28,6 +28,7 @@ import { InviteContributorDto } from '../events/dto/invite-contributor.dto';
 import { Request } from 'express';
 
 import { loadPhotoAllowance } from '../billing/metering.service';
+import { DigestSchedulerService } from '../common/services/digest-scheduler.service';
 
 @Injectable()
 export class PartnerApiService {
@@ -45,6 +46,7 @@ export class PartnerApiService {
     private readonly freeDownloads: FreeDownloadsService,
     @Inject(forwardRef(() => AnalyticsService))
     private readonly analytics: AnalyticsService,
+    @Optional() private readonly digestScheduler?: DigestSchedulerService,
   ) {}
 
   async listEvents(principal: PartnerPrincipal, query: PartnerListQueryDto) {
@@ -392,6 +394,7 @@ export class PartnerApiService {
       where: { id: { in: photoIds }, eventId },
       data: { publicationStatus: status, reviewNote: note, reviewedAt: now, reviewedById: principal.actorUserId },
     });
+    if (status === 'APPROVED') await this.digestScheduler?.scheduleForPhotos(eventId, photoIds).catch(() => undefined);
     await this.emit(principal.workspaceId, 'photo.bulk.completed', { eventId, operation: 'review', requested: photoIds.length, affected: result.count });
     return { requested: photoIds.length, affected: result.count, status };
   }
@@ -490,6 +493,43 @@ export class PartnerApiService {
     await this.assertEventInWorkspace(principal.workspaceId, eventId);
     const content = await this.freeDownloads.exportEmails(eventId, principal.actorUserId, principal.actorRole as UserRole);
     return { filename: `audience-${eventId}.csv`, contentType: 'text/csv; charset=utf-8', content };
+  }
+
+  async listRegistrations(principal: PartnerPrincipal, eventId: string, query: PartnerListQueryDto) {
+    await this.assertEventInWorkspace(principal.workspaceId, eventId);
+    const where: Prisma.BibSubscriptionWhereInput = { eventId };
+    const [items, total] = await Promise.all([
+      this.prisma.bibSubscription.findMany({
+        where,
+        select: {
+          id: true, bib: true, name: true, email: true, phone: true, phoneCountry: true, locale: true,
+          source: true, status: true, emailConsentAt: true, whatsappConsentAt: true,
+          lastNotifiedAt: true, createdAt: true,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+      this.prisma.bibSubscription.count({ where }),
+    ]);
+    return { items, pagination: this.pagination(query.page, query.limit, total) };
+  }
+
+  async exportRegistrations(principal: PartnerPrincipal, eventId: string) {
+    await this.assertEventInWorkspace(principal.workspaceId, eventId);
+    const rows = await this.prisma.bibSubscription.findMany({
+      where: { eventId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        bib: true, name: true, email: true, phone: true, phoneCountry: true, locale: true, source: true,
+        status: true, emailConsentAt: true, whatsappConsentAt: true, createdAt: true,
+      },
+    });
+    const content = this.csv(
+      ['bib', 'name', 'email', 'phone', 'phoneCountry', 'locale', 'source', 'status', 'emailConsentAt', 'whatsappConsentAt', 'createdAt'],
+      rows.map(r => [r.bib, r.name || '', r.email || '', r.phone || '', r.phoneCountry || '', r.locale, r.source, r.status, r.emailConsentAt?.toISOString() || '', r.whatsappConsentAt?.toISOString() || '', r.createdAt.toISOString()]),
+    );
+    return { filename: `registrations-${eventId}.csv`, contentType: 'text/csv; charset=utf-8', content };
   }
 
   async getWorkspace(principal: PartnerPrincipal) {
@@ -605,7 +645,8 @@ export class PartnerApiService {
   private csv(headers: string[], rows: Array<Array<string | number>>) {
     const cell = (value: string | number) => {
       let safe = String(value);
-      if (/^[=+\-@]/.test(safe)) safe = `'${safe}`;
+      // Los teléfonos E.164 (+525512345678) están validados: no son fórmulas y deben salir intactos.
+      if (/^[=+\-@]/.test(safe) && !/^\+\d{6,15}$/.test(safe)) safe = `'${safe}`;
       return `"${safe.replace(/"/g, '""')}"`;
     };
     return [headers.map(cell).join(','), ...rows.map(row => row.map(cell).join(','))].join('\n');

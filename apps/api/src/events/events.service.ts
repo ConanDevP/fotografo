@@ -13,6 +13,7 @@ import { MeteringService } from '../billing/metering.service';
 import { InviteContributorDto } from './dto/invite-contributor.dto';
 import { ReviewPhotoDto } from './dto/review-photo.dto';
 import { QueueService } from '../common/services/queue.service';
+import { DigestSchedulerService } from '../common/services/digest-scheduler.service';
 import { MailerService } from '../common/services/mailer.service';
 import { pricingPolicyIssue } from '@shared/pricing-policy';
 
@@ -28,6 +29,7 @@ export class EventsService {
     private billingService: BillingService,
     private mailerService: MailerService,
     @Optional() private meteringService?: MeteringService,
+    @Optional() private digestScheduler?: DigestSchedulerService,
   ) {}
 
   /** ¿Hay algún transporte de correo configurado? Sirve para avisar en la UI
@@ -367,7 +369,7 @@ export class EventsService {
       await this.billingService.chargePublication(id);
     }
 
-    return this.prisma.event.update({
+    const updated = await this.prisma.event.update({
       where: { id },
       data: updateData,
       include: {
@@ -379,6 +381,14 @@ export class EventsService {
         },
       },
     });
+
+    // Quien se registró antes de publicar espera sus fotos: es el momento de avisarle.
+    if (publishingNow) {
+      await this.digestScheduler?.scheduleForEvent(id).catch(error =>
+        this.logger.warn(`No se pudo programar los avisos al publicar: ${error instanceof Error ? error.message : error}`),
+      );
+    }
+    return updated;
   }
 
   /**
@@ -1292,7 +1302,7 @@ export class EventsService {
     if (dto.status === 'PENDING_REVIEW') throw new BadRequestException('La revisión debe aprobar o rechazar la fotografía');
     const photo = await this.prisma.photo.findFirst({ where: { id: photoId, eventId } });
     if (!photo) throw new NotFoundException('Fotografía no encontrada');
-    return this.prisma.photo.update({
+    const reviewed = await this.prisma.photo.update({
       where: { id: photoId },
       data: {
         publicationStatus: dto.status,
@@ -1301,6 +1311,12 @@ export class EventsService {
         reviewedById: userId,
       },
     });
+    if (dto.status === 'APPROVED') {
+      await this.digestScheduler?.scheduleForPhotos(eventId, [photoId]).catch(error =>
+        this.logger.warn(`No se pudo programar el aviso de la foto aprobada: ${error instanceof Error ? error.message : error}`),
+      );
+    }
+    return reviewed;
   }
 
   /**

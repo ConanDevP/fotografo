@@ -1,3 +1,4 @@
+import { DIGEST_WINDOW_MS, digestJobId } from '@shared/registration';
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
@@ -287,24 +288,22 @@ export class ProcessPhotoProcessor extends WorkerHost {
     if (!uniqueBibs.length) return;
 
     const subscriptions = await this.prisma.bibSubscription.findMany({
-      where: { eventId, bib: { in: uniqueBibs } },
+      where: { eventId, status: 'ACTIVE', bib: { in: uniqueBibs } },
+      select: { id: true, bib: true },
     });
+    // Un solo aviso por corredor en cada ventana de 10 minutos: el id del
+    // trabajo repetido es ignorado, y el envío reúne todas sus fotos nuevas.
     for (const subscription of subscriptions) {
       await this.emailQueue.add(
         JOBS.SEND_BIB_EMAIL,
+        { kind: 'BIB_NOTIFICATION', subscriptionId: subscription.id, eventId, bib: subscription.bib, email: '' },
         {
-          kind: 'BIB_NOTIFICATION',
-          eventId,
-          bib: subscription.bib,
-          email: subscription.email,
-          photoIds: [photoId],
-        },
-        {
-          jobId: `bib-${subscription.id}-${photoId}`,
+          jobId: digestJobId(subscription.id),
+          delay: DIGEST_WINDOW_MS,
           attempts: 3,
-          backoff: { type: 'exponential', delay: 2000 },
-          removeOnComplete: 1000,
-          removeOnFail: 500,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: true,
+          removeOnFail: true,
         },
       );
     }

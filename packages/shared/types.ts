@@ -133,7 +133,10 @@ export interface ProcessPhotoJob {
 export interface SendBibEmailJob {
   eventId: string;
   bib: string;
+  /** Vacío cuando el aviso va solo por WhatsApp. */
   email: string;
+  /** Resumen agrupado de una suscripción: reúne las fotos aún no avisadas. */
+  subscriptionId?: string;
   photoIds?: string[];
   kind?: 'BIB_NOTIFICATION' | 'ORDER_CONFIRMATION' | 'EVENT_INVITATION';
   eventName?: string;

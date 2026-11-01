@@ -16,6 +16,7 @@ import { AdminModule } from './admin/admin.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { PhotographersModule } from './photographers/photographers.module';
 import { PublicModule } from './public/public.module';
+import { RegistrationsModule } from './registrations/registrations.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 import { SponsorsModule } from './sponsors/sponsors.module';
 import { MetricsModule } from './metrics/metrics.module';
@@ -48,6 +49,7 @@ import { validateEnvironment } from './common/config/validate-environment';
     WebhooksModule,
     PhotographersModule,
     PublicModule,
+    RegistrationsModule,
     WorkspacesModule,
     SponsorsModule,
     MetricsModule,

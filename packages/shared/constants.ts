@@ -100,6 +100,8 @@ export const GEMINI_MODELS = {
 export const RATE_LIMITS = {
   SEARCH: 60,
   EMAIL: 5,
+  /** Registro por QR: en la meta muchos corredores comparten la misma IP. */
+  REGISTER: 40,
   UPLOAD: 20,
   DEFAULT: 100,
 } as const;

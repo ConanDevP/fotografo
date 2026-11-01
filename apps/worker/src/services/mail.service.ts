@@ -6,6 +6,7 @@ interface EmailOptions {
   to: string;
   subject: string;
   html: string;
+  headers?: Record<string, string>;
   attachments?: Array<{
     filename: string;
     path: string;
@@ -135,6 +136,61 @@ export class MailService {
     });
   }
 
+  /**
+   * Resumen para quien se registró (por QR o al buscar su dorsal): un solo
+   * correo con las fotos nuevas, una baja a un clic y las cabeceras que Gmail
+   * y Apple Mail necesitan para mostrar "darse de baja".
+   */
+  async sendRunnerDigest(input: {
+    to: string;
+    locale: 'es' | 'en';
+    name?: string | null;
+    bib: string;
+    eventName: string;
+    previews: string[];
+    totalPhotos: number;
+    eventUrl: string;
+    unsubscribeUrl: string;
+    unsubscribePostUrl?: string;
+  }): Promise<void> {
+    const en = input.locale === 'en';
+    const e = (value: string) => this.escapeHtml(value);
+    const subject = en
+      ? `📸 Your photos from ${input.eventName} are ready`
+      : `📸 Ya están tus fotos de ${input.eventName}`;
+    const greeting = input.name?.trim()
+      ? (en ? `Hi ${e(input.name.trim())},` : `Hola ${e(input.name.trim())},`)
+      : (en ? 'Hi,' : 'Hola,');
+    const count = input.totalPhotos;
+    const headline = en
+      ? `${count} new photo${count === 1 ? '' : 's'} of bib ${e(input.bib)}`
+      : `${count} foto${count === 1 ? '' : 's'} nueva${count === 1 ? '' : 's'} del dorsal ${e(input.bib)}`;
+    const intro = en
+      ? `We found photos of you at <strong>${e(input.eventName)}</strong>. Previews are watermarked; open your gallery to see and get them.`
+      : `Encontramos fotos tuyas en <strong>${e(input.eventName)}</strong>. Las vistas previas llevan marca de agua; abre tu galería para verlas y conseguirlas.`;
+    const cta = en ? 'See my photos' : 'Ver mis fotos';
+    const more = count > input.previews.length
+      ? `<p style="text-align:center;color:#777;font-size:13px">${en ? `and ${count - input.previews.length} more` : `y ${count - input.previews.length} más`}</p>`
+      : '';
+    const footer = en
+      ? `You are receiving this because you asked to be notified about bib ${e(input.bib)}. <a href="${e(input.unsubscribeUrl)}" style="color:#777">Unsubscribe</a>.`
+      : `Recibes este correo porque pediste que te avisáramos del dorsal ${e(input.bib)}. <a href="${e(input.unsubscribeUrl)}" style="color:#777">Darme de baja</a>.`;
+    const images = input.previews
+      .map(url => `<a href="${e(input.eventUrl)}"><img src="${e(url)}" alt="" width="176" style="width:176px;height:auto;border-radius:10px;margin:4px"></a>`)
+      .join('');
+
+    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;background:#f4f1ea;padding:28px 12px;color:#171717"><div style="max-width:600px;margin:auto;background:#fff;border-radius:20px;padding:32px"><h1 style="font-size:26px;line-height:1.15;margin:0 0 14px">${headline}</h1><p>${greeting}</p><p>${intro}</p><div style="text-align:center;margin:24px 0">${images}${more}</div><p style="text-align:center;margin:28px 0"><a href="${e(input.eventUrl)}" style="display:inline-block;background:#171717;color:#fff;padding:14px 28px;border-radius:999px;text-decoration:none;font-weight:bold">${cta}</a></p><p style="font-size:12px;color:#888;border-top:1px solid #eee;padding-top:16px;margin-top:28px">${footer}</p></div></body></html>`;
+
+    const headers: Record<string, string> = {
+      'List-Unsubscribe': input.unsubscribePostUrl
+        ? `<${input.unsubscribePostUrl}>, <${input.unsubscribeUrl}>`
+        : `<${input.unsubscribeUrl}>`,
+    };
+    if (input.unsubscribePostUrl) headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+
+    await this.sendEmail({ to: input.to, subject, html, headers });
+  }
+
   private async sendEmail(options: EmailOptions): Promise<void> {
     const from = this.configService.get('EMAIL_FROM', 'noreply@lucilamon.com');
 
@@ -150,7 +206,7 @@ export class MailService {
           Authorization: `Bearer ${resendApiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ from, to: recipients, subject: options.subject, html: options.html }),
+        body: JSON.stringify({ from, to: recipients, subject: options.subject, html: options.html, headers: options.headers }),
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => '');

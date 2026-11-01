@@ -20,6 +20,7 @@ export const PARTNER_API_SCOPES = [
   'webhooks:manage',
   'orders:read',
   'metrics:write',
+  'registrations:read',
 ] as const;
 
 export type PartnerApiScope = typeof PARTNER_API_SCOPES[number];

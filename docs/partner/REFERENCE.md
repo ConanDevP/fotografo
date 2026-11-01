@@ -4,7 +4,7 @@
 > cambia el código o los textos de `scripts/partner-docs/` y regenera. La referencia con esquemas y ejemplos de cada
 > respuesta está en la página interactiva (`/developers/reference.html`).
 
-Las rutas son relativas a `/v1/partner`. Hay **73 operaciones** y **28 eventos de webhook**.
+Las rutas son relativas a `/v1/partner`. Hay **75 operaciones** y **30 eventos de webhook**.
 
 ## Autenticación y aislamiento
 
@@ -39,6 +39,7 @@ entorno aislado: operan sobre los datos reales del espacio y solo las limitan lo
 | `photos:read` | Fotografías, imágenes públicas y lotes de carga | 5 |
 | `photos:review` | Estado de publicación, dorsales a mano y cola de baja confianza | 5 |
 | `photos:upload` | Crear lotes, solicitar carga, confirmar y cerrar | 4 |
+| `registrations:read` | Consultar y exportar los corredores registrados por QR | 2 |
 | `search:bib` | Buscar por dorsal | 1 |
 | `search:face` | Buscar por rostro y consultar cobertura | 2 |
 | `webhooks:manage` | Suscripciones, secretos, entregas y reintentos | 7 |
@@ -184,7 +185,9 @@ Métricas del evento y exportaciones en CSV.
 | `GET` | `/events/{eventId}/exports/analytics` | `exports:read` | Exportar métricas en CSV. |
 | `GET` | `/events/{eventId}/exports/audience` | `exports:read` | Exportar audiencia en CSV. |
 | `GET` | `/events/{eventId}/exports/photos` | `exports:read` | Exportar fotografías en CSV. |
+| `GET` | `/events/{eventId}/exports/registrations` | `registrations:read` | Exportar corredores registrados en CSV. |
 | `POST` | `/events/{eventId}/metrics` | `metrics:write` | Enviar métricas de audiencia de tu tienda. |
+| `GET` | `/events/{eventId}/registrations` | `registrations:read` | Listar corredores registrados. |
 
 ### Marca y dominio
 

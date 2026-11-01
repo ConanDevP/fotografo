@@ -56,6 +56,8 @@ OPS = {
     'exportAnalytics': ('Analítica y exportaciones', 'Exportar métricas en CSV', 'Devuelve un archivo CSV dentro del JSON (`filename`, `contentType`, `content`).'),
     'exportPhotos': ('Analítica y exportaciones', 'Exportar fotografías en CSV', 'Una fila por fotografía con su estado, dorsales y fechas.'),
     'exportAudience': ('Analítica y exportaciones', 'Exportar audiencia en CSV', 'Personas que descargaron fotografías gratuitas (correo, nombre, teléfono, dorsal y fecha). Trátalos según tu propia política de privacidad. Responde `400` si la exportación supera 100 000 registros.'),
+    'listRegistrations': ('Analítica y exportaciones', 'Listar corredores registrados', 'Corredores que dejaron su dorsal y su contacto en el QR del evento (o al pedir un aviso al buscar), del más reciente al más antiguo. Incluye correo y teléfono (E.164) **solo de quienes dieron su consentimiento** a ese canal, y su estado: `ACTIVE` o `UNSUBSCRIBED`. Respeta las bajas: no escribas a quien esté en `UNSUBSCRIBED`. Trata estos datos según tu propia política de privacidad.'),
+    'exportRegistrations': ('Analítica y exportaciones', 'Exportar corredores registrados en CSV', 'Los mismos registros de «Listar corredores registrados» en un CSV. Devuelve el archivo dentro del JSON (`filename`, `contentType`, `content`).'),
     # ── Patrocinadores ─────────────────────────────────────────────────────────────────────────
     'listSponsors': ('Patrocinadores', 'Listar patrocinadores', 'Patrocinadores de tu espacio, con los eventos a los que están asignados.'),
     'createSponsor': ('Patrocinadores', 'Crear un patrocinador', 'El logo debe ser una URL HTTPS pública.'),
@@ -228,6 +230,16 @@ FIELDS = {
     'lastError': 'Último error de entrega.', 'nextAttemptAt': 'Próximo intento.', 'deliveredAt': 'Cuándo se entregó con éxito.', 'endpointId': 'Webhook al que pertenece.',
     'payload': 'Carga entregada.',
     # dominio
+    # registro de corredores
+    'registrationId': 'Identificador del registro del corredor.',
+    'channels': 'Canales por los que aceptó recibir avisos: `EMAIL` y/o `WHATSAPP`.',
+    'phone': 'Teléfono. En los registros de corredores va en formato internacional E.164 (`+525512345678`) y es nulo si no dejó teléfono.',
+    'phoneCountry': 'País del teléfono (ISO 3166-1 alfa-2).',
+    'locale': 'Idioma de los avisos: `es` o `en`.',
+    'source': 'De dónde viene el registro: `QR` (formulario del evento) o `SEARCH` (aviso pedido al buscar su dorsal).',
+    'emailConsentAt': 'Cuándo aceptó recibir avisos por correo. Nulo si no los aceptó.',
+    'whatsappConsentAt': 'Cuándo aceptó recibir avisos por WhatsApp. Nulo si no los aceptó.',
+    'lastNotifiedAt': 'Cuándo se le avisó por última vez de fotos nuevas.',
     # pedidos y liquidaciones
     'eventName': 'Nombre del evento.', 'amountCents': 'Importe en la unidad menor de la moneda (centavos).', 'paymentGateway': 'Pasarela con la que se pagó.',
     'buyerEmail': 'Correo del comprador.', 'itemCount': 'Número de partidas del pedido.', 'paidAt': 'Cuándo se pagó.', 'refundedAt': 'Cuándo se reembolsó.',

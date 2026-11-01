@@ -41,6 +41,8 @@ export function validateEnvironment(config: Record<string, unknown>) {
   requireValue('RESEND_API_KEY');
   requireSecret('ORDER_ACCESS_SECRET');
   requireSecret('METRICS_HASH_SECRET');
+  // Firma los enlaces de baja de los avisos a corredores y salta las IP guardadas.
+  requireSecret('REGISTRATION_SECRET');
   requireSecret('FACE_API_KEY');
   requireSecret('PARTNER_WEBHOOK_ENCRYPTION_KEY');
   requireValue('GEMINI_API_KEY');

@@ -24,6 +24,7 @@ SCOPE_DOCS = {
     'workspace:read': 'Consultar la marca, el espacio y el consumo del contrato', 'workspace:write': 'Modificar marca, imágenes y dominio',
     'search:bib': 'Buscar por dorsal', 'search:face': 'Buscar por rostro y consultar cobertura', 'webhooks:manage': 'Suscripciones, secretos, entregas y reintentos',
     'orders:read': 'Pedidos pagados en la tienda de LucilaMon, desglose de ventas e ingresos', 'metrics:write': 'Enviar métricas de audiencia de una tienda propia',
+    'registrations:read': 'Consultar y exportar los corredores registrados por QR',
 }
 ORDER = [g['name'] for g in SPEC['x-tagGroups']]
 

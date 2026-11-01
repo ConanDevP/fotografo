@@ -47,7 +47,8 @@ RESP = {
     'bulkDownload': ('BulkDownloadItem', 'list'),
     'searchByBib': ('BibSearchMatch', 'cursor'), 'searchByFace': ('FaceSearchResponse', 'face'), 'getFaceStats': ('FaceStats', 'object'),
     'analytics': ('EventAnalytics', 'object'), 'analyticsEvents': ('AnalyticsEvents', 'object'),
-    'exportAnalytics': ('CsvExport', 'object'), 'exportPhotos': ('CsvExport', 'object'), 'exportAudience': ('CsvExport', 'object'),
+    'exportAnalytics': ('CsvExport', 'object'), 'exportPhotos': ('CsvExport', 'object'), 'exportAudience': ('CsvExport', 'object'), 'exportRegistrations': ('CsvExport', 'object'),
+    'listRegistrations': ('Registration', 'paginated'),
     'listSponsors': ('SponsorWithEvents', 'list'), 'createSponsor': ('Sponsor', 'object'), 'updateSponsor': ('Sponsor', 'object'),
     'removeSponsor': ('Sponsor', 'object'), 'eventSponsors': ('EventSponsor', 'list'), 'attachSponsor': ('EventSponsor', 'object'),
     'detachSponsor': ('DetachResult', 'object'),
@@ -76,6 +77,12 @@ MANUAL_EXAMPLES = {
                                            'watermarkUrl': 'https://cdn.example.com/events/5b0c1e7e/photo-1-wm.jpg', 'discoveryType': 'FACE_DIRECT', 'detectedBibs': ['1001']}],
                               'total': 1, 'searchTime': 412, 'userFaceDetected': True, 'confirmedBibs': ['1001'], 'inferredBibs': []},
                          'meta': {'total': 1, 'searchTime': 412}},
+    'listRegistrations': {'data': [{'id': '0e6f2c9a-3d1b-4b8e-a7c4-5f9d2e8b1a30', 'bib': '1001', 'name': 'Ana Pérez', 'email': 'ana@example.com', 'phone': '+525512345678',
+                                    'phoneCountry': 'MX', 'locale': 'es', 'source': 'QR', 'status': 'ACTIVE', 'emailConsentAt': '2027-03-10T18:20:00.000Z',
+                                    'whatsappConsentAt': '2027-03-10T18:20:00.000Z', 'lastNotifiedAt': None, 'createdAt': '2027-03-10T18:20:00.000Z'}],
+                          'meta': {'pagination': {'page': 1, 'limit': 50, 'total': 1, 'pages': 1}}},
+    'exportRegistrations': {'data': {'filename': 'registrations-5b0c1e7e-4d3a-4f6e-9a21-8c7d2e1f0a11.csv', 'contentType': 'text/csv; charset=utf-8',
+                                     'content': '"bib","name","email","phone","phoneCountry","locale","source","status","emailConsentAt","whatsappConsentAt","createdAt"\n"1001","Ana Pérez","ana@example.com","+525512345678","MX","es","QR","ACTIVE","2027-03-10T18:20:00.000Z","2027-03-10T18:20:00.000Z","2027-03-10T18:20:00.000Z"'}},
     'uploadEventCover': None,  # se reutiliza el ejemplo de updateEvent con imageUrl
     'uploadWorkspaceAsset': None,
 }
@@ -495,7 +502,8 @@ def scopes_section():
         'photos:process': 'Reprocesar fotografías.', 'photos:delete': 'Borrar fotografías.', 'photos:download': 'Generar enlaces a originales y descargas gratuitas.',
         'photos:bulk': 'Operaciones masivas (se suma al permiso de la operación).', 'exports:read': 'Exportaciones en CSV.', 'workspace:read': 'Leer tu espacio y el consumo del contrato.',
         'workspace:write': 'Editar marca, imágenes y dominio.', 'search:bib': 'Buscar por dorsal.', 'search:face': 'Buscar por selfie.', 'webhooks:manage': 'Registrar y administrar webhooks.',
-        'orders:read': 'Consultar pedidos, desglose de ventas y liquidaciones.', 'metrics:write': 'Enviar métricas de audiencia de tu tienda propia.'}
+        'orders:read': 'Consultar pedidos, desglose de ventas y liquidaciones.', 'metrics:write': 'Enviar métricas de audiencia de tu tienda propia.',
+        'registrations:read': 'Consultar y exportar los corredores registrados por QR.'}
     for s in sorted(by):
         rows.append(f'| `{s}` | {docs[s]} | {len(by[s])} |')
     return '\n'.join(rows)
@@ -516,7 +524,7 @@ def build():
     responses = error_responses()
     responses.update(_EXTRA)
     tags = [{'name': n, 'description': d} for n, d in G.TAGS]
-    tags.append({'name': 'Eventos de webhook', 'description': 'Los 28 eventos que puedes recibir. Cada uno llega como `POST` a tu URL con el sobre `{ id, type, createdAt, data }`.'})
+    tags.append({'name': 'Eventos de webhook', 'description': 'Los 30 eventos que puedes recibir. Cada uno llega como `POST` a tu URL con el sobre `{ id, type, createdAt, data }`.'})
     tags.append({'name': 'Errores', 'x-displayName': 'Errores', 'description': 'Todas las respuestas de error tienen la misma forma (ver la introducción). Estos son los códigos:\n\n' + errors_section()})
     tags.append({'name': 'Permisos', 'x-displayName': 'Permisos (scopes)', 'description': 'Cada credencial lleva solo los permisos que le des. Algunos solo se pueden conceder si el contrato incluye la función.\n\n' + scopes_section()})
     spec = {

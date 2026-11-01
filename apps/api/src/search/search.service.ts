@@ -1,3 +1,4 @@
+import { REGISTRATION_CONSENT_VERSION } from '@shared/registration';
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
@@ -387,20 +388,33 @@ export class SearchService {
       },
     });
 
-    if (existingSubscription) {
+    if (existingSubscription?.status === 'ACTIVE') {
       return { message: 'Ya estás suscrito a las notificaciones de este dorsal' };
     }
 
+    // Quien se dio de baja y vuelve a pedir el aviso lo está pidiendo de nuevo.
     // Create subscription
+    let subscriptionId: string;
     try {
-      await this.prisma.bibSubscription.create({
-        data: { eventId, bib: normalizedBib, email: normalizedEmail },
-      });
+      const subscription = existingSubscription
+        ? await this.prisma.bibSubscription.update({
+            where: { id: existingSubscription.id },
+            data: { status: 'ACTIVE', unsubscribedAt: null, emailConsentAt: new Date() },
+          })
+        : await this.prisma.bibSubscription.create({
+            data: {
+              eventId,
+              bib: normalizedBib,
+              email: normalizedEmail,
+              source: 'SEARCH',
+              emailConsentAt: new Date(),
+              consentTextVersion: REGISTRATION_CONSENT_VERSION,
+            },
+          });
+      subscriptionId = subscription.id;
     } catch (error) {
-      const racedSubscription = await this.prisma.bibSubscription.findUnique({
-        where: {
-          eventId_bib_email: { eventId, bib: normalizedBib, email: normalizedEmail },
-        },
+      const racedSubscription = await this.prisma.bibSubscription.findFirst({
+        where: { eventId, bib: normalizedBib, email: normalizedEmail },
       });
       if (racedSubscription) {
         return { message: 'Ya estás suscrito a las notificaciones de este dorsal' };
@@ -408,32 +422,8 @@ export class SearchService {
       throw error;
     }
 
-    // Check if there are already existing photos for this bib
-    const existingPhotos = await this.prisma.photoBib.findMany({
-      where: {
-        eventId,
-        bib: normalizedBib,
-        photo: {
-          status: 'PROCESSED',
-          publicationStatus: 'APPROVED',
-          watermarkUrl: { not: null },
-        },
-      },
-      select: {
-        photoId: true,
-      },
-      take: 20, // Limit to avoid overwhelming emails
-    });
-
-    // If there are existing photos, send immediate notification
-    if (existingPhotos.length > 0) {
-      await this.queueService.addSendEmailJob({
-        eventId,
-        bib: normalizedBib,
-        email: normalizedEmail,
-        photoIds: existingPhotos.map(p => p.photoId),
-      });
-    }
+    // Si ya hay fotos suyas, el resumen las incluye; si no, no envía nada.
+    await this.queueService.addRegistrationDigestJob(subscriptionId, eventId, normalizedBib, 30_000);
 
     return { message: 'Suscripción creada correctamente' };
   }

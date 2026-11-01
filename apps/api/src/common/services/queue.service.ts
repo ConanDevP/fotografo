@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import { QUEUES, JOBS } from '@shared/constants';
 import { ProcessPhotoJob, SendBibEmailJob, ReprocessPhotoJob } from '@shared/types';
+import { DIGEST_WINDOW_MS, digestJobId } from '@shared/registration';
 
 /** Prioridad de un trabajo normal. Ver `PROCESSING_PRIORITY` para el porqué de no usar 0. */
 const NORMAL_PRIORITY = 10;
@@ -126,6 +127,31 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       delay,
       jobId,
     });
+  }
+
+  /**
+   * Resumen de avisos de un corredor. El id lleva una ventana de 10 minutos: las
+   * fotos que lleguen dentro de ella comparten un solo trabajo y, por tanto, un
+   * solo mensaje.
+   */
+  async addRegistrationDigestJob(
+    subscriptionId: string,
+    eventId: string,
+    bib: string,
+    delay = DIGEST_WINDOW_MS,
+  ) {
+    return this.sendEmailQueue.add(
+      JOBS.SEND_BIB_EMAIL,
+      { kind: 'BIB_NOTIFICATION', subscriptionId, eventId, bib, email: '' } satisfies SendBibEmailJob,
+      {
+        jobId: digestJobId(subscriptionId),
+        delay,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
+    );
   }
 
   async addReprocessPhotoJob(job: ReprocessPhotoJob, priority = 10) {

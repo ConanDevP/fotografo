@@ -104,7 +104,7 @@ REQUEST_FIELDS = {
     # webhooks
     ('CreatePartnerWebhookDto', 'url'): 'URL HTTPS pública que recibirá los eventos.',
     ('UpdatePartnerWebhookDto', 'url'): 'Nueva URL HTTPS pública.',
-    ('CreatePartnerWebhookDto', 'events'): 'Eventos a recibir (de los 28 disponibles).',
+    ('CreatePartnerWebhookDto', 'events'): 'Eventos a recibir (de los 30 disponibles).',
     ('UpdatePartnerWebhookDto', 'events'): 'Nueva lista de eventos a recibir.',
     'active': 'Activa o pausa las entregas.',
     # carga

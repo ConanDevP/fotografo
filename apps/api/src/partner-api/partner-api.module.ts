@@ -1,4 +1,6 @@
 import { forwardRef, Module } from '@nestjs/common';
+import { QueueService } from '../common/services/queue.service';
+import { DigestSchedulerService } from '../common/services/digest-scheduler.service';
 import { PrismaService } from '../common/services/prisma.service';
 import { MailerService } from '../common/services/mailer.service';
 import { EventsModule } from '../events/events.module';
@@ -29,7 +31,7 @@ import { BillingModule } from '../billing/billing.module';
 @Module({
   imports: [WorkspacesModule, EventsModule, UploadsModule, PhotosModule, SearchModule, SponsorsModule, MetricsModule, BillingModule, forwardRef(() => AnalyticsModule)],
   controllers: [ApiClientsController, PartnerApiController, PartnerDocsController, WorkspaceWebhooksController, EnterpriseAccessController],
-  providers: [PrismaService, MailerService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService, EnterpriseBillingService, UsageAlertsService, DataRetentionService, PartnerCommerceService, PartnerInsightsService],
+  providers: [PrismaService, MailerService, ApiClientsService, PartnerApiKeyGuard, PartnerApiService, PartnerWebhooksService, EnterpriseAccessService, EnterpriseBillingService, UsageAlertsService, DataRetentionService, PartnerCommerceService, PartnerInsightsService, QueueService, DigestSchedulerService],
   exports: [PartnerWebhooksService, EnterpriseAccessService, EnterpriseBillingService, PartnerCommerceService],
 })
 export class PartnerApiModule {}

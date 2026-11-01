@@ -12,6 +12,7 @@ import { SharpTransformService } from '../common/services/sharp-transform.servic
 import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { BillingModule } from '../billing/billing.module';
 import { QueueService } from '../common/services/queue.service';
+import { DigestSchedulerService } from '../common/services/digest-scheduler.service';
 
 @Module({
   imports: [WorkspacesModule, BillingModule],
@@ -26,6 +27,7 @@ import { QueueService } from '../common/services/queue.service';
     R2Service,
     SharpTransformService,
     QueueService,
+    DigestSchedulerService,
   ],
   exports: [EventsService, FreeDownloadsService],
 })
