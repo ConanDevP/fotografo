@@ -41,7 +41,7 @@ export class MailerService {
     }
 
     try {
-      const response = await fetch('https://api.resend.com/emails', {
+      const response = await fetch(`${process.env.RESEND_API_BASE || 'https://api.resend.com'}/emails`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,

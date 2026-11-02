@@ -15,6 +15,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/services/prisma.service';
 import { EventsService } from '../events/events.service';
 import { DigestSchedulerService, NOTIFIABLE_PHOTO } from '../common/services/digest-scheduler.service';
+import { whatsappUsable } from '../messaging/channel-config';
 import { PartnerWebhooksService } from '../partner-api/partner-webhooks.service';
 import { normalizePhone } from '../common/utils/phone';
 import { bibMatchesRules } from '../common/utils/bib-rules';
@@ -57,7 +58,7 @@ export class RegistrationsService {
       imageUrl: event.imageUrl,
       workspace: event.workspace ? { slug: event.workspace.slug, name: event.workspace.name } : null,
       defaultCountry: event.countryCode || this.cleanCountry(countryHint) || null,
-      whatsappEnabled: this.whatsappEnabled(),
+      whatsappEnabled: await this.whatsappAvailable(event.workspaceId),
       turnstileSiteKey: this.config.get<string>('TURNSTILE_SITE_KEY') || null,
       consentVersion: REGISTRATION_CONSENT_VERSION,
     };
@@ -87,8 +88,8 @@ export class RegistrationsService {
     if (dto.phone) {
       // Sin canal de WhatsApp configurado el formulario ni siquiera pide el teléfono:
       // guardarlo aquí daría a entender que va a llegar un aviso que no va a salir.
-      if (!this.whatsappEnabled()) {
-        throw new BadRequestException({ code: ERROR_CODES.VALIDATION_ERROR, message: 'Los avisos por WhatsApp no están disponibles todavía. Déjanos un correo.' });
+      if (!(await this.whatsappAvailable(event.workspaceId))) {
+        throw new BadRequestException({ code: ERROR_CODES.VALIDATION_ERROR, message: 'Los avisos por WhatsApp no están disponibles en este evento. Déjanos un correo.' });
       }
       if (dto.whatsappConsent !== true) {
         throw new BadRequestException({ code: ERROR_CODES.VALIDATION_ERROR, message: 'Acepta recibir avisos por WhatsApp o quita el teléfono' });
@@ -173,12 +174,13 @@ export class RegistrationsService {
     const event = await this.prisma.event.findFirstOrThrow({
       where: { id: eventId, deletedAt: null },
       select: {
-        registrationCode: true, registrationEnabled: true, registrationUseCustomDomain: true, countryCode: true, date: true,
+        workspaceId: true, registrationCode: true, registrationEnabled: true, registrationUseCustomDomain: true, countryCode: true, date: true,
         workspace: { select: { customDomain: true, customDomainVerifiedAt: true } },
       },
     });
     const customDomain = this.verifiedDomain(event.workspace);
     const code = event.registrationCode;
+    const delivery = await this.deliverySummary(event.workspaceId, eventId);
     // Si el dominio dejó de estar verificado, el QR vuelve solo a lucilamon.com: mejor eso que un enlace muerto.
     const usingCustomDomain = event.registrationUseCustomDomain && !!customDomain;
     return {
@@ -192,9 +194,16 @@ export class RegistrationsService {
       customDomainLapsed: event.registrationUseCustomDomain && !customDomain,
       countryCode: event.countryCode,
       closesAt: new Date(event.date.getTime() + REGISTRATION_WINDOW_DAYS * DAY_MS),
-      whatsappEnabled: this.whatsappEnabled(),
+      whatsappEnabled: delivery.whatsappEnabled,
+      delivery,
       stats: await this.stats(eventId),
     };
+  }
+
+  /** Reprograma los avisos pendientes del evento (tras arreglar un canal). */
+  async retryNotifications(eventId: string, userId: string, role: UserRole) {
+    await this.events.assertCanManageEvent(eventId, userId, role);
+    return { scheduled: await this.scheduler.scheduleForEvent(eventId, 5_000) };
   }
 
   async updateConfig(eventId: string, dto: UpdateRegistrationConfigDto, userId: string, role: UserRole) {
@@ -419,12 +428,40 @@ export class RegistrationsService {
     throw new HttpException('No se pudo generar el código', HttpStatus.INTERNAL_SERVER_ERROR);
   }
 
-  whatsappEnabled() {
-    return !!(
-      this.config.get('WHATSAPP_TOKEN')
-      && this.config.get('WHATSAPP_PHONE_ID')
-      && this.config.get('WHATSAPP_TEMPLATE_ES')
-    );
+  /** WhatsApp solo se ofrece si el espacio del evento tiene su propio canal activo y probado. */
+  private async whatsappAvailable(workspaceId: string | null | undefined): Promise<boolean> {
+    if (!workspaceId) return false;
+    const row = await this.prisma.workspaceChannel.findUnique({
+      where: { workspaceId_channel: { workspaceId, channel: 'WHATSAPP' } },
+      select: { status: true, config: true },
+    });
+    return whatsappUsable(row);
+  }
+
+  /** Cómo van a salir los avisos de este evento y si algo los está frenando. */
+  private async deliverySummary(workspaceId: string | null, eventId: string) {
+    const rows = workspaceId ? await this.prisma.workspaceChannel.findMany({ where: { workspaceId } }) : [];
+    const email = rows.find(row => row.channel === 'EMAIL');
+    const whatsapp = rows.find(row => row.channel === 'WHATSAPP');
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const groups = await this.prisma.deliveryIssue.groupBy({
+      by: ['scope'],
+      where: { eventId, createdAt: { gte: since } },
+      _count: { _all: true },
+    });
+    const count = (scope: string) => groups.find(group => group.scope === scope)?._count._all ?? 0;
+    const problems = rows
+      .filter(row => row.status === 'ERROR')
+      .map(row => ({ channel: row.channel, code: row.lastErrorCode, message: row.lastErrorMessage }));
+    return {
+      whatsappEnabled: whatsappUsable(whatsapp),
+      email: { mode: email && email.status !== 'DISABLED' ? 'OWN' : 'PLATFORM', status: email?.status ?? null },
+      whatsapp: { status: whatsapp?.status ?? null },
+      /** Canales pausados por un problema de la cuenta del cliente. */
+      problems,
+      /** Avisos de este evento que no salieron en los últimos 7 días, por tipo. */
+      failed: { recipient: count('RECIPIENT'), account: count('ACCOUNT') + count('TEMPLATE'), other: count('LIMIT') + count('TRANSIENT') },
+    };
   }
 
   private secret() {

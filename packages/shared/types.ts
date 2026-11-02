@@ -137,6 +137,8 @@ export interface SendBibEmailJob {
   email: string;
   /** Resumen agrupado de una suscripción: reúne las fotos aún no avisadas. */
   subscriptionId?: string;
+  /** Veces que el aviso se aplazó por un límite del proveedor. */
+  limitRetries?: number;
   photoIds?: string[];
   kind?: 'BIB_NOTIFICATION' | 'ORDER_CONFIRMATION' | 'EVENT_INVITATION';
   eventName?: string;

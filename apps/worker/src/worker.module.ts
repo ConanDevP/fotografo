@@ -21,7 +21,7 @@ import { FaceApiService } from './services/face-api.service';
 import { PythonFaceApiService } from './services/python-face-api.service';
 import { ImagesService } from './services/images.service';
 import { MailService } from './services/mail.service';
-import { WhatsAppService } from './services/whatsapp.service';
+import { ChannelHealthService } from '../../api/src/messaging/channel-health.service';
 import { SpatialMatchingService } from './services/spatial-matching.service';
 import { AthleteSignatureService } from './services/athlete-signature.service';
 import { FaceKnnService } from './services/face-knn.service';
@@ -84,7 +84,7 @@ import { QUEUES } from '@shared/constants';
     PythonFaceApiService,
     ImagesService,
     MailService,
-    WhatsAppService,
+    ChannelHealthService,
     SpatialMatchingService,
     AthleteSignatureService,
     FaceKnnService,

@@ -18,6 +18,8 @@ export class RegistrationRetentionService {
       where: { event: { date: { lt: cutoff } } },
     });
     if (count) this.logger.log(`Registros de corredores borrados por antigüedad: ${count}`);
+    // El historial de avisos fallidos solo sirve para diagnosticar: 90 días bastan.
+    await this.prisma.deliveryIssue.deleteMany({ where: { createdAt: { lt: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000) } } });
     return count;
   }
 }

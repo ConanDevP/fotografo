@@ -35,24 +35,52 @@ fotos suyas aprobadas. Se puede registrar antes de que el evento esté publicado
   reescribirlo a `/s/{slug}`. Si el dominio deja de estar verificado, el QR vuelve solo a `lucilamon.com` y el panel avisa: **los QR ya impresos con el
   dominio propio dejan de abrir**. El enlace de baja de los correos siempre usa `lucilamon.com`.
 
+## Canales de aviso: los del cliente, no los de LucilaMon
+
+Cada espacio envía con **sus** cuentas: su Resend (correo) y su WhatsApp Business (Meta). Se conectan en el panel,
+**Configuración del espacio → Avisos**, y se guardan cifradas (AES-256-GCM, llave `PARTNER_WEBHOOK_ENCRYPTION_KEY`); nunca se devuelven, solo sus últimos caracteres.
+Código: `apps/api/src/messaging/`.
+
+| Canal | Qué pega el cliente | Cómo se valida |
+|---|---|---|
+| Correo | Clave de Resend, remitente (`fotos@su-dominio.com`), nombre y respuesta opcionales | Lista sus dominios en Resend: el del remitente debe existir y estar verificado. Una clave «solo envío» no puede listar: queda pendiente hasta que un correo de prueba llegue. Se rechaza `resend.dev` (solo envía al propio dueño). |
+| WhatsApp | Token permanente, ID del número y ID de la cuenta de WhatsApp Business | Comprueba token, que el número pertenezca a la cuenta, calidad, nivel de envío, estado del nombre y de la cuenta. Crea y manda a revisión las plantillas (es/en, categoría Utilidad, 4 variables). |
+
+**Quién envía qué**
+
+- Correo: con canal propio `ACTIVE` sale por su Resend; sin canal propio (o aún `PENDING`) sale por LucilaMon con el nombre del espacio como remitente.
+- WhatsApp: **solo** con canal propio activo. Sin él, el formulario no pide teléfono. LucilaMon no paga mensajes de WhatsApp de nadie.
+- Un canal activo requiere: plantilla aprobada por Meta **y** que el cliente **confirme que le llegó un mensaje de prueba real**. Meta acepta el mensaje antes de entregarlo (un fallo de pago puede llegar después), por eso la confirmación es manual.
+
+**Cuando la cuenta del cliente falla** (sin método de pago, token vencido, dominio sin verificar, plantilla pausada…):
+
+1. Cada error de Resend o de Meta se clasifica (`delivery-errors.ts`) como `ACCOUNT`, `TEMPLATE`, `RECIPIENT`, `LIMIT` o `TRANSIENT`.
+2. `ACCOUNT`/`TEMPLATE`: el canal pasa a `ERROR` (se pausa), se guarda el motivo con **qué hacer y a dónde ir**, y se avisa por correo al contacto del espacio **una vez por motivo y día**. El texto dice que el problema está en su cuenta de Resend/Meta, no en LucilaMon. Los avisos **no se pierden**: quedan pendientes.
+3. Al arreglarlo (verificar dominio, aprobar plantilla, confirmar prueba, botón *Reintentar*) el canal se reactiva y los avisos pendientes se reprograman solos.
+4. `RECIPIENT` (correo o teléfono inválido, sin WhatsApp): solo se descarta ese aviso. `LIMIT` (cuota diaria de Resend, ritmo de Meta): se aplaza (hasta 72 veces) sin gastar reintentos. `TRANSIENT`: reintento normal de BullMQ.
+5. Todo queda en `delivery_issues` (90 días) y se resume en el panel del evento: «Últimos 7 días sin enviar».
+6. Opcional por canal de correo: *«Si mi correo falla, enviar desde LucilaMon»* (`fallbackToPlatform`), apagado por defecto.
+
+**Plantillas de WhatsApp** (`whatsapp-templates.ts`): `lucilamon_fotos_listas_v{n}`, UTILITY. Si Meta rechaza una, se envía una versión nueva (`v2`…); un cron cada 15 min revisa las pendientes y avisa al cliente cuando se aprueban o rechazan, o si Meta la reclasifica como *Marketing* (más cara). Cuerpo (variables en orden: nombre, evento, nº de fotos, enlace):
+
+> Hola {{1}}, ya están disponibles tus fotos de {{2}}: hay {{3}} con tu dorsal. Consúltalas aquí: {{4}} Gracias por participar.
+
+**Lo que no se puede garantizar desde aquí**
+
+- No hay confirmación de entrega: no recibimos los avisos (webhooks) de Meta ni de Resend. Un rebote o un `131026` asíncrono no se ve; el correo rebotado tampoco. Es lo siguiente a construir (rebotes y quejas de Resend protegen la reputación del dominio del cliente).
+- Meta puede aceptar un mensaje y no cobrarlo/entregarlo por facturación: por eso la prueba real y la confirmación manual.
+- Los nombres de error de Resend y los códigos de Meta están mapeados de su documentación; un código nuevo cae en `TRANSIENT` (se reintenta, no pausa).
+- Para pruebas hay dos variables: `RESEND_API_BASE` y `WHATSAPP_GRAPH_BASE` (apuntar a un proveedor simulado).
+
 ## Variables
 
 Ver `.env.example` y `.env.production.example`. `REGISTRATION_SECRET` es **obligatorio en producción** (la API no arranca sin él).
-
-### WhatsApp (opcional)
-
-Meta Cloud API. Solo puede abrir conversación con una **plantilla aprobada** (categoría *Utility*), con 4 variables en el cuerpo:
-
-> Hola {{1}}, ya hay {{3}} foto(s) tuyas de {{2}}. Míralas aquí: {{4}}
-
-Variables: `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID`, `WHATSAPP_TEMPLATE_ES` (y `WHATSAPP_TEMPLATE_EN`). Un fallo permanente (número sin WhatsApp,
-plantilla inexistente) se da por avisado para no reintentar sin fin; uno pasajero (429/5xx) se reintenta.
-Falta aún: responder a "STOP" por webhook de Meta; mientras tanto la baja es por el enlace.
+`RESEND_API_KEY`/`EMAIL_FROM` solo se usan para los espacios que no conectaron su propio correo y para las alertas a los clientes.
 
 ## Pendiente antes de anunciarlo
 
 - Revisión legal del texto de consentimiento y de la política de privacidad (ya actualizada). WhatsApp exige opt-in explícito.
-- Aprobar la plantilla en Meta y probar con un número real.
-- Probar el correo con el dominio verificado en Resend (cabeceras de baja incluidas).
+- Probar con una cuenta real de Resend y de WhatsApp Business (hasta ahora solo con proveedores simulados).
+- Responder a «STOP» por webhook de Meta; rebotes y quejas de Resend.
 - La migración `20261101000000_runner_registrations` incluye un índice único parcial (teléfono) que Prisma no representa en el esquema:
   `prisma migrate dev` puede proponer borrarlo; no lo aceptes.

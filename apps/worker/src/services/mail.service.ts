@@ -7,6 +7,8 @@ interface EmailOptions {
   subject: string;
   html: string;
   headers?: Record<string, string>;
+  /** Nombre visible del remitente cuando se envía con la cuenta de la plataforma. */
+  fromDisplayName?: string | null;
   attachments?: Array<{
     filename: string;
     path: string;
@@ -137,12 +139,12 @@ export class MailService {
   }
 
   /**
-   * Resumen para quien se registró (por QR o al buscar su dorsal): un solo
-   * correo con las fotos nuevas, una baja a un clic y las cabeceras que Gmail
-   * y Apple Mail necesitan para mostrar "darse de baja".
+   * Arma el correo de resumen para quien se registró: un solo mensaje con las
+   * fotos nuevas, una baja a un clic y las cabeceras que Gmail y Apple Mail
+   * necesitan para mostrar «darse de baja». Es independiente de quién lo envíe:
+   * lo manda el Resend del cliente o, si no tiene, el de LucilaMon.
    */
-  async sendRunnerDigest(input: {
-    to: string;
+  buildRunnerDigest(input: {
     locale: 'es' | 'en';
     name?: string | null;
     bib: string;
@@ -152,7 +154,7 @@ export class MailService {
     eventUrl: string;
     unsubscribeUrl: string;
     unsubscribePostUrl?: string;
-  }): Promise<void> {
+  }): { subject: string; html: string; headers: Record<string, string> } {
     const en = input.locale === 'en';
     const e = (value: string) => this.escapeHtml(value);
     const subject = en
@@ -187,12 +189,41 @@ export class MailService {
         : `<${input.unsubscribeUrl}>`,
     };
     if (input.unsubscribePostUrl) headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+    return { subject, html, headers };
+  }
 
-    await this.sendEmail({ to: input.to, subject, html, headers });
+  /**
+   * Envío con la cuenta de LucilaMon (cuando el espacio no conectó la suya).
+   * El nombre del remitente es el del espacio, para que el corredor lo reconozca.
+   */
+  async sendRunnerDigest(
+    input: Parameters<MailService['buildRunnerDigest']>[0] & { to: string; fromDisplayName?: string | null },
+  ): Promise<void> {
+    const { subject, html, headers } = this.buildRunnerDigest(input);
+    await this.sendEmail({ to: input.to, subject, html, headers, fromDisplayName: input.fromDisplayName });
+  }
+
+  /** Aviso al cliente de que uno de sus canales dejó de funcionar. Sale siempre por la cuenta de LucilaMon. */
+  async sendChannelAlert(input: {
+    to: string;
+    workspaceName: string;
+    channel: 'EMAIL' | 'WHATSAPP';
+    message: string;
+    action?: string;
+    helpUrl?: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const e = (value: string) => this.escapeHtml(value);
+    const label = input.channel === 'EMAIL' ? 'correo (Resend)' : 'WhatsApp';
+    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;background:#f4f1ea;padding:28px 12px;color:#171717"><div style="max-width:600px;margin:auto;background:#fff;border-radius:20px;padding:32px"><p style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#a33">Avisos pausados</p><h1 style="font-size:24px;line-height:1.2;margin:6px 0 14px">Tu canal de ${label} dejó de enviar</h1><p>${e(input.message)}</p>${input.action ? `<p><strong>Qué hacer:</strong> ${e(input.action)}</p>` : ''}<p style="color:#555;font-size:14px">Este problema está en tu cuenta de ${input.channel === 'EMAIL' ? 'Resend' : 'Meta / WhatsApp'}, no en LucilaMon. Los avisos a tus corredores <strong>no se pierden</strong>: quedan en espera y saldrán en cuanto lo resuelvas.</p><p style="margin:24px 0">${input.helpUrl ? `<a href="${e(input.helpUrl)}" style="display:inline-block;background:#171717;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:bold">Ir a resolverlo</a> ` : ''}<a href="${e(input.dashboardUrl)}" style="color:#171717">Abrir LucilaMon</a></p><p style="font-size:12px;color:#888">Espacio: ${e(input.workspaceName)}. Recibes este correo porque eres el contacto de ese espacio.</p></div></body></html>`;
+    await this.sendEmail({ to: input.to, subject: `Tus avisos de ${input.workspaceName} están pausados (${label})`, html });
   }
 
   private async sendEmail(options: EmailOptions): Promise<void> {
-    const from = this.configService.get('EMAIL_FROM', 'noreply@lucilamon.com');
+    const platformFrom = this.configService.get<string>('EMAIL_FROM', 'noreply@lucilamon.com');
+    const address = /<([^>]+)>/.exec(platformFrom)?.[1] ?? platformFrom;
+    const display = (options.fromDisplayName || '').replace(/[<>"\r\n]/g, '').trim();
+    const from = display ? `${display} <${address}>` : platformFrom;
 
     // Resend manda cuando hay clave: una petición HTTP, sin transporte SMTP que
     // mantener. El camino de nodemailer se conserva para no obligar a migrar
@@ -200,7 +231,7 @@ export class MailService {
     const resendApiKey = this.configService.get('RESEND_API_KEY');
     if (resendApiKey) {
       const recipients = Array.isArray(options.to) ? options.to : [options.to];
-      const response = await fetch('https://api.resend.com/emails', {
+      const response = await fetch(`${process.env.RESEND_API_BASE || 'https://api.resend.com'}/emails`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${resendApiKey}`,
@@ -215,7 +246,8 @@ export class MailService {
       return;
     }
 
-    await this.transporter.sendMail({ from, ...options });
+    const { fromDisplayName: _ignored, ...mail } = options;
+    await this.transporter.sendMail({ from, ...mail });
   }
 
   private escapeHtml(value: string): string {

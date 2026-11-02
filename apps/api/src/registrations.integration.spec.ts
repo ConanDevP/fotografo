@@ -17,14 +17,22 @@ suite('registro por QR contra PostgreSQL real', () => {
   let prisma: any;
   let service: RegistrationsService;
   let processor: SendBibEmailProcessor;
-  const mail = { sendRunnerDigest: jest.fn().mockResolvedValue(undefined) };
-  const whatsApp = { enabled: () => true, sendPhotosReady: jest.fn().mockResolvedValue(undefined) };
+  const mail = { sendRunnerDigest: jest.fn().mockResolvedValue(undefined), buildRunnerDigest: jest.fn(), sendChannelAlert: jest.fn() };
+  const waClient = { sendTemplate: jest.fn().mockResolvedValue({ messageId: 'w1' }) };
+  // El correo sale por la plataforma y WhatsApp por el canal propio del espacio.
+  const health: any = {
+    emailRoute: async () => ({ kind: 'PLATFORM' }),
+    whatsappRoute: async () => ({ kind: 'OWN', client: waClient, phoneId: '111', template: { name: 'lucilamon_fotos_listas_v1', language: 'es' } }),
+    recordFailure: jest.fn().mockResolvedValue({ alert: false }),
+    alertRecipient: jest.fn(),
+  };
   const scheduled: any[] = [];
   let eventId: string;
+  let workspaceId: string;
   const code = `e2e${String(stamp).slice(-6)}`;
 
   const config: any = {
-    get: (key: string, fallback?: unknown) => ({ REGISTRATION_SECRET: 'secreto-e2e', FRONTEND_URL: 'https://lucilamon.test', WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_ID: 'p', WHATSAPP_TEMPLATE_ES: 'x' }[key] ?? fallback),
+    get: (key: string, fallback?: unknown) => ({ REGISTRATION_SECRET: 'secreto-e2e', FRONTEND_URL: 'https://lucilamon.test' }[key] ?? fallback),
   };
 
   async function photo(bib: string, publicationStatus: 'APPROVED' | 'PENDING_REVIEW' = 'APPROVED') {
@@ -40,7 +48,7 @@ suite('registro por QR contra PostgreSQL real', () => {
   }
 
   const digest = (id: string) =>
-    processor.process({ data: { subscriptionId: id, kind: 'BIB_NOTIFICATION', eventId, bib: '', email: '' } } as any);
+    processor.process({ data: { subscriptionId: id, kind: 'BIB_NOTIFICATION', eventId, bib: '', email: '' }, updateData: jest.fn(), moveToDelayed: jest.fn() } as any, 'tok');
 
   beforeAll(async () => {
     prisma = new PrismaClient({ datasources: { db: { url } } });
@@ -54,8 +62,12 @@ suite('registro por QR contra PostgreSQL real', () => {
       },
     });
     eventId = event.id;
+    workspaceId = ws.id;
+    await prisma.workspaceChannel.create({
+      data: { workspaceId: ws.id, channel: 'WHATSAPP', status: 'ACTIVE', secretEnc: 'x', config: { phoneId: '111', wabaId: '222', warnings: [], templates: { es: { status: 'APPROVED', name: 'lucilamon_fotos_listas_v1', language: 'es' } }, testConfirmedAt: new Date().toISOString() } },
+    });
     service = new RegistrationsService(prisma, config, {} as any, { scheduleForBibs: async (...a: any[]) => { scheduled.push(a); } } as any);
-    processor = new SendBibEmailProcessor(prisma, mail as any, whatsApp as any, config);
+    processor = new SendBibEmailProcessor(prisma, mail as any, health, config);
   });
 
   afterAll(async () => { await prisma?.$disconnect(); });
@@ -125,7 +137,7 @@ suite('registro por QR contra PostgreSQL real', () => {
     await service.register(code, { bib: '300', phone: '(415) 555-2671', phoneCountry: 'US', whatsappConsent: true, name: 'Kim' }, '7.7.7.7');
     const sub = await prisma.bibSubscription.findFirstOrThrow({ where: { eventId, bib: '300' } });
     await digest(sub.id);
-    expect(whatsApp.sendPhotosReady).toHaveBeenCalledWith(expect.objectContaining({ to: '+14155552671', photoCount: 1, name: 'Kim' }));
+    expect(waClient.sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ to: '+14155552671', phoneId: '111', params: expect.arrayContaining(['Kim', '1']) }));
   });
 
   it('quien se da de baja deja de recibir avisos y puede volver a registrarse', async () => {
@@ -146,6 +158,30 @@ suite('registro por QR contra PostgreSQL real', () => {
     const sub = await prisma.bibSubscription.findFirstOrThrow({ where: { eventId, bib: '400' } });
     await prisma.bibSubscription.delete({ where: { id: sub.id } });
     expect(await prisma.bibNotificationLog.count({ where: { subscriptionId: sub.id } })).toBe(0);
+  });
+
+  it('cada espacio tiene un solo canal de cada tipo, y borrar el espacio borra sus credenciales', async () => {
+    await expect(prisma.workspaceChannel.create({ data: { workspaceId, channel: 'WHATSAPP', secretEnc: 'y' } })).rejects.toThrow();
+    const other = await prisma.workspace.create({ data: { name: 'Otro', slug: `otro-${stamp}`, ownerId: (await prisma.user.findFirstOrThrow({ where: { email: `qr-${stamp}@e2e.test` } })).id } });
+    await prisma.workspaceChannel.create({ data: { workspaceId: other.id, channel: 'EMAIL', secretEnc: 'z', config: {} } });
+    await prisma.workspace.delete({ where: { id: other.id } });
+    expect(await prisma.workspaceChannel.count({ where: { workspaceId: other.id } })).toBe(0);
+  });
+
+  it('un canal con problemas se refleja en el panel con el motivo y los fallos por tipo', async () => {
+    await prisma.workspaceChannel.update({
+      where: { workspaceId_channel: { workspaceId, channel: 'WHATSAPP' } },
+      data: { status: 'ERROR', lastErrorCode: 'WA_BILLING', lastErrorMessage: 'Sin método de pago.' },
+    });
+    await prisma.deliveryIssue.createMany({ data: [
+      { workspaceId, eventId, channel: 'WHATSAPP', scope: 'ACCOUNT', code: 'WA_BILLING', message: 'Sin método de pago.' },
+      { workspaceId, eventId, channel: 'WHATSAPP', scope: 'RECIPIENT', code: 'WA_UNDELIVERABLE', message: 'x' },
+    ] });
+    (service as any).events = { assertCanAccessEvent: async () => undefined };
+    const { delivery } = await service.getConfig(eventId, 'u', 'ADMIN' as any);
+    expect(delivery.whatsappEnabled).toBe(false);
+    expect(delivery.problems).toEqual([{ channel: 'WHATSAPP', code: 'WA_BILLING', message: 'Sin método de pago.' }]);
+    expect(delivery.failed).toEqual({ recipient: 1, account: 1, other: 0 });
   });
 
   it('el conteo del panel no incluye datos personales', async () => {

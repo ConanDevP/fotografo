@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 
@@ -28,6 +28,11 @@ export class RegistrationsAdminController {
     @Req() req: AuthenticatedRequest,
   ) {
     return { data: await this.registrations.updateConfig(eventId, dto, req.user.id, req.user.role) };
+  }
+
+  @Post('registrations/retry')
+  async retry(@Param('eventId') eventId: string, @Req() req: AuthenticatedRequest) {
+    return { data: await this.registrations.retryNotifications(eventId, req.user.id, req.user.role) };
   }
 
   @Get('registrations/export.csv')

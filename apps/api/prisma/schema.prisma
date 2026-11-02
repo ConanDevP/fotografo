@@ -97,6 +97,7 @@ model Workspace {
   brandTheme                    BrandTheme?
   subscription                  Subscription?
   members                       WorkspaceMember[]
+  messagingChannels             WorkspaceChannel[]
   teamInvitations               WorkspaceInvitation[]
   events                        Event[]
   photographerPhotos            Photo[]            @relation("PhotoPhotographerWorkspace")
@@ -498,6 +499,54 @@ model BibNotificationLog {
 
   @@unique([subscriptionId, photoId, channel])
   @@map("bib_notification_log")
+}
+
+/// Canal de avisos propio de un espacio: su cuenta de Resend o de WhatsApp Business.
+/// Las credenciales son del cliente y van cifradas; LucilaMon solo las usa para
+/// enviar en su nombre.
+model WorkspaceChannel {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  /// EMAIL | WHATSAPP
+  channel          String    @db.VarChar(12)
+  /// PENDING (conectado, falta que el proveedor lo apruebe) | ACTIVE | ERROR (el proveedor lo rechaza) | DISABLED
+  status           String    @default("PENDING") @db.VarChar(12)
+  /// Datos que no son secretos: remitente, ids, estado de plantillas...
+  config           Json      @default("{}")
+  secretEnc        String    @map("secret_enc")
+  /// Últimos caracteres de la credencial, para que el cliente reconozca cuál conectó.
+  secretHint       String?   @map("secret_hint") @db.VarChar(12)
+  lastCheckedAt    DateTime? @map("last_checked_at") @db.Timestamptz(6)
+  lastErrorCode    String?   @map("last_error_code") @db.VarChar(40)
+  lastErrorMessage String?   @map("last_error_message") @db.VarChar(600)
+  lastAlertAt      DateTime? @map("last_alert_at") @db.Timestamptz(6)
+  lastAlertCode    String?   @map("last_alert_code") @db.VarChar(40)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, channel])
+  @@map("workspace_channels")
+}
+
+/// Avisos que no salieron y por qué. Sirve para que el cliente vea que el
+/// problema está en su proveedor (saldo, dominio, plantilla) y qué hacer.
+model DeliveryIssue {
+  id             BigInt   @id @default(autoincrement())
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  eventId        String?  @map("event_id") @db.Uuid
+  subscriptionId String?  @map("subscription_id") @db.Uuid
+  /// EMAIL | WHATSAPP
+  channel        String   @db.VarChar(12)
+  /// ACCOUNT | TEMPLATE | RECIPIENT | LIMIT | TRANSIENT
+  scope          String   @db.VarChar(12)
+  code           String   @db.VarChar(40)
+  message        String   @db.VarChar(600)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt])
+  @@index([eventId, createdAt])
+  @@map("delivery_issues")
 }
 
 model Order {

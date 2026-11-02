@@ -1,10 +1,12 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { DelayedError, Job } from 'bullmq';
 
 import { PrismaService } from '../../../api/src/common/services/prisma.service';
 import { MailService } from '../services/mail.service';
-import { WhatsAppDeliveryError, WhatsAppService } from '../services/whatsapp.service';
+import { ChannelHealthService } from '../../../api/src/messaging/channel-health.service';
+import { ChannelSendError, ClassifiedError } from '../../../api/src/messaging/delivery-errors';
+import { cleanTemplateParam } from '../../../api/src/messaging/whatsapp-templates';
 import { ConfigService } from '@nestjs/config';
 import { signUnsubscribeToken } from '@shared/registration';
 import { SendBibEmailJob } from '@shared/types';
@@ -17,13 +19,13 @@ export class SendBibEmailProcessor extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private mailService: MailService,
-    private whatsApp: WhatsAppService,
+    private health: ChannelHealthService,
     private config: ConfigService,
   ) {
     super();
   }
 
-  async process(job: Job<SendBibEmailJob>): Promise<void> {
+  async process(job: Job<SendBibEmailJob>, token?: string): Promise<void> {
     const { eventId, bib, email, photoIds } = job.data;
 
     if (job.data.kind === 'EVENT_INVITATION') {
@@ -65,7 +67,7 @@ export class SendBibEmailProcessor extends WorkerHost {
     }
     
     if (job.data.subscriptionId) {
-      await this.processDigest(job.data.subscriptionId);
+      await this.processDigest(job.data.subscriptionId, job, token);
       return;
     }
 
@@ -162,15 +164,19 @@ export class SendBibEmailProcessor extends WorkerHost {
    * que ese canal aún no ha avisado y manda un solo mensaje. Cada canal lleva
    * su propia cuenta, así que si WhatsApp falla y el correo no, el reintento
    * solo repite WhatsApp.
+   *
+   * Los avisos salen por los canales del espacio (su Resend y su WhatsApp
+   * Business). Lo que rechaza la cuenta del cliente (saldo, dominio, plantilla)
+   * pausa ese canal y se le avisa; los avisos quedan pendientes, no se pierden.
    */
-  private async processDigest(subscriptionId: string): Promise<void> {
+  private async processDigest(subscriptionId: string, job: Job<SendBibEmailJob>, token?: string): Promise<void> {
     const subscription = await this.prisma.bibSubscription.findUnique({
       where: { id: subscriptionId },
       include: {
         event: {
           select: {
-            id: true, name: true, slug: true, isPublished: true, deletedAt: true,
-            workspace: { select: { slug: true, customDomain: true, customDomainVerifiedAt: true } },
+            id: true, name: true, slug: true, isPublished: true, deletedAt: true, workspaceId: true,
+            workspace: { select: { name: true, slug: true, customDomain: true, customDomainVerifiedAt: true } },
           },
         },
       },
@@ -195,12 +201,14 @@ export class SendBibEmailProcessor extends WorkerHost {
     const locale: 'es' | 'en' = subscription.locale === 'en' ? 'en' : 'es';
     const eventUrl = this.eventUrl(event, subscription.bib);
     const unsubscribeUrl = this.unsubscribeUrl(subscription.id);
-    const failures: Error[] = [];
+    const context = { eventId: event.id, subscriptionId: subscription.id };
+    const retryable: Error[] = [];
+    let delayMs = 0;
     let sentAny = false;
 
     const channels: Array<'EMAIL' | 'WHATSAPP'> = [];
     if (subscription.email && subscription.emailConsentAt) channels.push('EMAIL');
-    if (subscription.phone && subscription.whatsappConsentAt && this.whatsApp.enabled()) channels.push('WHATSAPP');
+    if (subscription.phone && subscription.whatsappConsentAt) channels.push('WHATSAPP');
 
     for (const channel of channels) {
       const done = await this.prisma.bibNotificationLog.findMany({
@@ -211,10 +219,16 @@ export class SendBibEmailProcessor extends WorkerHost {
       const fresh = eligible.filter(item => !already.has(item.photoId));
       if (!fresh.length) continue;
 
+      const markNotified = () => this.prisma.bibNotificationLog.createMany({
+        data: fresh.map(item => ({ subscriptionId: subscription.id, photoId: item.photoId, channel })),
+        skipDuplicates: true,
+      });
+
       try {
         if (channel === 'EMAIL') {
-          await this.mailService.sendRunnerDigest({
-            to: subscription.email!,
+          const route = await this.health.emailRoute(event.workspaceId);
+          if (route.kind === 'PAUSED') continue; // el cliente tiene que arreglar su canal; los avisos esperan
+          const digest = {
             locale,
             name: subscription.name,
             bib: subscription.bib,
@@ -227,41 +241,103 @@ export class SendBibEmailProcessor extends WorkerHost {
             eventUrl,
             unsubscribeUrl,
             unsubscribePostUrl: this.unsubscribePostUrl(subscription.id),
-          });
+          };
+          if (route.kind === 'OWN') {
+            const mail = this.mailService.buildRunnerDigest(digest);
+            await route.client.send({ from: route.from, to: subscription.email!, subject: mail.subject, html: mail.html, headers: mail.headers, replyTo: route.replyTo });
+          } else {
+            await this.mailService.sendRunnerDigest({ ...digest, to: subscription.email!, fromDisplayName: event.workspace?.name });
+          }
         } else {
-          await this.whatsApp.sendPhotosReady({
+          const route = await this.health.whatsappRoute(event.workspaceId, locale);
+          if (route.kind !== 'OWN') continue; // sin canal propio activo no se envía WhatsApp
+          await route.client.sendTemplate({
+            phoneId: route.phoneId,
             to: subscription.phone!,
-            locale,
-            name: subscription.name,
-            eventName: event.name,
-            photoCount: fresh.length,
-            url: eventUrl,
+            name: route.template.name,
+            language: route.template.language,
+            params: [
+              cleanTemplateParam(subscription.name, locale === 'en' ? 'runner' : 'corredor', 60),
+              cleanTemplateParam(event.name, 'evento', 100),
+              String(fresh.length),
+              cleanTemplateParam(eventUrl, eventUrl, 500),
+            ],
           });
         }
       } catch (error) {
-        // Un fallo permanente (número sin WhatsApp, plantilla mal) se da por
-        // avisado para no reintentar eternamente; uno pasajero se reintenta.
-        if (!(error instanceof WhatsAppDeliveryError && error.permanent)) {
-          failures.push(error instanceof Error ? error : new Error(String(error)));
+        if (!(error instanceof ChannelSendError)) {
+          retryable.push(error instanceof Error ? error : new Error(String(error)));
           continue;
         }
-        this.logger.warn(`WhatsApp no entregable para la suscripción ${subscription.id}: ${error.message}`);
+        const outcome = await this.handleFailure(event.workspaceId, event.workspace?.name, channel, error.detail, context);
+        if (outcome === 'RECIPIENT') await markNotified(); // ese destinatario no se puede avisar: no se reintenta
+        else if (outcome === 'LIMIT') delayMs = Math.max(delayMs, error.detail.retryAfterMs ?? 15 * 60_000);
+        else if (outcome === 'RETRY') retryable.push(error);
+        continue;
       }
 
-      await this.prisma.bibNotificationLog.createMany({
-        data: fresh.map(item => ({ subscriptionId: subscription.id, photoId: item.photoId, channel })),
-        skipDuplicates: true,
-      });
+      await markNotified();
       sentAny = true;
     }
 
     if (sentAny) {
-      await this.prisma.bibSubscription.update({
-        where: { id: subscription.id },
-        data: { lastNotifiedAt: new Date() },
-      });
+      await this.prisma.bibSubscription.update({ where: { id: subscription.id }, data: { lastNotifiedAt: new Date() } });
     }
-    if (failures.length) throw failures[0];
+    if (retryable.length) throw retryable[0];
+    if (delayMs && token) {
+      // Un límite del proveedor se resuelve esperando: se aplaza el aviso sin gastar reintentos.
+      const postponed = (job.data.limitRetries ?? 0) + 1;
+      if (postponed <= 72) {
+        await job.updateData({ ...job.data, limitRetries: postponed });
+        await job.moveToDelayed(Date.now() + delayMs, token);
+        throw new DelayedError();
+      }
+    }
+  }
+
+  /**
+   * Qué hacer con un fallo clasificado. Devuelve cómo sigue ese aviso:
+   * RECIPIENT (se descarta), LIMIT (se aplaza), RETRY (reintento normal) o
+   * PAUSED (canal pausado, espera a que el cliente lo arregle).
+   */
+  private async handleFailure(
+    workspaceId: string | null,
+    workspaceName: string | undefined,
+    channel: 'EMAIL' | 'WHATSAPP',
+    detail: ClassifiedError,
+    context: { eventId: string; subscriptionId: string },
+  ): Promise<'RECIPIENT' | 'LIMIT' | 'RETRY' | 'PAUSED'> {
+    this.logger.warn(`Aviso ${channel} no enviado (${detail.scope}/${detail.code}): ${detail.raw ?? detail.message}`);
+    if (workspaceId) {
+      const { alert } = await this.health.recordFailure(workspaceId, channel, detail, context).catch(error => {
+        this.logger.warn(`No se pudo registrar el fallo: ${error?.message}`);
+        return { alert: false };
+      });
+      if (alert) await this.alertOwner(workspaceId, workspaceName, channel, detail);
+    }
+    if (detail.scope === 'RECIPIENT') return 'RECIPIENT';
+    if (detail.scope === 'LIMIT') return 'LIMIT';
+    if (detail.scope === 'TRANSIENT') return 'RETRY';
+    return 'PAUSED';
+  }
+
+  private async alertOwner(workspaceId: string, workspaceName: string | undefined, channel: 'EMAIL' | 'WHATSAPP', detail: ClassifiedError) {
+    try {
+      const who = await this.health.alertRecipient(workspaceId);
+      if (!who) return;
+      const frontend = this.config.get<string>('FRONTEND_URL', 'http://localhost:3000').replace(/\/$/, '');
+      await this.mailService.sendChannelAlert({
+        to: who.email,
+        workspaceName: workspaceName ?? who.workspaceName,
+        channel,
+        message: detail.message,
+        action: detail.action,
+        helpUrl: detail.helpUrl,
+        dashboardUrl: `${frontend}/dashboard/workspaces/${workspaceId}`,
+      });
+    } catch (error) {
+      this.logger.warn(`No se pudo avisar al cliente del problema de su canal: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
   private eventUrl(
@@ -303,7 +379,21 @@ export class SendBibEmailProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job<SendBibEmailJob>, err: Error) {
-    this.logger.error(`Email job ${job.id} falló: ${err.message}`);
+  async onFailed(job: Job<SendBibEmailJob> | undefined, err: Error) {
+    this.logger.error(`Email job ${job?.id} falló: ${err.message}`);
+    // Agotados los reintentos, queda constancia para que el cliente vea que hubo avisos sin salir.
+    if (!job?.data.subscriptionId || job.attemptsMade < (job.opts.attempts ?? 1)) return;
+    const subscription = await this.prisma.bibSubscription.findUnique({
+      where: { id: job.data.subscriptionId },
+      select: { id: true, eventId: true, event: { select: { workspaceId: true } } },
+    }).catch(() => null);
+    const workspaceId = subscription?.event.workspaceId;
+    if (!subscription || !workspaceId) return;
+    await this.health.recordFailure(
+      workspaceId,
+      'EMAIL',
+      { scope: 'TRANSIENT', code: 'DELIVERY_FAILED', message: 'Un aviso no se pudo enviar tras varios intentos por un error del proveedor.', raw: err.message.slice(0, 200) },
+      { eventId: subscription.eventId, subscriptionId: subscription.id },
+    ).catch(() => undefined);
   }
 }

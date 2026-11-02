@@ -7,11 +7,11 @@ import { signUnsubscribeToken } from '@shared/registration';
 const SECRET = 'secreto-de-prueba';
 const DAY = 24 * 60 * 60 * 1000;
 
-function build(overrides: { event?: any; existing?: any; createError?: Error; config?: Record<string, string> } = {}) {
+function build(overrides: { event?: any; existing?: any; createError?: Error; config?: Record<string, string>; whatsapp?: 'ACTIVE' | 'NONE' } = {}) {
   const found = overrides.existing ? [overrides.existing] : [];
   const event = {
     id: 'evt-1', name: 'Maratón', date: new Date(Date.now() + DAY), location: 'CDMX', imageUrl: null,
-    bibRules: null, countryCode: 'MX', isPublished: false, workspace: { slug: 'ws', name: 'WS' },
+    bibRules: null, countryCode: 'MX', isPublished: false, workspaceId: 'ws-1', workspace: { slug: 'ws', name: 'WS' },
     ...overrides.event,
   };
   const prisma: any = {
@@ -28,9 +28,18 @@ function build(overrides: { event?: any; existing?: any; createError?: Error; co
     },
     photoBib: { count: jest.fn().mockResolvedValue(0) },
     bibNotificationLog: { findMany: jest.fn().mockResolvedValue([]), createMany: jest.fn().mockResolvedValue({}) },
+    workspaceChannel: {
+      findUnique: jest.fn().mockResolvedValue(
+        (overrides.whatsapp ?? 'ACTIVE') === 'ACTIVE'
+          ? { status: 'ACTIVE', config: { templates: { es: { status: 'APPROVED' } } } }
+          : null,
+      ),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    deliveryIssue: { groupBy: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn().mockImplementation((ops: any[]) => Promise.all(ops)),
   };
-  const config: any = { get: jest.fn((key: string, fallback?: unknown) => ({ REGISTRATION_SECRET: SECRET, WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_ID: 'p', WHATSAPP_TEMPLATE_ES: 'x', ...(overrides.config || {}) }[key] ?? fallback)) };
+  const config: any = { get: jest.fn((key: string, fallback?: unknown) => ({ REGISTRATION_SECRET: SECRET, ...(overrides.config || {}) }[key] ?? fallback)) };
   const scheduler: any = { scheduleForBibs: jest.fn().mockResolvedValue(1) };
   const service = new RegistrationsService(prisma, config, {} as any, scheduler);
   return { service, prisma, scheduler };
@@ -74,8 +83,8 @@ describe('RegistrationsService.register', () => {
     expect(prisma.bibSubscription.create).not.toHaveBeenCalled();
   });
 
-  it('no acepta un teléfono si el canal de WhatsApp no está configurado', async () => {
-    const { service, prisma } = build({ config: { WHATSAPP_TOKEN: '' } });
+  it('no acepta un teléfono si el espacio no tiene WhatsApp propio activo', async () => {
+    const { service, prisma } = build({ whatsapp: 'NONE' });
     await expect(
       service.register('abcd2345', { bib: '1', phone: '5512345678', whatsappConsent: true }, 'ip'),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -259,5 +268,52 @@ describe('RegistrationsService: dominio propio en el QR', () => {
     const { service, prisma } = withEvent({});
     await service.updateConfig('e', { useCustomDomain: true }, 'u', ADMIN);
     expect(prisma.event.update.mock.calls[0][0].data).toEqual({ registrationUseCustomDomain: true });
+  });
+});
+
+describe('RegistrationsService: WhatsApp depende del canal del espacio', () => {
+  it('solo se ofrece con el canal activo, plantilla aprobada y prueba confirmada', async () => {
+    const active = build({ whatsapp: 'ACTIVE' });
+    expect((await active.service.getPublic('abcd2345')).whatsappEnabled).toBe(true);
+
+    const none = build({ whatsapp: 'NONE' });
+    expect((await none.service.getPublic('abcd2345')).whatsappEnabled).toBe(false);
+
+    const pending = build();
+    pending.prisma.workspaceChannel.findUnique.mockResolvedValue({ status: 'PENDING', config: { templates: { es: { status: 'APPROVED' } } } });
+    expect((await pending.service.getPublic('abcd2345')).whatsappEnabled).toBe(false);
+
+    const sinPlantilla = build();
+    sinPlantilla.prisma.workspaceChannel.findUnique.mockResolvedValue({ status: 'ACTIVE', config: { templates: { es: { status: 'PENDING' } } } });
+    expect((await sinPlantilla.service.getPublic('abcd2345')).whatsappEnabled).toBe(false);
+  });
+
+  it('un evento sin espacio nunca ofrece WhatsApp (no tiene canal propio)', async () => {
+    const { service, prisma } = build({ event: { workspaceId: null, workspace: null } });
+    expect((await service.getPublic('abcd2345')).whatsappEnabled).toBe(false);
+    expect(prisma.workspaceChannel.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('el panel muestra qué canal está pausado y cuántos avisos fallaron por qué', async () => {
+    const { service, prisma } = build();
+    (service as any).events = { assertCanAccessEvent: jest.fn() };
+    prisma.event.findFirstOrThrow = jest.fn().mockResolvedValue({
+      workspaceId: 'ws-1', registrationCode: 'k7m2p9xq', registrationEnabled: true, registrationUseCustomDomain: false,
+      countryCode: 'MX', date: new Date(), workspace: null,
+    });
+    prisma.workspaceChannel.findMany.mockResolvedValue([
+      { channel: 'EMAIL', status: 'ACTIVE', lastErrorCode: null, lastErrorMessage: null },
+      { channel: 'WHATSAPP', status: 'ERROR', config: {}, lastErrorCode: 'WA_BILLING', lastErrorMessage: 'Sin método de pago.' },
+    ]);
+    prisma.deliveryIssue.groupBy.mockResolvedValue([
+      { scope: 'ACCOUNT', _count: { _all: 4 } }, { scope: 'RECIPIENT', _count: { _all: 2 } }, { scope: 'LIMIT', _count: { _all: 1 } },
+    ]);
+    prisma.bibSubscription.count.mockResolvedValue(0);
+
+    const { delivery } = await service.getConfig('e', 'u', 'ADMIN' as any);
+    expect(delivery.email).toEqual({ mode: 'OWN', status: 'ACTIVE' });
+    expect(delivery.whatsappEnabled).toBe(false);
+    expect(delivery.problems).toEqual([{ channel: 'WHATSAPP', code: 'WA_BILLING', message: 'Sin método de pago.' }]);
+    expect(delivery.failed).toEqual({ recipient: 2, account: 4, other: 1 });
   });
 });

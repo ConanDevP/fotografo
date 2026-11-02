@@ -31,6 +31,17 @@ export class DigestSchedulerService {
     return this.scheduleForBibs(eventId, withPhotos.map(item => item.bib), delayMs);
   }
 
+  /** Tras arreglar un canal: reprograma los avisos de todos los eventos publicados del espacio. */
+  async scheduleForWorkspace(workspaceId: string, delayMs = 5_000): Promise<number> {
+    const events = await this.prisma.event.findMany({
+      where: { workspaceId, deletedAt: null, isPublished: true, registrationEnabled: true },
+      select: { id: true },
+    });
+    let total = 0;
+    for (const event of events) total += await this.scheduleForEvent(event.id, delayMs);
+    return total;
+  }
+
   /** Al aprobar fotos: solo los dorsales que aparecen en ellas. */
   async scheduleForPhotos(eventId: string, photoIds: string[], delayMs?: number): Promise<number> {
     if (!photoIds.length) return 0;
