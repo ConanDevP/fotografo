@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsDateString, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class GrantAdminPlanDto {
@@ -20,6 +20,14 @@ export class GrantAdminPlanDto {
   @Min(0)
   @Max(100)
   extraStorageBlocks = 0;
+
+  /// Comisión de plataforma pactada (0 = sin comisión). Vacío = la del plan.
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  commissionPercent?: number;
 }
 
 export class RevokeAdminPlanDto {

@@ -166,6 +166,51 @@ describe('BillingService', () => {
       expect(result.storageAllowanceBytes).toBe(BigInt(5) * GB);
     });
 
+    describe('comisión pactada por soporte', () => {
+      const future = new Date(Date.now() + 30 * 86_400_000);
+      const past = new Date(Date.now() - 86_400_000);
+      const granted = (over: any) => ({
+        status: 'ACTIVE', extraStorageBlocks: 0, plan: profesional,
+        adminGrantedUntil: future, adminCommissionPercent: 0, stripeSubscriptionId: null, ...over,
+      });
+
+      it('aplica 0 % (sin comisión) en vez de la del plan', async () => {
+        givenWorkspace(granted({}), BigInt(0));
+
+        const result = await service.resolveForWorkspace(WORKSPACE);
+
+        expect(result.commissionPercent).toBe(0);
+        expect(await service.commissionPercentFor(WORKSPACE)).toBe(0);
+      });
+
+      it('aplica un porcentaje intermedio', async () => {
+        givenWorkspace(granted({ adminCommissionPercent: '3.50' }), BigInt(0));
+
+        expect((await service.resolveForWorkspace(WORKSPACE)).commissionPercent).toBe(3.5);
+      });
+
+      it('sin comisión pactada manda la del plan', async () => {
+        givenWorkspace(granted({ adminCommissionPercent: null }), BigInt(0));
+
+        expect((await service.resolveForWorkspace(WORKSPACE)).commissionPercent).toBe(7);
+      });
+
+      it('al vencer la concesión vuelve a cobrar la comisión del plan gratuito', async () => {
+        givenWorkspace(granted({ adminGrantedUntil: past }), BigInt(0));
+
+        const result = await service.resolveForWorkspace(WORKSPACE);
+
+        expect(result.plan.slug).toBe('arranque');
+        expect(result.commissionPercent).toBe(10);
+      });
+
+      it('no se hereda si el espacio ya paga con Stripe', async () => {
+        givenWorkspace(granted({ stripeSubscriptionId: 'sub_123' }), BigInt(0));
+
+        expect((await service.resolveForWorkspace(WORKSPACE)).commissionPercent).toBe(7);
+      });
+    });
+
     it('no deja el espacio disponible en negativo cuando ya se pasó del cupo', async () => {
       givenWorkspace(null, BigInt(9) * GB);
 

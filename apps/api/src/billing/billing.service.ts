@@ -147,6 +147,13 @@ export class BillingService {
       if (businessPlan) plan = businessPlan;
     }
 
+    // Comisión pactada por soporte: solo con concesión vigente y sin suscripción
+    // de pago, para que un cambio posterior a Stripe no herede el descuento.
+    const negotiated = active && active.adminGrantedUntil && !active.stripeSubscriptionId
+      && active.adminCommissionPercent != null
+      ? Number(active.adminCommissionPercent)
+      : null;
+
     const blockBytes = plan.extraStorageBlockBytes ?? BigInt(0);
     const extraBytes = blockBytes * BigInt(active?.extraStorageBlocks ?? 0);
     const allowance = plan.includedStorageBytes + extraBytes;
@@ -158,7 +165,7 @@ export class BillingService {
       storageAllowanceBytes: allowance,
       storageUsedBytes: used,
       storageAvailableBytes: allowance > used ? allowance - used : BigInt(0),
-      commissionPercent: Number(plan.commissionPercent),
+      commissionPercent: negotiated ?? Number(plan.commissionPercent),
       enterprise: enterpriseActive ? enterprise : null,
     };
   }

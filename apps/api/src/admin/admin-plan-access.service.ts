@@ -36,6 +36,7 @@ export class AdminPlanAccessService {
     return {
       items: items.map(item => ({ ...item, storageBytesUsed: item.storageBytesUsed.toString(), subscription: item.subscription ? {
         ...item.subscription,
+        adminCommissionPercent: item.subscription.adminCommissionPercent == null ? null : Number(item.subscription.adminCommissionPercent),
         plan: { ...item.subscription.plan, includedStorageBytes: item.subscription.plan.includedStorageBytes.toString(), commissionPercent: Number(item.subscription.plan.commissionPercent), sharePhotoCents: Number(item.subscription.plan.sharePhotoCents) },
       } : null })),
       plans: plans.map(plan => ({ slug: plan.slug, name: plan.name, priceCents: plan.priceCents })),
@@ -63,13 +64,14 @@ export class AdminPlanAccessService {
     if (workspace.storageBytesUsed > allowance) throw new BadRequestException('El espacio usado supera el cupo del plan elegido');
 
     const reason = dto.reason.trim();
+    const commissionPercent = dto.commissionPercent ?? null;
     const subscription = await this.prisma.$transaction(async tx => {
       const saved = await tx.subscription.upsert({
         where: { workspaceId },
-        create: { workspaceId, planId: plan.id, status: SubscriptionStatus.ACTIVE, extraStorageBlocks: dto.extraStorageBlocks, adminGrantedUntil: expiresAt, adminGrantReason: reason, adminGrantedById: adminId },
-        update: { planId: plan.id, status: SubscriptionStatus.ACTIVE, extraStorageBlocks: dto.extraStorageBlocks, cancelAtPeriodEnd: false, adminGrantedUntil: expiresAt, adminGrantReason: reason, adminGrantedById: adminId },
+        create: { workspaceId, planId: plan.id, status: SubscriptionStatus.ACTIVE, extraStorageBlocks: dto.extraStorageBlocks, adminGrantedUntil: expiresAt, adminGrantReason: reason, adminGrantedById: adminId, adminCommissionPercent: commissionPercent },
+        update: { planId: plan.id, status: SubscriptionStatus.ACTIVE, extraStorageBlocks: dto.extraStorageBlocks, cancelAtPeriodEnd: false, adminGrantedUntil: expiresAt, adminGrantReason: reason, adminGrantedById: adminId, adminCommissionPercent: commissionPercent },
       });
-      await tx.auditLog.create({ data: { userId: adminId, action: 'PLAN_ACCESS_GRANTED_BY_ADMIN', data: { workspaceId, workspaceName: workspace.name, planSlug: plan.slug, expiresAt: expiresAt.toISOString(), extraStorageBlocks: dto.extraStorageBlocks, reason } } });
+      await tx.auditLog.create({ data: { userId: adminId, action: 'PLAN_ACCESS_GRANTED_BY_ADMIN', data: { workspaceId, workspaceName: workspace.name, planSlug: plan.slug, expiresAt: expiresAt.toISOString(), extraStorageBlocks: dto.extraStorageBlocks, commissionPercent, reason } } });
       return saved;
     });
     return { ...subscription, plan: { slug: plan.slug, name: plan.name }, storageAllowanceBytes: allowance.toString() };

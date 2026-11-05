@@ -1305,6 +1305,10 @@ model Subscription {
   adminGrantedUntil    DateTime?          @map("admin_granted_until") @db.Timestamptz(6)
   adminGrantReason     String?            @map("admin_grant_reason")
   adminGrantedById     String?            @map("admin_granted_by_id") @db.Uuid
+  /// Comisión de plataforma pactada por soporte para esta concesión (0–100).
+  /// Si es null manda la del plan. Solo vale mientras la concesión esté vigente
+  /// y no haya una suscripción pagada en Stripe.
+  adminCommissionPercent Decimal?         @map("admin_commission_percent") @db.Decimal(5, 2)
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
