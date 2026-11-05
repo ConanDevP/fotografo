@@ -19,6 +19,9 @@ import { StripeConnectService } from './gateways/stripe-connect.service';
 // import { PayPalOnboardingController } from '../photographers/paypal-onboarding.controller';
 import { StripeOnboardingController } from '../photographers/stripe-onboarding.controller';
 import { SettlementSweeperService } from './settlement-sweeper.service';
+import { MailerService } from '../common/services/mailer.service';
+import { ManualPayoutsService } from './manual-payouts.service';
+import { ManualPayoutsController } from './manual-payouts.controller';
 
 // Factory providers para servicios opcionales
 const stripeGatewayProvider = {
@@ -75,7 +78,7 @@ const paypalPartnerProvider = {
 
 @Module({
   imports: [BillingModule, PartnerApiModule],
-  controllers: [PaymentsController, StripeOnboardingController],
+  controllers: [PaymentsController, StripeOnboardingController, ManualPayoutsController],
   providers: [
     PaymentsService,
     PrismaService,
@@ -90,6 +93,8 @@ const paypalPartnerProvider = {
     stripeGatewayProvider,
     stripeConnectProvider,
     SettlementSweeperService,
+    ManualPayoutsService,
+    MailerService,
   ],
   exports: [PaymentsService, StripeConnectService],
 })

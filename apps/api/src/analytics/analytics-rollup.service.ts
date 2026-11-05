@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/services/prisma.service';
+import { countingLedgerWhere, ledgerByTypeAndCurrency, primaryMoney } from '../common/utils/revenue';
 
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 /** Ventana del pase nocturno. El incremental ya mantiene 3 días perfectos; esto
@@ -295,8 +296,8 @@ export class AnalyticsRollupService implements OnModuleInit {
         _sum: { count: true, uniqueVisitors: true },
       }),
       this.prisma.ledgerEntry.groupBy({
-        by: ['type'],
-        where: { eventId },
+        by: ['currency', 'type'],
+        where: countingLedgerWhere({ eventId }),
         _sum: { amountCents: true },
       }),
       this.prisma.order.count({ where: { eventId, status: 'PAID' } }),
@@ -332,14 +333,21 @@ export class AnalyticsRollupService implements OnModuleInit {
     const rollup = Object.fromEntries(
       rollupGroups.map(g => [g.metricType, g._sum.count ?? 0]),
     ) as Record<string, number>;
+    // Un evento cobra en una moneda, pero si alguna vez cambió de precio entre
+    // monedas no se mezclan: se toma la que más ha vendido.
+    const ledgerByType = ledgerByTypeAndCurrency(ledgerGroups);
+    const eventCurrency = primaryMoney(ledgerByType.GROSS_SALE ?? {}).currency;
     const ledger = Object.fromEntries(
-      ledgerGroups.map(g => [g.type, Math.abs(g._sum.amountCents ?? 0)]),
+      Object.entries(ledgerByType).map(([type, byCurrency]) => [type, Math.abs(byCurrency[eventCurrency] ?? 0)]),
     ) as Record<string, number>;
 
     const grossCents =
       ledger.GROSS_SALE ??
-      (await this.prisma.order.aggregate({ where: { eventId, status: 'PAID' }, _sum: { amountCents: true } }))._sum
-        .amountCents ??
+      (await this.prisma.order.groupBy({
+        by: ['currency'],
+        where: { eventId, status: 'PAID' },
+        _sum: { amountCents: true },
+      })).find(row => row.currency.toUpperCase() === eventCurrency)?._sum.amountCents ??
       0;
 
     await this.prisma.eventAnalyticsSnapshot.upsert({
@@ -365,7 +373,7 @@ export class AnalyticsRollupService implements OnModuleInit {
         noResultSearches: rollup.SEARCH_NO_RESULTS ?? 0,
         addToCart: rollup.ADD_TO_CART ?? 0,
         checkoutStarted: rollup.CHECKOUT_STARTED ?? 0,
-        purchases: Math.max(rollup.PURCHASE_COMPLETED ?? 0, paidOrders),
+        purchases: paidOrders,
         freeDownloads: Math.max(rollup.FREE_DOWNLOAD ?? 0, freeDownloads, event.totalFreeDownloads ?? 0),
         paidDownloads: rollup.PAID_DOWNLOAD ?? 0,
         grossCents,
@@ -401,7 +409,7 @@ export class AnalyticsRollupService implements OnModuleInit {
         noResultSearches: rollup.SEARCH_NO_RESULTS ?? 0,
         addToCart: rollup.ADD_TO_CART ?? 0,
         checkoutStarted: rollup.CHECKOUT_STARTED ?? 0,
-        purchases: Math.max(rollup.PURCHASE_COMPLETED ?? 0, paidOrders),
+        purchases: paidOrders,
         freeDownloads: Math.max(rollup.FREE_DOWNLOAD ?? 0, freeDownloads, event.totalFreeDownloads ?? 0),
         paidDownloads: rollup.PAID_DOWNLOAD ?? 0,
         grossCents,

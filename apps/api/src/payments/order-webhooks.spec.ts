@@ -7,6 +7,7 @@ function build(currentStatus: string) {
     order: {
       findUnique: jest.fn().mockResolvedValue({ stripeSessionId: null, status: currentStatus, paymentGateway: 'PAYPAL' }),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
   };
   svc.createLedgerForOrder = jest.fn().mockResolvedValue(undefined);

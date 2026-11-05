@@ -154,7 +154,10 @@ export class StripeGatewayService implements IPaymentGateway {
                 orderId: session.metadata?.orderId || '',
                 status,
                 transactionId,
-                paidAmount: session.amount_total || 0,
+                // Sin impuestos: el pedido guarda el precio de las fotos. Si Stripe
+                // añade IVA al cobro, el total lo supera y el pedido no
+                // coincidiría nunca, quedando sin entregar un cobro ya hecho.
+                paidAmount: (session.amount_total || 0) - (session.total_details?.amount_tax || 0),
                 paidCurrency: session.currency?.toUpperCase(),
                 gatewayResponse: session,
             };

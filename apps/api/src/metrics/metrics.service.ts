@@ -7,6 +7,13 @@ import { PrismaService } from '../common/services/prisma.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { BillingService } from '../billing/billing.service';
 import { RecordMetricDto } from './dto/record-metric.dto';
+import {
+  countingLedgerWhere,
+  ledgerByTypeAndCurrency,
+  paidInRange,
+  primaryMoney,
+  sumRowsByCurrency,
+} from '../common/utils/revenue';
 
 @Injectable()
 export class MetricsService {
@@ -271,8 +278,11 @@ export class MetricsService {
       throw new BadRequestException('Rango de fechas inválido');
     }
     const createdAt = { gte: start, lte: end };
+    // Las ventas se miden por la fecha en que se cobraron, no en que se creó el
+    // pedido, y nunca se suman monedas distintas.
+    const paid = paidInRange(start, end);
 
-    const [metricGroups, uniqueVisitorRows, paidOrders, revenue, ledger, recentEvents] = await Promise.all([
+    const [metricGroups, uniqueVisitorRows, paidOrders, revenueRows, ledgerRows, recentEvents] = await Promise.all([
       this.prisma.metricEvent.groupBy({
         by: ['type'],
         where: { workspaceId, createdAt },
@@ -287,15 +297,16 @@ export class MetricsService {
           AND "visitor_hash" IS NOT NULL
       `),
       this.prisma.order.count({
-        where: { status: 'PAID', event: { workspaceId }, createdAt },
+        where: { ...paid, event: { workspaceId } },
       }),
-      this.prisma.order.aggregate({
-        where: { status: 'PAID', event: { workspaceId }, createdAt },
+      this.prisma.order.groupBy({
+        by: ['currency'],
+        where: { ...paid, event: { workspaceId } },
         _sum: { amountCents: true },
       }),
       this.prisma.ledgerEntry.groupBy({
-        by: ['type'],
-        where: { workspaceId, createdAt },
+        by: ['currency', 'type'],
+        where: countingLedgerWhere({ workspaceId, createdAt }),
         _sum: { amountCents: true },
       }),
       this.prisma.event.findMany({
@@ -316,7 +327,11 @@ export class MetricsService {
 
     const metrics = Object.fromEntries(metricGroups.map(group => [group.type, group._count._all]));
     const eventViews = metrics.EVENT_VIEW || 0;
-    const purchases = metrics.PURCHASE_COMPLETED || paidOrders;
+    // Pedidos que siguen pagados: la métrica PURCHASE_COMPLETED no baja cuando
+    // un pedido se reembolsa, así que no sirve para contar ventas.
+    const purchases = paidOrders;
+    const money = primaryMoney(sumRowsByCurrency(revenueRows, row => row._sum.amountCents));
+    const ledgerByType = ledgerByTypeAndCurrency(ledgerRows);
 
     return {
       period: { from: start.toISOString(), to: end.toISOString() },
@@ -330,7 +345,10 @@ export class MetricsService {
         freeDownloads: metrics.FREE_DOWNLOAD || 0,
         paidDownloads: metrics.PAID_DOWNLOAD || 0,
         purchases,
-        revenueCents: revenue._sum.amountCents || 0,
+        revenueCents: money.cents,
+        currency: money.currency,
+        revenueByCurrency: money.byCurrency,
+        mixedCurrencies: money.mixedCurrencies,
         conversionRate: eventViews > 0 ? Number(((purchases / eventViews) * 100).toFixed(2)) : 0,
         sponsorExposures: metrics.SPONSOR_DOWNLOAD_EXPOSURE || 0,
         sponsorClicks: metrics.SPONSOR_CLICK || 0,
@@ -338,7 +356,9 @@ export class MetricsService {
       advanced,
       ...(advanced
         ? {
-            ledger: Object.fromEntries(ledger.map(entry => [entry.type, entry._sum.amountCents || 0])),
+            ledger: Object.fromEntries(
+              Object.entries(ledgerByType).map(([type, byCurrency]) => [type, byCurrency[money.currency] ?? 0]),
+            ),
             events: recentEvents,
             rawMetrics: metrics,
           }

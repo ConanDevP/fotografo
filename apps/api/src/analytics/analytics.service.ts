@@ -6,6 +6,13 @@ import { WorkspacesService } from '../workspaces/workspaces.service';
 import { BillingService } from '../billing/billing.service';
 import { UserRole } from '@shared/types';
 import { AnalyticsRollupService } from './analytics-rollup.service';
+import {
+  countingLedgerWhere,
+  ledgerByTypeAndCurrency,
+  paidInRange,
+  primaryMoney,
+  sumRowsByCurrency,
+} from '../common/utils/revenue';
 
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 /** Una instantánea más vieja que esto se recalcula al abrir el dashboard. */
@@ -61,6 +68,9 @@ export class AnalyticsService {
 
     const s = snapshot;
     const searches = s.bibSearches + s.faceSearches;
+    const pricing = (await this.prisma.event.findUnique({ where: { id: eventId }, select: { pricing: true } }))
+      ?.pricing as { currency?: string } | null;
+    const currency = (pricing?.currency || 'USD').toUpperCase();
 
     const funnel = this.buildFunnel([
       { step: 'Vistas del evento', count: s.eventViews },
@@ -111,6 +121,7 @@ export class AnalyticsService {
       funnel,
 
       commerce: {
+        currency,
         grossCents: s.grossCents,
         netPlatformCents: s.netPlatformCents,
         organizerCommissionCents: s.organizerCommissionCents,
@@ -158,19 +169,22 @@ export class AnalyticsService {
     const advanced = await this.isAdvanced(workspaceId);
     const { start, end } = this.resolveRange(from, to, advanced);
 
-    const [rollupRows, paidAgg, ledgerGroups, events] = await Promise.all([
+    const [rollupRows, paidRows, ledgerGroups, events] = await Promise.all([
       this.prisma.metricDailyRollup.findMany({
         where: { workspaceId, eventKey: ZERO_UUID, day: { gte: this.dayFloor(start), lte: end } },
         select: { day: true, metricType: true, count: true, uniqueVisitors: true },
       }),
-      this.prisma.order.aggregate({
-        where: { status: 'PAID', event: { workspaceId }, createdAt: { gte: start, lte: end } },
+      // Por fecha de cobro y por moneda: un pedido creado un día y pagado otro
+      // cuenta cuando se pagó, y los dólares no se suman con los lempiras.
+      this.prisma.order.groupBy({
+        by: ['currency'],
+        where: { ...paidInRange(start, end), event: { workspaceId } },
         _sum: { amountCents: true },
         _count: { _all: true },
       }),
       this.prisma.ledgerEntry.groupBy({
-        by: ['type'],
-        where: { workspaceId, createdAt: { gte: start, lte: end } },
+        by: ['currency', 'type'],
+        where: countingLedgerWhere({ workspaceId, createdAt: { gte: start, lte: end } }),
         _sum: { amountCents: true },
       }),
       this.prisma.event.findMany({
@@ -181,6 +195,7 @@ export class AnalyticsService {
           slug: true,
           date: true,
           commerceMode: true,
+          pricing: true,
           analyticsSnapshot: true,
         },
         orderBy: { date: 'desc' },
@@ -189,7 +204,13 @@ export class AnalyticsService {
     ]);
 
     const byType = this.sumByType(rollupRows);
-    const ledger = Object.fromEntries(ledgerGroups.map(g => [g.type, Math.abs(g._sum.amountCents ?? 0)]));
+    const paidCount = paidRows.reduce((total, row) => total + row._count._all, 0);
+    const money = primaryMoney(sumRowsByCurrency(paidRows, row => row._sum.amountCents));
+    const ledgerByType = ledgerByTypeAndCurrency(ledgerGroups);
+    const inPrimary = (type: string) => ledgerByType[type]?.[money.currency];
+    const ledger = Object.fromEntries(
+      Object.keys(ledgerByType).map(type => [type, Math.abs(inPrimary(type) ?? 0)]),
+    );
     const searches = (byType.BIB_SEARCH ?? 0) + (byType.FACE_SEARCH ?? 0);
     const uniqueVisitors = rollupRows.reduce((acc, r) => acc + (r.uniqueVisitors ?? 0), 0);
 
@@ -204,18 +225,23 @@ export class AnalyticsService {
         searches,
         noResultSearches: byType.SEARCH_NO_RESULTS ?? 0,
         addToCart: byType.ADD_TO_CART ?? 0,
-        purchases: Math.max(byType.PURCHASE_COMPLETED ?? 0, paidAgg._count._all),
+        // Pedidos que siguen pagados. La métrica PURCHASE_COMPLETED no baja con
+        // un reembolso, así que no vale para contar ventas.
+        purchases: paidCount,
         freeDownloads: byType.FREE_DOWNLOAD ?? 0,
-        grossCents: ledger.GROSS_SALE ?? paidAgg._sum.amountCents ?? 0,
+        grossCents: ledger.GROSS_SALE ?? money.cents,
         platformNetCents: ledger.PLATFORM_FEE ?? 0,
-        conversionRatePct: this.pct(paidAgg._count._all, byType.EVENT_VIEW ?? 0),
+        currency: money.currency,
+        grossByCurrency: money.byCurrency,
+        mixedCurrencies: money.mixedCurrencies,
+        conversionRatePct: this.pct(paidCount, byType.EVENT_VIEW ?? 0),
         sponsorImpressions: byType.SPONSOR_DOWNLOAD_EXPOSURE ?? 0,
         sponsorClicks: byType.SPONSOR_CLICK ?? 0,
       },
       events: events.map(e => this.eventRow(e)),
       ...(advanced
         ? {
-            ledger: Object.fromEntries(ledgerGroups.map(g => [g.type, g._sum.amountCents ?? 0])),
+            ledger: Object.fromEntries(Object.keys(ledgerByType).map(type => [type, inPrimary(type) ?? 0])),
             dailySeries: this.workspaceSeries(rollupRows),
             channelSplit: this.mergeSplit(events, 'channelSplit', 'channel'),
             topCountries: this.mergeSplit(events, 'topCountries', 'country'),
@@ -240,6 +266,7 @@ export class AnalyticsService {
         slug: true,
         date: true,
         commerceMode: true,
+        pricing: true,
         analyticsSnapshot: true,
       },
       orderBy: { date: 'desc' },
@@ -343,6 +370,7 @@ export class AnalyticsService {
     slug: string;
     date: Date;
     commerceMode: string;
+    pricing?: unknown;
     analyticsSnapshot: any | null;
   }) {
     const s = e.analyticsSnapshot;
@@ -362,6 +390,7 @@ export class AnalyticsService {
       purchases: s?.purchases ?? 0,
       freeDownloads: s?.freeDownloads ?? 0,
       grossCents: s?.grossCents ?? 0,
+      currency: String((e.pricing as { currency?: string } | null)?.currency || 'USD').toUpperCase(),
       conversionRatePct: s ? this.pct(s.purchases, s.eventViews) : null,
       computedAt: s?.computedAt ? new Date(s.computedAt).toISOString() : null,
     };

@@ -37,6 +37,9 @@ export interface PhotographerStatsResponse {
   totalPhotos: number;
   totalProcessedPhotos: number;
   totalRevenue: number;
+  /** Moneda de `totalRevenue`. Si hay más de una, el desglose está en `revenueByCurrency`. */
+  currency: string;
+  revenueByCurrency: Record<string, number>;
   averagePhotosPerEvent: number;
   recentEvents: Array<{
     id: string;

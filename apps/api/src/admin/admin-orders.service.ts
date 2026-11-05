@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException, BadRequestException 
 import { PrismaService } from '../common/services/prisma.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
+import { addMoney, MoneyByCurrency, paidInRange, primaryMoney, sumRowsByCurrency } from '../common/utils/revenue';
 
 @Injectable()
 export class AdminOrdersService {
@@ -218,18 +219,20 @@ export class AdminOrdersService {
     const [
       totalOrders,
       ordersByStatus,
-      totalRevenue,
+      paidRows,
       recentOrders,
-      avgOrderValue,
     ] = await Promise.all([
       this.prisma.order.count(),
+      // Por moneda: los importes de monedas distintas no se suman.
       this.prisma.order.groupBy({
-        by: ['status'],
-        _count: { status: true },
+        by: ['status', 'currency'],
+        _count: { _all: true },
         _sum: { amountCents: true },
       }),
-      this.prisma.order.aggregate({
+      this.prisma.order.groupBy({
+        by: ['currency'],
         where: { status: 'PAID' },
+        _count: { _all: true },
         _sum: { amountCents: true },
       }),
       this.prisma.order.count({
@@ -239,25 +242,32 @@ export class AdminOrdersService {
           },
         },
       }),
-      this.prisma.order.aggregate({
-        where: { status: 'PAID' },
-        _avg: { amountCents: true },
-      }),
     ]);
 
-    const statusStats = ordersByStatus.reduce((acc, stat) => {
-      acc[stat.status] = {
-        count: stat._count.status,
-        revenue: stat._sum.amountCents || 0,
-      };
-      return acc;
-    }, {} as Record<string, { count: number; revenue: number }>);
+    const perStatus = new Map<string, { count: number; money: MoneyByCurrency }>();
+    for (const stat of ordersByStatus) {
+      const bucket = perStatus.get(stat.status) ?? { count: 0, money: {} };
+      bucket.count += stat._count._all;
+      addMoney(bucket.money, stat.currency, stat._sum.amountCents);
+      perStatus.set(stat.status, bucket);
+    }
+    const statusStats: Record<string, { count: number; revenue: number; revenueByCurrency: MoneyByCurrency }> = {};
+    for (const [status, bucket] of perStatus) {
+      const money = primaryMoney(bucket.money);
+      statusStats[status] = { count: bucket.count, revenue: money.cents, revenueByCurrency: money.byCurrency };
+    }
+
+    const paid = primaryMoney(sumRowsByCurrency(paidRows, row => row._sum.amountCents));
+    const paidInPrimary = paidRows.find(row => row.currency.toUpperCase() === paid.currency)?._count._all ?? 0;
 
     return {
       total: totalOrders,
       byStatus: statusStats,
-      totalRevenue: totalRevenue._sum.amountCents || 0,
-      avgOrderValue: avgOrderValue._avg.amountCents || 0,
+      totalRevenue: paid.cents,
+      currency: paid.currency,
+      revenueByCurrency: paid.byCurrency,
+      mixedCurrencies: paid.mixedCurrencies,
+      avgOrderValue: paidInPrimary > 0 ? paid.cents / paidInPrimary : 0,
       recentOrders,
     };
   }
@@ -275,59 +285,44 @@ export class AdminOrdersService {
       });
     }
 
-    const where: any = {
-      status: 'PAID',
-    };
-
-    if (dateFrom || dateTo) {
-      where.createdAt = {};
-      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
-      if (dateTo) where.createdAt.lte = new Date(dateTo);
-    }
-
+    // Por fecha de cobro, y una fila por periodo y moneda.
     const orders = await this.prisma.order.findMany({
-      where,
+      where: paidInRange(dateFrom ? new Date(dateFrom) : undefined, dateTo ? new Date(dateTo) : undefined),
       select: {
         amountCents: true,
+        currency: true,
+        paidAt: true,
         createdAt: true,
-        eventId: true,
       },
       orderBy: { createdAt: 'asc' },
     });
 
-    // Group by period
-    const grouped: Record<string, { revenue: number; count: number }> = {};
+    const grouped: Record<string, { period: string; currency: string; revenue: number; count: number }> = {};
 
     orders.forEach((order) => {
-      let key: string;
-      const date = new Date(order.createdAt);
-
-      switch (period) {
-        case 'daily':
-          key = date.toISOString().split('T')[0];
-          break;
-        case 'monthly':
-          key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-          break;
-        case 'yearly':
-          key = String(date.getFullYear());
-          break;
-      }
+      const date = new Date(order.paidAt ?? order.createdAt);
+      const iso = date.toISOString();
+      const periodKey = period === 'daily' ? iso.slice(0, 10) : period === 'monthly' ? iso.slice(0, 7) : iso.slice(0, 4);
+      const currency = (order.currency || 'USD').toUpperCase();
+      const key = `${periodKey}|${currency}`;
 
       if (!grouped[key]) {
-        grouped[key] = { revenue: 0, count: 0 };
+        grouped[key] = { period: periodKey, currency, revenue: 0, count: 0 };
       }
 
       grouped[key].revenue += order.amountCents;
       grouped[key].count += 1;
     });
 
-    return Object.entries(grouped).map(([period, data]) => ({
-      period,
-      revenue: data.revenue,
-      orders: data.count,
-      avgOrderValue: data.count > 0 ? data.revenue / data.count : 0,
-    }));
+    return Object.values(grouped)
+      .sort((a, b) => a.period.localeCompare(b.period) || a.currency.localeCompare(b.currency))
+      .map(data => ({
+        period: data.period,
+        currency: data.currency,
+        revenue: data.revenue,
+        orders: data.count,
+        avgOrderValue: data.count > 0 ? data.revenue / data.count : 0,
+      }));
   }
 
   async deleteOrder(orderId: string, userRole: UserRole) {

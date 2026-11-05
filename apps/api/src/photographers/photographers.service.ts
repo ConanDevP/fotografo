@@ -8,6 +8,7 @@ import {
   PhotographerStatsResponse 
 } from './dto/photographer-response.dto';
 import { UserRole, PhotoStatus, OrderStatus } from '@shared/types';
+import { primaryMoney, sumRowsByCurrency } from '../common/utils/revenue';
 
 @Injectable()
 export class PhotographersService {
@@ -119,14 +120,13 @@ export class PhotographersService {
           status: PhotoStatus.PROCESSED
         }
       }),
-      this.prisma.order.findMany({
-        where: { 
+      this.prisma.order.groupBy({
+        by: ['currency'],
+        where: {
           event: { ownerId: userId },
           status: OrderStatus.PAID
         },
-        include: {
-          items: true
-        }
+        _sum: { amountCents: true },
       }),
       this.prisma.event.findMany({
         where: { ownerId: userId },
@@ -144,10 +144,8 @@ export class PhotographersService {
       })
     ]);
 
-    // Calcular ingresos totales
-    const totalRevenue = paidOrders.reduce((total, order) => {
-      return total + order.amountCents;
-    }, 0);
+    // Ingresos por moneda: nunca se suman monedas distintas.
+    const revenue = primaryMoney(sumRowsByCurrency(paidOrders, row => row._sum.amountCents));
 
     const averagePhotosPerEvent = totalEvents > 0 ? totalPhotos / totalEvents : 0;
 
@@ -155,7 +153,9 @@ export class PhotographersService {
       totalEvents,
       totalPhotos,
       totalProcessedPhotos,
-      totalRevenue,
+      totalRevenue: revenue.cents,
+      currency: revenue.currency,
+      revenueByCurrency: revenue.byCurrency,
       averagePhotosPerEvent: Math.round(averagePhotosPerEvent * 100) / 100,
       recentEvents: recentEvents.map(event => ({
         id: event.id,

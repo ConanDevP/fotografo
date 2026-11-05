@@ -4,6 +4,7 @@ import { CloudinaryService } from '../common/services/cloudinary.service';
 import { QueueService } from '../common/services/queue.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
+import { primaryMoney, sumRowsByCurrency } from '../common/utils/revenue';
 
 @Injectable()
 export class AdminService {
@@ -58,7 +59,7 @@ export class AdminService {
         // Order statistics
         Promise.all([
           prisma.order.groupBy({
-            by: ['status'],
+            by: ['status', 'currency'],
             where: { eventId },
             _count: { status: true },
             _sum: { amountCents: true },
@@ -78,9 +79,10 @@ export class AdminService {
       const uniqueBibs = bibGroups.length;
       
       const totalOrders = orderStats[0].reduce((sum, stat) => sum + stat._count.status, 0);
-      const paidOrderGroup = orderStats[0].find(stat => stat.status === 'PAID');
-      const paidOrders = paidOrderGroup?._count.status || 0;
-      const totalRevenue = paidOrderGroup?._sum.amountCents || 0;
+      const paidGroups = orderStats[0].filter(stat => stat.status === 'PAID');
+      const paidOrders = paidGroups.reduce((sum, stat) => sum + stat._count.status, 0);
+      const revenue = primaryMoney(sumRowsByCurrency(paidGroups, stat => stat._sum.amountCents));
+      const totalRevenue = revenue.cents;
 
       // OCR accuracy (se calcula después para evitar otra query en la transacción)
       const ocrAccuracy = processedPhotos > 0 
@@ -96,6 +98,8 @@ export class AdminService {
         totalOrders,
         paidOrders,
         totalRevenue,
+        currency: revenue.currency,
+        revenueByCurrency: revenue.byCurrency,
         subscriptions: subscriptionCount,
         ocrAccuracy,
       };
@@ -325,10 +329,11 @@ export class AdminService {
       this.prisma.event.count(),
       this.prisma.photo.count(),
       this.prisma.order.count({ where: { status: 'PAID' } }),
-      this.prisma.order.aggregate({
+      this.prisma.order.groupBy({
+        by: ['currency'],
         where: { status: 'PAID' },
         _sum: { amountCents: true },
-      }).then(result => result._sum.amountCents || 0),
+      }).then(rows => primaryMoney(sumRowsByCurrency(rows, row => row._sum.amountCents))),
       
       // Recent activity (last 24 hours)
       this.prisma.photo.count({
@@ -348,7 +353,12 @@ export class AdminService {
         recentUploads: recentActivity,
       },
       orders: { total: totalOrders },
-      revenue: { totalCents: totalRevenue },
+      revenue: {
+        totalCents: totalRevenue.cents,
+        currency: totalRevenue.currency,
+        byCurrency: totalRevenue.byCurrency,
+        mixedCurrencies: totalRevenue.mixedCurrencies,
+      },
     };
   }
 

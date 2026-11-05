@@ -23,9 +23,14 @@ import { StripeGatewayService } from './gateways/stripe-gateway.service';
 import Stripe from 'stripe';
 import { pricingPolicyIssue } from '@shared/pricing-policy';
 
+/** Motivo que queda en un asiento pagado a mano cuando el pedido se reembolsa o se disputa. */
+const MANUAL_PAYOUT_TO_RECOVER = 'El pedido se reembolsó o entró en disputa después de pagarse. Este importe está pendiente de ajuste.';
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
+  /** Espera base entre reintentos al leer la comisión de la pasarela. */
+  private feeRetryDelayMs = 800;
 
   constructor(
     private prisma: PrismaService,
@@ -691,12 +696,15 @@ export class PaymentsService {
       }
 
       if (orderStatus === 'PAID') {
-        if (confirmation.paidAmount !== undefined && confirmation.paidAmount !== order.amountCents) {
-          this.logger.error(`Amount mismatch for order ${order.id}: expected ${order.amountCents}, got ${confirmation.paidAmount}`);
-          return { success: false, orderId: order.id };
-        }
-        if (confirmation.paidCurrency && confirmation.paidCurrency.toUpperCase() !== order.currency.toUpperCase()) {
-          this.logger.error(`Currency mismatch for order ${order.id}: expected ${order.currency}, got ${confirmation.paidCurrency}`);
+        const amountDiffers = confirmation.paidAmount !== undefined && confirmation.paidAmount !== order.amountCents;
+        const currencyDiffers = Boolean(
+          confirmation.paidCurrency && confirmation.paidCurrency.toUpperCase() !== order.currency.toUpperCase(),
+        );
+        if (amountDiffers || currencyDiffers) {
+          // El comprador ya pagó y no se le entrega: eso no puede quedar solo en
+          // un log. Se deja constancia para que alguien lo resuelva (reembolsar
+          // o corregir el pedido) antes de que el comprador reclame.
+          await this.recordPaymentMismatch(order, confirmation, paymentId, gateway);
           return { success: false, orderId: order.id };
         }
         await this.markOrderPaid(order.id, confirmation.transactionId || paymentId);
@@ -715,6 +723,46 @@ export class PaymentsService {
     } catch (error) {
       this.logger.error(`Error confirming payment ${paymentId}:`, error);
       return { success: false };
+    }
+  }
+
+  /** Constancia de un cobro que no coincide con el pedido. Una vez por pedido y hora. */
+  private async recordPaymentMismatch(
+    order: { id: string; amountCents: number; currency: string },
+    confirmation: PaymentConfirmation,
+    paymentId: string,
+    gateway: PaymentGateway,
+  ) {
+    this.logger.error(
+      `Cobro que no coincide con el pedido ${order.id}: ` +
+      `esperado ${order.amountCents} ${order.currency}, cobrado ${confirmation.paidAmount} ${confirmation.paidCurrency}`,
+    );
+    try {
+      const recent = await this.prisma.auditLog.findFirst({
+        where: {
+          action: 'PAYMENT_MISMATCH',
+          createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+          data: { path: ['orderId'], equals: order.id },
+        },
+        select: { id: true },
+      });
+      if (recent) return;
+      await this.prisma.auditLog.create({
+        data: {
+          action: 'PAYMENT_MISMATCH',
+          data: {
+            orderId: order.id,
+            gateway,
+            paymentId,
+            expectedCents: order.amountCents,
+            expectedCurrency: order.currency,
+            paidCents: confirmation.paidAmount ?? null,
+            paidCurrency: confirmation.paidCurrency ?? null,
+          },
+        },
+      });
+    } catch (error) {
+      this.logger.error(`No se pudo registrar el desajuste del pedido ${order.id}: ${error instanceof Error ? error.message : error}`);
     }
   }
 
@@ -792,6 +840,17 @@ export class PaymentsService {
     }
 
     const reversalErrors = await this.reverseTransfersForOrder(order.id, `Reembolso Stripe ${refund.id}`);
+    // Lo que aún no se había transferido deja de estar "pendiente de pago": la
+    // venta se devolvió. Lo ya transferido solo se marca al revertir la
+    // transferencia (arriba), para no dar por devuelto dinero que no volvió.
+    await this.prisma.ledgerEntry.updateMany({
+      where: {
+        orderId: order.id,
+        status: { in: ['PENDING', 'AVAILABLE'] },
+        type: { notIn: ['REFUND', 'DISPUTE', 'DISPUTE_FEE'] },
+      },
+      data: { status: 'REVERSED' },
+    });
     await this.prisma.order.update({
       where: { id: order.id },
       data: {
@@ -818,180 +877,6 @@ export class PaymentsService {
       })),
       demoMode: isDemoMode,
     };
-  }
-
-  async handlePayPalReturn(token: string, payerID: string) {
-    try {
-      this.logger.log('Processing PayPal return');
-
-      const order = await this.prisma.order.findFirst({
-        where: { stripeSessionId: token },
-        select: { id: true, status: true },
-      });
-
-      if (!order) {
-        this.logger.error(`Order not found for token: ${token}`);
-        throw new NotFoundException('Orden no encontrada');
-      }
-
-      this.logger.log(`Order found: ${order.id}, current status: ${order.status}`);
-
-      // SIEMPRE confirmar el pago cuando llegue la redirección
-      // No dependemos del webhook para esto
-      let finalStatus = order.status;
-
-      if (order.status === 'CREATED') {
-        try {
-          this.logger.log('Confirming payment with PayPal...');
-          const paymentGateway = this.paymentGatewayFactory.createGateway(PaymentGateway.PAYPAL);
-          const confirmation = await paymentGateway.confirmPayment(token, { payerID });
-
-          this.logger.log(`PayPal confirmation status: ${confirmation.status}`);
-
-          // Actualizar según confirmación de PayPal
-          finalStatus = confirmation.status === PaymentStatus.APPROVED ? 'PAID' : 'CREATED';
-
-          await this.prisma.order.update({
-            where: { id: order.id },
-            data: { status: finalStatus },
-          });
-
-          // Si el pago fue aprobado, enviar email de confirmación
-          if (finalStatus === 'PAID') {
-            const orderWithDetails = await this.prisma.order.findUnique({
-              where: { id: order.id },
-              include: {
-                items: true,
-                user: { select: { email: true } },
-              },
-            });
-
-            if (orderWithDetails?.user?.email) {
-              await this.queueService.addSendEmailJob({
-                eventId: orderWithDetails.eventId!,
-                bib: '',
-                email: orderWithDetails.user.email,
-                photoIds: orderWithDetails.items.map(item => item.photoId!).filter(Boolean),
-              });
-            }
-          }
-        } catch (confirmError) {
-          this.logger.error('Error confirming PayPal payment:', confirmError);
-          finalStatus = 'CREATED'; // Mantener como creada si falla la confirmación
-        }
-      }
-
-      return {
-        success: finalStatus === 'PAID',
-        orderId: order.id,
-        status: finalStatus === 'PAID' ? 'paid' : 'pending',
-        message: finalStatus === 'PAID' ? 'Pago completado exitosamente' : 'Pago en proceso',
-        redirectUrl: `${this.configService.get('FRONTEND_URL', 'http://localhost:3000')}/payment/${finalStatus === 'PAID' ? 'success' : 'pending'}?orderId=${order.id}`,
-      };
-    } catch (error) {
-      this.logger.error('Error handling PayPal return:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
-
-      return {
-        success: false,
-        error: errorMessage,
-        redirectUrl: `${frontendUrl}/payment/error?error=${encodeURIComponent(errorMessage)}`,
-      };
-    }
-  }
-
-  async handlePayPalCancel(token: string) {
-    try {
-      this.logger.log('Processing PayPal cancellation');
-
-      const order = await this.prisma.order.findFirst({
-        where: { stripeSessionId: token },
-        select: { id: true },
-      });
-
-      if (order) {
-        await this.prisma.order.update({
-          where: { id: order.id },
-          data: { status: 'CANCELLED' },
-        });
-        this.logger.log(`Order ${order.id} marked as cancelled`);
-      }
-
-      const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
-
-      return {
-        success: true,
-        orderId: order?.id,
-        status: 'cancelled',
-        message: 'Pago cancelado',
-        redirectUrl: `${frontendUrl}/payment/cancelled${order ? `?orderId=${order.id}` : ''}`,
-      };
-    } catch (error) {
-      this.logger.error('Error handling PayPal cancel:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const frontendUrl = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
-
-      return {
-        success: false,
-        error: errorMessage,
-        redirectUrl: `${frontendUrl}/payment/error?error=${encodeURIComponent(errorMessage)}`,
-      };
-    }
-  }
-
-  async verifyPayPalReturn(token: string, payerID?: string) {
-    try {
-      this.logger.log('Verifying PayPal return');
-
-      // Buscar orden por token PayPal (guardado en stripeSessionId)
-      const order = await this.prisma.order.findFirst({
-        where: {
-          stripeSessionId: token,
-          status: { not: 'CANCELLED' },
-        },
-        include: {
-          event: { select: { name: true } },
-          _count: { select: { items: true } },
-        },
-      });
-
-      if (!order) {
-        this.logger.error('Order not found for PayPal return');
-        throw new NotFoundException({
-          code: 'PAYMENT_NOT_FOUND',
-          message: 'No se encontró la orden con este token de PayPal',
-        });
-      }
-
-      this.logger.log(`Order found: ${order.id}, status: ${order.status}`);
-
-      return {
-        success: true,
-        data: {
-          orderId: order.id,
-          status: order.status,
-          eventName: order.event?.name,
-          itemCount: order._count.items,
-          paymentDetails: {
-            paypalToken: token,
-            payerID: payerID,
-            amount: order.amountCents,
-            currency: order.currency,
-          },
-        },
-      };
-    } catch (error) {
-      this.logger.error('Error verifying PayPal return:', error);
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-
-      throw new BadRequestException({
-        code: 'VERIFICATION_ERROR',
-        message: 'Error al verificar el retorno de PayPal',
-      });
-    }
   }
 
   async downloadOrderAsZip(orderId: string, userId: string | undefined, accessToken: string | undefined, res: Response): Promise<void> {
@@ -1279,10 +1164,18 @@ export class PaymentsService {
     });
     if (!current) throw new NotFoundException('Pedido no encontrado');
     if (current.status === 'REFUNDED') throw new BadRequestException('Un pedido reembolsado no puede volver a pagarse');
-    const justPaid = current.status !== 'PAID';
+    // Una confirmación que llega tarde no puede deshacer una disputa abierta:
+    // si se gana, `handleDisputeClosed` lo devuelve a pagado.
+    if (current.status === 'DISPUTED') throw new BadRequestException('Un pedido en disputa no puede volver a pagarse');
+
+    // El cambio a "pagado" se reclama con una condición sobre el estado: si el
+    // webhook y la vuelta del comprador llegan a la vez, solo uno lo consigue y
+    // solo ese avisa al socio. Leer el estado y escribir después dejaba pasar
+    // a los dos.
+    let justPaid = false;
     if (current.status !== 'PAID') {
-      await this.prisma.order.update({
-        where: { id: orderId },
+      const claim = await this.prisma.order.updateMany({
+        where: { id: orderId, status: { in: ['CREATED', 'CANCELLED'] } },
         data: {
           status: 'PAID',
           stripeSessionId: current.stripeSessionId || paymentId,
@@ -1290,6 +1183,7 @@ export class PaymentsService {
           paidAt: new Date(),
         },
       });
+      justPaid = claim.count === 1;
     }
     await this.createLedgerForOrder(orderId);
     await this.recordPurchaseMetric(orderId);
@@ -1514,6 +1408,18 @@ export class PaymentsService {
 
   /** Devuelve a la plataforma lo ya transferido a los beneficiarios. */
   private async reverseTransfersForOrder(orderId: string, reason: string): Promise<string[]> {
+    // Lo que se pagó a mano (sin transferencia de Stripe) no se puede revertir
+    // desde aquí: se marca para que el administrador lo recupere.
+    await this.prisma.ledgerEntry.updateMany({
+      where: {
+        orderId,
+        type: { in: ['ORGANIZER_COMMISSION', 'PHOTOGRAPHER_EARNING'] },
+        status: 'PAID_OUT',
+        externalTransferId: null,
+      },
+      data: { failureReason: MANUAL_PAYOUT_TO_RECOVER },
+    });
+
     const entries = await this.prisma.ledgerEntry.findMany({
       where: {
         orderId,
@@ -1555,30 +1461,37 @@ export class PaymentsService {
   private async fetchProcessorFee(order: { id: string; paymentGateway: string | null; stripeSessionId: string | null }): Promise<number> {
     if (order.paymentGateway !== PaymentGateway.STRIPE || !order.stripeSessionId) return 0;
 
-    try {
-      const stripeGateway = this.paymentGatewayFactory.createGateway(PaymentGateway.STRIPE) as StripeGatewayService;
-      const stripe = stripeGateway.getStripeInstance();
-      const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId, {
-        expand: ['payment_intent.latest_charge.balance_transaction'],
-      });
-      const charge = (session.payment_intent as any)?.latest_charge;
-      const balanceTransaction = typeof charge === 'string' ? null : charge?.balance_transaction;
-      const fee = typeof balanceTransaction === 'string' ? null : balanceTransaction?.fee;
+    // Stripe puede tardar unos instantes en tener lista la transacción de
+    // balance justo tras el cobro. Como el reparto no se recalcula después, un
+    // "todavía no" se reintenta en vez de darlo por cero.
+    const attempts = 3;
+    const delay = this.feeRetryDelayMs ?? 800;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const stripeGateway = this.paymentGatewayFactory.createGateway(PaymentGateway.STRIPE) as StripeGatewayService;
+        const stripe = stripeGateway.getStripeInstance();
+        const session = await stripe.checkout.sessions.retrieve(order.stripeSessionId, {
+          expand: ['payment_intent.latest_charge.balance_transaction'],
+        });
+        const charge = (session.payment_intent as any)?.latest_charge;
+        const balanceTransaction = typeof charge === 'string' ? null : charge?.balance_transaction;
+        const fee = typeof balanceTransaction === 'string' ? null : balanceTransaction?.fee;
 
-      if (typeof fee !== 'number') {
-        this.logger.warn(`Stripe no devolvió la comisión del pedido ${order.id}; se reparte sin descontarla`);
-        return 0;
+        if (typeof fee === 'number') {
+          this.logger.log(`Comisión de Stripe en el pedido ${order.id}: ${fee} céntimos`);
+          return Math.max(0, fee);
+        }
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo leer la comisión de Stripe del pedido ${order.id} (intento ${attempt}/${attempts}): ${
+            error instanceof Error ? error.message : 'error desconocido'
+          }`,
+        );
       }
-      this.logger.log(`Comisión de Stripe en el pedido ${order.id}: ${fee} céntimos`);
-      return Math.max(0, fee);
-    } catch (error) {
-      this.logger.warn(
-        `No se pudo leer la comisión de Stripe del pedido ${order.id}: ${
-          error instanceof Error ? error.message : 'error desconocido'
-        }`,
-      );
-      return 0;
+      if (attempt < attempts && delay > 0) await new Promise(resolve => setTimeout(resolve, delay * attempt));
     }
+    this.logger.warn(`Stripe no devolvió la comisión del pedido ${order.id}; se reparte sin descontarla`);
+    return 0;
   }
 
   private async createLedgerForOrder(orderId: string) {
@@ -1628,20 +1541,28 @@ export class PaymentsService {
       percentByWorkspace.set(beneficiaryId, planPercent ?? fallbackPlatformPercent);
     }
 
-    for (const item of order.items) {
-      const beneficiary = item.beneficiaryWorkspace || organizerWorkspace;
-      if (!beneficiary) continue;
+    // Solo las líneas con beneficiario reparten: la última de ESAS es la que
+    // recoge el redondeo (si fuera la última del pedido y no tuviera
+    // beneficiario, parte de la comisión se quedaría sin asignar).
+    const billable = order.items.filter(item => item.beneficiaryWorkspace || organizerWorkspace);
+    const lastBillable = billable[billable.length - 1];
+
+    for (const item of billable) {
+      const beneficiary = (item.beneficiaryWorkspace || organizerWorkspace)!;
       const platformPercent = percentByWorkspace.get(beneficiary.id) ?? fallbackPlatformPercent;
-      const platformShare = Math.round(item.priceCents * platformPercent / 100);
+      // Ninguna parte puede superar lo que costó la foto: si las comisiones la
+      // superan (fotos muy baratas), el exceso lo absorbe la plataforma y
+      // nadie recibe un importe negativo.
+      const platformShare = Math.min(item.priceCents, Math.round(item.priceCents * platformPercent / 100));
       // La última línea recoge el redondeo para que las partes sumen exactamente
       // lo que cobró Stripe, sin céntimos perdidos.
-      const isLastItem = item === order.items[order.items.length - 1];
-      const processorShare = isLastItem
+      const wantedProcessor = item === lastBillable
         ? processorFeeCents - processorAssigned
         : Math.round((processorFeeCents * item.priceCents) / grossCents);
+      const processorShare = Math.min(Math.max(0, wantedProcessor), item.priceCents - platformShare);
       processorAssigned += processorShare;
       platformFee += platformShare;
-      const afterPlatform = Math.max(0, item.priceCents - platformShare - processorShare);
+      const afterPlatform = item.priceCents - platformShare - processorShare;
       const contributorTerms = order.event.contributors.find(c => c.photographerWorkspaceId === beneficiary.id);
       const organizerPercent = beneficiary.id === organizerWorkspace?.id
         ? 0
@@ -1685,6 +1606,11 @@ export class PaymentsService {
         status: 'AVAILABLE',
         amountCents: platformFee,
         currency: order.currency,
+        // Comisión de la pasarela que no pudo repercutirse al fotógrafo y asume
+        // la plataforma (solo ocurre con importes ínfimos).
+        ...(processorFeeCents > processorAssigned
+          ? { metadata: { processorFeeAbsorbedCents: processorFeeCents - processorAssigned } }
+          : {}),
       },
     ];
 
@@ -1796,8 +1722,12 @@ export class PaymentsService {
         where: { orderId, status: 'PAID_OUT' },
         orderBy: { createdAt: 'desc' },
       });
-      for (const entry of paidEntries) {
-        if (!entry.externalTransferId) throw new Error(`La liquidación ${entry.id} no tiene transferencia asociada`);
+      // Un asiento pagado sin transferencia de Stripe se pagó a mano: no hay
+      // nada que revertir en Stripe. Se queda como pagado y marcado para
+      // recuperar ese importe de la persona; no bloquea el reembolso al comprador.
+      const paidManually = paidEntries.filter(entry => !entry.externalTransferId);
+      for (const entry of paidEntries.filter(item => item.externalTransferId)) {
+        if (!entry.externalTransferId) continue;
         const reversal = entry.externalReversalId
           ? { id: entry.externalReversalId }
           : await stripe.transfers.createReversal(
@@ -1832,9 +1762,15 @@ export class PaymentsService {
 
       await this.prisma.$transaction(async tx => {
         await tx.ledgerEntry.updateMany({
-          where: { orderId, status: { not: 'REVERSED' } },
+          where: { orderId, status: { not: 'REVERSED' }, id: { notIn: paidManually.map(entry => entry.id) } },
           data: { status: 'REVERSED' },
         });
+        if (paidManually.length > 0) {
+          await tx.ledgerEntry.updateMany({
+            where: { id: { in: paidManually.map(entry => entry.id) } },
+            data: { failureReason: MANUAL_PAYOUT_TO_RECOVER },
+          });
+        }
         await tx.ledgerEntry.createMany({
           data: [{
             dedupeKey: `${orderId}:refund:${refund.id}`,

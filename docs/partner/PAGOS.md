@@ -5,7 +5,7 @@ la venta y qué te cobramos nosotros.
 
 | | A. Tu checkout y tu pasarela | B. Nuestro checkout (tienda con tu marca) | C. Descarga gratuita con patrocinadores |
 |---|---|---|---|
-| Quién cobra al comprador | Tú, con tu pasarela | LucilaMon, con Stripe o PayPal | Nadie: el corredor descarga gratis |
+| Quién cobra al comprador | Tú, con tu pasarela | LucilaMon, con Stripe | Nadie: el corredor descarga gratis |
 | Quién ve el pago | Solo tú | Tú en el panel; LucilaMon en su libro contable | No hay pago |
 | Qué nos pagas | Solo el contrato (cuota anual y, si lo permite, exceso de fotografías) | Contrato + la comisión de tu plan sobre cada venta | Solo el contrato |
 | Cómo entregas la foto | `POST /photos/{photoId}/download-url` cuando tu pago esté confirmado | El comprador la descarga desde nuestra tienda | `POST /events/{eventId}/photos/{photoId}/download-free` |
@@ -29,16 +29,19 @@ debe vivir en tu backend. Tu contrato debe incluir las descargas de originales.
 
 ## B. Nuestro checkout
 
-Si publicas el evento en modo `PAID`, el comprador paga en tu tienda de LucilaMon (tu marca y, con el plan adecuado, tu dominio) con **Stripe o PayPal**.
+Si publicas el evento en modo `PAID`, el comprador paga en tu tienda de LucilaMon (tu marca y, con el plan adecuado, tu dominio) con **Stripe**.
 Cada venta se reparte en el libro contable de la plataforma:
 
 - **Venta bruta** del pedido.
-- **Comisión de la pasarela** (Stripe o PayPal), que se descuenta de la venta.
+- **Comisión de la pasarela** (Stripe), que se descuenta de la venta.
 - **Comisión de LucilaMon**: el porcentaje del plan del beneficiario (con contrato Enterprise se aplica como mínimo el del plan Business, 6 %).
 - **Comisión del organizador**, si hay fotógrafos invitados con reparto pactado.
 - **Ganancia del fotógrafo**: lo que queda.
 
-El dinero llega a la cuenta de cobro que cada fotógrafo u organizador conecta **desde el panel** (Stripe Connect o PayPal). Esa conexión no se puede hacer por la API.
+El dinero llega a la cuenta de cobro que cada fotógrafo u organizador conecta **desde el panel** (Stripe Connect). Esa conexión no se puede hacer por la API.
+
+Quien no puede abrir una cuenta de Stripe Connect en su país cobra igual: la venta queda registrada en su saldo y LucilaMon le paga por fuera (transferencia bancaria, Payoneer u otro medio). El pago se anota con su medio y referencia, y
+aparece en `GET /earnings` como transferido. Es un proceso del equipo de LucilaMon, no de la API.
 
 **Qué ves por la API** (permiso `orders:read`):
 
@@ -47,7 +50,7 @@ El dinero llega a la cuenta de cobro que cada fotógrafo u organizador conecta *
 - `GET /earnings`: lo transferido a tu cuenta, lo pendiente, lo revertido por reembolsos o contracargos, y los últimos asientos del libro contable.
 - Webhooks `order.paid`, `order.refunded`, `order.disputed` y `order.dispute.closed`, con el mismo objeto de pedido.
 
-**Qué sigue sin estar en la API:** conectar la cuenta de cobro (Stripe Connect o PayPal), que se hace **desde el panel**, y los reembolsos, que gestiona el equipo de
+**Qué sigue sin estar en la API:** conectar la cuenta de cobro (Stripe Connect), que se hace **desde el panel**, y los reembolsos, que gestiona el equipo de
 LucilaMon: escríbenos con el pedido. Los pagos hechos en tu propia pasarela (modelo A) no aparecen aquí porque no pasan por nosotros.
 
 Si muestras las fotografías en tu propia tienda, envía las visitas y búsquedas de tus clientes con `POST /events/{eventId}/metrics` (permiso `metrics:write`): así el embudo y

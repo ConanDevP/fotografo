@@ -15,6 +15,7 @@ import { PrismaService } from '../common/services/prisma.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { PlanSubscriptionsService } from './plan-subscriptions.service';
 import { UserRole } from '@shared/types';
+import { primaryMoney, sumRowsByCurrency } from '../common/utils/revenue';
 
 /** Plan que representa a un contrato Empresa sin suscripción de pago propia. */
 const BILLING_BUSINESS_PLAN_SLUG = 'organizacion';
@@ -923,7 +924,7 @@ export class BillingService {
 
     const [grouped, entries] = await Promise.all([
       this.prisma.ledgerEntry.groupBy({
-        by: ['type', 'status'],
+        by: ['type', 'status', 'currency'],
         where,
         _sum: { amountCents: true },
         _count: true,
@@ -942,20 +943,30 @@ export class BillingService {
           createdAt: true,
           paidOutAt: true,
           failureReason: true,
+          metadata: true,
           event: { select: { id: true, name: true } },
         },
       }),
     ]);
-
-    const sum = (predicate: (row: (typeof grouped)[number]) => boolean) =>
-      grouped.filter(predicate).reduce((total, row) => total + (row._sum.amountCents || 0), 0);
 
     // Lo que gana el espacio son sus asientos de ingreso; el resto del reparto
     // pertenece a la plataforma o a la pasarela y no se le suma.
     const ownTypes = ['PHOTOGRAPHER_EARNING', 'ORGANIZER_COMMISSION'];
     const isOwn = (row: (typeof grouped)[number]) => ownTypes.includes(row.type);
 
-    const share = await this.shareOfSales(where, ownTypes);
+    // Nunca se suman monedas distintas: las cifras son de la moneda en la que
+    // más ha ganado el espacio, y el resto se ofrece desglosado.
+    const earnedByCurrency = primaryMoney(
+      sumRowsByCurrency(grouped.filter(isOwn), row => Math.abs(row._sum.amountCents || 0)),
+      entries[0]?.currency || 'USD',
+    );
+    const currency = earnedByCurrency.currency;
+    const sum = (predicate: (row: (typeof grouped)[number]) => boolean) =>
+      grouped
+        .filter(row => row.currency.toUpperCase() === currency && predicate(row))
+        .reduce((total, row) => total + (row._sum.amountCents || 0), 0);
+
+    const share = await this.shareOfSales(where, ownTypes, currency);
 
     return {
       summary: {
@@ -969,9 +980,22 @@ export class BillingService {
         platformFeeCents: share.platformFeeCents,
         processorFeeCents: share.processorFeeCents,
         grossCents: share.grossCents,
-        currency: entries[0]?.currency || 'USD',
+        currency,
+        earnedByCurrency: earnedByCurrency.byCurrency,
+        mixedCurrencies: earnedByCurrency.mixedCurrencies,
       },
-      entries,
+      // Un pago hecho a mano lleva el medio y la referencia, para que el
+      // fotógrafo pueda encontrarlo en su banco.
+      entries: entries.map(({ metadata, ...entry }) => {
+        const meta = metadata as { manualPayout?: { method?: string; reference?: string }; recovery?: unknown } | null;
+        const manual = meta?.manualPayout;
+        return {
+          ...entry,
+          payout: manual
+            ? { method: manual.method ?? null, reference: manual.reference ?? null, recovered: Boolean(meta?.recovery) }
+            : null,
+        };
+      }),
     };
   }
 
@@ -993,12 +1017,15 @@ export class BillingService {
   private async shareOfSales(
     where: { workspaceId: string; eventId?: string },
     ownTypes: string[],
+    currency: string,
   ): Promise<{ platformFeeCents: number; processorFeeCents: number; grossCents: number }> {
     const empty = { platformFeeCents: 0, processorFeeCents: 0, grossCents: 0 };
 
+    // Solo ventas que siguen pagadas: un pedido reembolsado ya no es "vendido"
+    // (lo devuelto se muestra aparte, en `reversedCents`).
     const ownByOrder = await this.prisma.ledgerEntry.groupBy({
       by: ['orderId'],
-      where: { ...where, type: { in: ownTypes as any } },
+      where: { ...where, currency, type: { in: ownTypes as any }, order: { status: 'PAID' } },
       _sum: { amountCents: true },
     });
 

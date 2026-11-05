@@ -3,6 +3,7 @@ import { PrismaService } from '../common/services/prisma.service';
 import { QueueService } from '../common/services/queue.service';
 import { UserRole } from '@shared/types';
 import { ERROR_CODES } from '@shared/constants';
+import { paidInRange, primaryMoney, sumRowsByCurrency } from '../common/utils/revenue';
 import { aiCallCostUsd, resolveAiPrices } from './ai-pricing';
 
 @Injectable()
@@ -108,12 +109,12 @@ export class AdminSystemService {
       this.prisma.order.count({
         where: { createdAt: { gte: startOfDay, lte: endOfDay } },
       }),
-      this.prisma.order.aggregate({
-        where: {
-          createdAt: { gte: startOfDay, lte: endOfDay },
-          status: 'PAID',
-        },
+      // Cobrado ese día (por fecha de pago) y por moneda.
+      this.prisma.order.groupBy({
+        by: ['currency'],
+        where: paidInRange(startOfDay, endOfDay),
         _sum: { amountCents: true },
+        _count: { _all: true },
       }),
       this.prisma.bibSubscription.count({
         where: { createdAt: { gte: startOfDay, lte: endOfDay } },
@@ -136,7 +137,9 @@ export class AdminSystemService {
         new: newOrders,
       },
       revenue: {
-        totalCents: revenue._sum.amountCents || 0,
+        totalCents: primaryMoney(sumRowsByCurrency(revenue, row => row._sum.amountCents)).cents,
+        currency: primaryMoney(sumRowsByCurrency(revenue, row => row._sum.amountCents)).currency,
+        byCurrency: primaryMoney(sumRowsByCurrency(revenue, row => row._sum.amountCents)).byCurrency,
       },
       subscriptions: {
         new: newSubscriptions,
@@ -189,17 +192,19 @@ export class AdminSystemService {
           status: 'PAID',
         },
       }),
-      this.prisma.order.aggregate({
-        where: {
-          createdAt: { gte: startOfMonth, lte: endOfMonth },
-          status: 'PAID',
-        },
+      this.prisma.order.groupBy({
+        by: ['currency'],
+        where: paidInRange(startOfMonth, endOfMonth),
         _sum: { amountCents: true },
+        _count: { _all: true },
       }),
       this.prisma.bibSubscription.count({
         where: { createdAt: { gte: startOfMonth, lte: endOfMonth } },
       }),
     ]);
+
+    const monthlyRevenue = primaryMoney(sumRowsByCurrency(revenue, row => row._sum.amountCents));
+    const collectedInPrimary = revenue.find(row => row.currency.toUpperCase() === monthlyRevenue.currency)?._count._all ?? 0;
 
     return {
       period: `${year}-${String(month).padStart(2, '0')}`,
@@ -220,8 +225,11 @@ export class AdminSystemService {
         conversionRate: totalOrders > 0 ? (paidOrders / totalOrders) * 100 : 0,
       },
       revenue: {
-        totalCents: revenue._sum.amountCents || 0,
-        avgOrderValue: paidOrders > 0 ? (revenue._sum.amountCents || 0) / paidOrders : 0,
+        totalCents: monthlyRevenue.cents,
+        currency: monthlyRevenue.currency,
+        byCurrency: monthlyRevenue.byCurrency,
+        mixedCurrencies: monthlyRevenue.mixedCurrencies,
+        avgOrderValue: collectedInPrimary > 0 ? monthlyRevenue.cents / collectedInPrimary : 0,
       },
       subscriptions: {
         new: newSubscriptions,
@@ -295,13 +303,14 @@ export class AdminSystemService {
 
     const eventsWithRevenue = await Promise.all(
       events.map(async (event) => {
-        const revenue = await this.prisma.order.aggregate({
-          where: {
-            eventId: event.id,
-            status: 'PAID',
-          },
-          _sum: { amountCents: true },
-        });
+        const revenue = primaryMoney(sumRowsByCurrency(
+          await this.prisma.order.groupBy({
+            by: ['currency'],
+            where: { eventId: event.id, status: 'PAID' },
+            _sum: { amountCents: true },
+          }),
+          row => row._sum.amountCents,
+        ));
 
         const processedPhotos = await this.prisma.photo.count({
           where: {
@@ -321,7 +330,8 @@ export class AdminSystemService {
             processedPhotos,
             orders: event._count.orders,
             subscriptions: event._count.bibSubscriptions,
-            revenueCents: revenue._sum.amountCents || 0,
+            revenueCents: revenue.cents,
+            currency: revenue.currency,
           },
         };
       })

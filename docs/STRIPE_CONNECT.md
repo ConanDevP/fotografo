@@ -168,12 +168,16 @@ model User {
 
 En modo test, puedes completar el onboarding con datos ficticios.
 
-## Migración desde PayPal
+## PayPal
 
-1. Los fotógrafos existentes mantienen su conexión PayPal
-2. Pueden conectar Stripe adicionalmente
-3. El frontend muestra ambas opciones de pago
-4. PayPal sigue funcionando en modo básico (sin marketplace)
+PayPal **no se usa**: el cobro al comprador y los pagos a fotógrafos son solo por Stripe. El código antiguo está desactivado y la web ya no lo menciona.
+
+## Quién puede conectar Stripe Connect (importante en LatAm)
+
+- Las cuentas Connect de Stripe solo se abren en México y Brasil dentro de LatAm.
+- Los pagos entre países por Connect estándar solo funcionan entre EE. UU., Reino Unido, EEE, Canadá y Suiza.
+- Un fotógrafo de Honduras, Colombia, Perú, etc. normalmente **no puede** conectar Stripe. Para ellos, ver [PAGOS_MANUALES.md](PAGOS_MANUALES.md).
+- `STRIPE_CONNECT_COUNTRY` no se cambia: se deja como está configurado.
 
 ## Troubleshooting
 

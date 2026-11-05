@@ -256,7 +256,7 @@ describe('BillingService', () => {
      * el fotógrafo no sumaba el total vendido.
      */
     const givenLedger = (
-      propios: Array<{ type: string; status: string; total: number }>,
+      propios: Array<{ type: string; status: string; total: number; currency?: string }>,
       pedidos: Array<{ orderId: string; type: string; total: number }> = [],
       // Parte de ESTE espacio en cada pedido. Si se omite, es el único
       // beneficiario y le corresponde todo lo repartido.
@@ -276,7 +276,7 @@ describe('BillingService', () => {
           // Resumen por tipo y estado, ya filtrado por espacio.
           if (by.includes('status')) {
             return Promise.resolve(
-              propios.map(row => ({ type: row.type, status: row.status, _sum: { amountCents: row.total }, _count: 1 })),
+              propios.map(row => ({ type: row.type, status: row.status, currency: row.currency ?? 'USD', _sum: { amountCents: row.total }, _count: 1 })),
             );
           }
           // Parte de este espacio en cada pedido.
@@ -377,6 +377,34 @@ describe('BillingService', () => {
       // Lo revertido no debe seguir contando como cobrado.
       expect(result.summary.paidOutCents).toBe(5000);
       expect(result.summary.reversedCents).toBe(1500);
+    });
+
+    it('no mezcla monedas: las cifras son de la moneda en que más ha ganado y el resto va desglosado', async () => {
+      givenLedger([
+        { type: 'PHOTOGRAPHER_EARNING', status: 'PAID_OUT', total: 7000, currency: 'USD' },
+        { type: 'PHOTOGRAPHER_EARNING', status: 'PAID_OUT', total: 90000, currency: 'HNL' },
+        { type: 'PHOTOGRAPHER_EARNING', status: 'AVAILABLE', total: 2500, currency: 'USD' },
+      ]);
+
+      const { summary } = await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
+
+      expect(summary.currency).toBe('HNL');
+      expect(summary.paidOutCents).toBe(90000);
+      expect(summary.pendingCents).toBe(0);
+      expect(summary.mixedCurrencies).toBe(true);
+      expect(summary.earnedByCurrency).toEqual({ HNL: 90000, USD: 9500 });
+    });
+
+    it('el reparto solo cuenta ventas que siguen pagadas: un pedido reembolsado no es "vendido"', async () => {
+      givenLedger([{ type: 'PHOTOGRAPHER_EARNING', status: 'AVAILABLE', total: 1000 }], [
+        { orderId: 'ord-1', type: 'GROSS_SALE', total: 1300 },
+        { orderId: 'ord-1', type: 'PHOTOGRAPHER_EARNING', total: 1000 },
+      ]);
+
+      await service.earnings(WORKSPACE, 'user-1', UserRole.ADMIN);
+
+      const porPedido = prisma.ledgerEntry.groupBy.mock.calls.find(([args]: any) => args.by.length === 1)[0];
+      expect(porPedido.where.order).toEqual({ status: 'PAID' });
     });
 
     it('exige permiso sobre el espacio si no es administrador', async () => {

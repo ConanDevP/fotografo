@@ -37,7 +37,8 @@ describe('PhotographersService', () => {
         count: jest.fn()
       },
       order: {
-        findMany: jest.fn()
+        findMany: jest.fn(),
+        groupBy: jest.fn()
       }
     };
 
@@ -149,9 +150,8 @@ describe('PhotographersService', () => {
       prismaService.photo.count
         .mockResolvedValueOnce(100) // total photos
         .mockResolvedValueOnce(95); // processed photos
-      prismaService.order.findMany.mockResolvedValue([
-        { amountCents: 1000, items: [] },
-        { amountCents: 1500, items: [] }
+      prismaService.order.groupBy.mockResolvedValue([
+        { currency: 'USD', _sum: { amountCents: 2500 } },
       ] as any);
       prismaService.event.findMany.mockResolvedValue([
         {
@@ -168,8 +168,26 @@ describe('PhotographersService', () => {
       expect(result.totalPhotos).toBe(100);
       expect(result.totalProcessedPhotos).toBe(95);
       expect(result.totalRevenue).toBe(2500);
+      expect(result.currency).toBe('USD');
       expect(result.averagePhotosPerEvent).toBe(20);
       expect(result.recentEvents).toHaveLength(1);
+    });
+
+    it('no suma monedas distintas en los ingresos', async () => {
+      prismaService.user.findUnique.mockResolvedValue(mockUser);
+      prismaService.event.count.mockResolvedValue(1);
+      prismaService.photo.count.mockResolvedValue(0);
+      prismaService.order.groupBy.mockResolvedValue([
+        { currency: 'USD', _sum: { amountCents: 2500 } },
+        { currency: 'HNL', _sum: { amountCents: 60000 } },
+      ] as any);
+      prismaService.event.findMany.mockResolvedValue([] as any);
+
+      const result = await service.getPhotographerStats('123');
+
+      expect(result.currency).toBe('HNL');
+      expect(result.totalRevenue).toBe(60000);
+      expect(result.revenueByCurrency).toEqual({ HNL: 60000, USD: 2500 });
     });
   });
 });

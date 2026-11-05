@@ -106,7 +106,7 @@ Los 30 eventos y sus cargas están en la sección **Webhooks** de esta referenci
 ## Pagos
 
 Tienes tres formas de cobrar: con **tu propio checkout y pasarela** (tú cobras y pides el enlace al original cuando el pago esté confirmado),
-con **nuestra tienda** (Stripe o PayPal, con la comisión de tu plan) o con **descarga gratuita y patrocinadores**. Se elige por evento.
+con **nuestra tienda** (con Stripe y la comisión de tu plan) o con **descarga gratuita y patrocinadores**. Se elige por evento.
 Con tu pasarela, mantén el evento sin publicar: las búsquedas y las descargas por API funcionan igual. Si usas nuestra tienda, consulta los pedidos y las liquidaciones en
 `/orders` y `/earnings` y recibe los avisos `order.*`; los reembolsos los gestiona el equipo de LucilaMon. Guía completa: `docs/partner/PAGOS.md`.
 
